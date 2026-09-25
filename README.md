@@ -2,19 +2,19 @@
 
 This continues the saga of exploring sm120 GPUs. Specifically 2x RTX Pro 4000, which is my local setup.
 
-My first pass modified a fork of nanochat. This was python only and no c++. This worked but required lots of changes.
-For example, sm120 doesn't support FA3. FA2 works pretty good, but its not designed for sm120 either.
+My first pass created a fork of nanochat and made python only changes, no c++. This worked but it required fairly
+intensive changes. For example, sm120 doesn't support FA3. FA2 works pretty good, but it's also not designed for sm120.
 
 # goals
 
-After thinking about it, I decided on the following goals:
+After thinking about it, I decided on the following goals (or questions really):
 
-1. how long would it take for claude/codex to port nanochat to c++
-2. how fast can we train using sm120
+1. how fast can claude port nanochat to c++?
+2. how fast can we train using sm120?
 
+By itself, c++ won't speed things up.
 
-
-# why c++?
+# why c++ then?
 
 To be honest, curiosity. This is first and foremost a learning project.
 

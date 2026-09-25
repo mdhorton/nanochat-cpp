@@ -19,6 +19,9 @@ static int run(int argc, char **argv) {
     o.max_seq_len = flags.i64("max-seq-len", o.max_seq_len, "max context length");
     o.window_pattern = flags.str("window-pattern", o.window_pattern,
                                  "sliding window pattern tiled across layers: L=full, S=quarter context");
+    o.attention = flags.str("attention", o.attention, "fa2 (FlashAttention-2) or sdpa (bit-identical to Python)");
+    o.loss_chunk_rows = flags.i64("loss-chunk-rows", o.loss_chunk_rows,
+                                  "rows per chunk of the lm_head + loss, saves memory (0 = unchunked, as Python)");
     // horizon
     o.num_iterations = flags.i64("num-iterations", o.num_iterations, "explicit number of steps (-1 = disable)");
     o.target_flops = flags.f64("target-flops", o.target_flops, "steps to reach target FLOPs (-1 = disable)");

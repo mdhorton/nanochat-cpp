@@ -46,6 +46,7 @@ add_library(nanochat_train
         src/nanochat/loss_eval.cpp
         src/nanochat/optim.cpp
         src/nanochat/safetensors.cpp
+        src/nanochat/softcap_ce.cpp
         src/nanochat/trainer.cpp)
 target_link_libraries(nanochat_train PUBLIC nanochat ${TORCH_LIBRARIES})
 # ATen/cuda headers need the CUDA library headers (cuBLAS, cuSPARSE, ...), which come with the NVIDIA wheels
@@ -83,6 +84,7 @@ add_executable(train_tests
         tests/test_loss_eval.cpp
         tests/test_optim.cpp
         tests/test_safetensors.cpp
+        tests/test_softcap_ce.cpp
         tests/test_torch.cpp
         tests/test_train.cpp)
 target_link_libraries(train_tests PRIVATE nanochat_train GTest::gtest)

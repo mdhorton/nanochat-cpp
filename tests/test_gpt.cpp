@@ -107,6 +107,47 @@ TEST(GPT, FlopsAndScalingParams) {
     EXPECT_EQ(model->estimate_flops(), 6 * matmul + attn);
 }
 
+// FlashAttention-2 (sliding windows in S layers) vs the SDPA path, within bf16 tolerance.
+TEST(GPT, Fa2MatchesSdpa) {
+    torch::manual_seed(0);
+    GPT model(tiny_config()); // T = 256, S layers use a 128 window
+    model->init_weights();
+    {
+        torch::NoGradGuard no_grad; // perturb so projections and gates are non-zero
+        for (auto &p: model->parameters())
+            p.add_((0.02 * torch::randn(p.sizes(), p.options().dtype(torch::kFloat32))).to(p.scalar_type()));
+    }
+    auto ids = torch::randint(0, 1000, {2, 257}, torch::TensorOptions().device(torch::kCUDA).dtype(torch::kInt64));
+    auto x = ids.slice(1, 0, -1).contiguous(), y = ids.slice(1, 1).contiguous();
+    auto run = [&](Attention attention) {
+        model->set_attention(attention);
+        model->zero_grad(true);
+        auto loss = model->forward(x, y);
+        loss.backward();
+        std::map<std::string, torch::Tensor> grads;
+        for (const auto &item: model->named_parameters(true))
+            grads[item.key()] = item.value().grad().clone();
+        return std::pair{loss.item<double>(), grads};
+    };
+    const auto [loss_fa2, grads_fa2] = run(Attention::FA2);
+    const auto [loss_sdpa, grads_sdpa] = run(Attention::SDPA);
+    if (std::getenv("NANOCHAT_TEST_VERBOSE")) {
+        const auto [loss_fa2b, grads_fa2b] = run(Attention::FA2);
+        for (const auto &[name, g]: grads_sdpa) {
+            const double scale = g.to(torch::kFloat64).abs().max().item<double>() + 1e-12;
+            std::cout << name << " fa2-sdpa " << max_abs_diff(grads_fa2.at(name), g) / scale << " fa2-fa2 "
+                      << max_abs_diff(grads_fa2.at(name), grads_fa2b.at(name)) / scale << "\n";
+        }
+    }
+    EXPECT_NEAR(loss_fa2, loss_sdpa, 1e-3);
+    for (const auto &[name, g]: grads_sdpa) {
+        const double scale = g.to(torch::kFloat64).abs().max().item<double>() + 1e-12;
+        // scalar grads sum over every position and layer with cancellation, so bf16 differences show up more
+        const double tol = g.numel() < 100 ? 0.2 : 3e-2;
+        EXPECT_LE(max_abs_diff(grads_fa2.at(name), g) / scale, tol) << name;
+    }
+}
+
 // Same seed, same draw order as Python init_weights => identical weights.
 TEST(GPTGolden, InitMatchesPython) {
     REQUIRE_TRAIN_GOLDEN("gpt_init.safetensors");
@@ -126,6 +167,7 @@ TEST(GPTGolden, InitMatchesPython) {
 TEST(GPTGolden, ForwardBackwardMatchPython) {
     REQUIRE_TRAIN_GOLDEN("gpt_outputs.safetensors");
     GPT model(golden_config());
+    model->set_attention(Attention::SDPA); // as Python on this GPU
     model->load_state(st::load(golden("gpt_perturbed.safetensors"), torch::kCUDA));
     const auto batch = st::load(golden("gpt_batch.safetensors"), torch::kCUDA);
     const auto want = st::load(golden("gpt_outputs.safetensors"), torch::kCUDA);

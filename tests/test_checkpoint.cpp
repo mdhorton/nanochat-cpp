@@ -45,6 +45,7 @@ TEST(Checkpoint, ResumeIsExact) {
     torch::manual_seed(42);
     GPT model(kTiny);
     model->init_weights();
+    model->set_attention(Attention::SDPA); // deterministic backward (FA2's may not be)
     auto opt = make_optimizer(*model);
     train_step(*model, opt, 1);
     train_step(*model, opt, 2);
@@ -54,6 +55,7 @@ TEST(Checkpoint, ResumeIsExact) {
     const auto ckpt = load_checkpoint(dir, 2, torch::kCUDA, true);
     GPT resumed(config_from_json(ckpt.meta["model_config"]));
     resumed->load_state(ckpt.model);
+    resumed->set_attention(Attention::SDPA);
     auto resumed_opt = make_optimizer(*resumed);
     resumed_opt.load_state_dict(ckpt.optimizer, ckpt.optimizer_metadata);
     expect_same_params(*model, *resumed);

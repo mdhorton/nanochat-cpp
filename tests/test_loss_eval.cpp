@@ -20,6 +20,7 @@ TEST(LossEvalGolden, BpbMatchesPython) {
     GPT model(GPTConfig{.sequence_len = c["sequence_len"], .vocab_size = c["vocab_size"], .n_layer = c["n_layer"],
                         .n_head = c["n_head"], .n_kv_head = c["n_kv_head"], .n_embd = c["n_embd"],
                         .window_pattern = c["window_pattern"]});
+    model->set_attention(Attention::SDPA); // as Python on this GPU
     model->load_state(safetensors::load(dir / "bpb_model.safetensors", torch::kCUDA));
 
     const auto tokenizer = Tokenizer::load(test_env().golden_dir / "tokenizer.json");

@@ -50,6 +50,7 @@ namespace {
             options_ = options_from_json(golden_["options"]);
             options_.base_dir = test_env().base_dir;
             options_.save = false;
+            options_.attention = "sdpa"; // as Python on this GPU
             options_.verbose = std::getenv("NANOCHAT_TEST_VERBOSE") != nullptr;
         }
         nlohmann::json golden_;

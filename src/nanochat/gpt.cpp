@@ -1,5 +1,7 @@
 #include "nanochat/gpt.h"
 
+#include "nanochat/softcap_ce.h"
+
 #include <cmath>
 #include <set>
 #include <stdexcept>
@@ -69,6 +71,27 @@ namespace nanochat {
         return at::scaled_dot_product_attention(q, k, v, mask, 0.0, false, std::nullopt, enable_gqa);
     }
 
+    // FlashAttention-2 on (B, T, H, D) with the same window semantics: `window` keys to the left plus the query.
+    static torch::Tensor fa2_attention(const torch::Tensor &q, const torch::Tensor &k, const torch::Tensor &v,
+                                       int64_t window) {
+        const int64_t Tq = q.size(1), Tk = k.size(1);
+        std::optional<int64_t> left, right;
+        if (window >= 0 && window < Tk) {
+            left = window;
+            right = 0;
+        }
+        return std::get<0>(at::_flash_attention_forward(q, k, v, std::nullopt, std::nullopt, Tq, Tk, 0.0,
+                                                        /*is_causal=*/true, false, std::nullopt, left, right));
+    }
+
+    Attention attention_from_string(const std::string &name) {
+        if (name == "fa2")
+            return Attention::FA2;
+        if (name == "sdpa")
+            return Attention::SDPA;
+        throw std::invalid_argument("unknown attention: " + name + " (use fa2 or sdpa)");
+    }
+
     // ---------------------------------------------------------------------------------------------------------------
 
     LinearImpl::LinearImpl(int64_t in_features, int64_t out_features, const torch::TensorOptions &options) {
@@ -115,7 +138,9 @@ namespace nanochat {
         q = rms_norm(q) * 1.2; // QK norm, sharper attention split between q and k
         k = rms_norm(k) * 1.2;
 
-        auto y = sdpa_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), window).transpose(1, 2);
+        auto y = attention == Attention::FA2
+                         ? fa2_attention(q, k, v, window)
+                         : sdpa_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), window).transpose(1, 2);
         return c_proj(y.contiguous().view({B, T, -1}));
     }
 
@@ -264,12 +289,24 @@ namespace nanochat {
         x = rms_norm(x);
 
         const double softcap = 15;
+        if (targets.defined() && loss_chunk_rows_ > 0) {
+            const auto r = std::holds_alternative<torch::enumtype::kMean>(reduction) ? LossReduction::Mean
+                           : std::holds_alternative<torch::enumtype::kSum>(reduction) ? LossReduction::Sum
+                                                                                     : LossReduction::None;
+            return softcap_cross_entropy(x.view({-1, x.size(-1)}), lm_head->weight, targets.view(-1),
+                                         config_.vocab_size, softcap, loss_chunk_rows_, r);
+        }
         auto logits = lm_head(x).index({"...", Slice(None, config_.vocab_size)}).to(torch::kFloat32);
         logits = softcap * torch::tanh(logits / softcap);
         if (!targets.defined())
             return logits;
         return F::cross_entropy(logits.view({-1, logits.size(-1)}), targets.view(-1),
                                 F::CrossEntropyFuncOptions().ignore_index(-1).reduction(reduction));
+    }
+
+    void GPTImpl::set_attention(Attention attention) {
+        for (const auto &m: *transformer->h)
+            m->as<BlockImpl>()->attn->attention = attention;
     }
 
     safetensors::TensorMap GPTImpl::state_dict() const {

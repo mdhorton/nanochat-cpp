@@ -53,5 +53,9 @@ steps:
 8. `base_train` app: flags, scaling, schedules, grad accumulation, eval, logging. check tiny loss curve vs python,
    d6 sanity run. **stop for review before d12.**
 9. memory/throughput for d24 on 1 GPU (chunked cross-entropy, activation recompute if needed).
+   done: `--attention fa2` (default), PyTorch's built-in FlashAttention-2 with native sliding windows. parity tests
+   use `--attention sdpa`, which is bit-identical to python on sm120.
+   done: `--loss-chunk-rows N` chunked lm_head + softcap + cross-entropy with recompute (plain libtorch). saves ~7GB
+   at d12 but costs ~12% speed, so it's off by default. a fused softcap + cross-entropy kernel would make it faster.
 10. 2 GPUs: NCCL, ZeRO-2 MuonAdamW, launcher.
 11. FP8.

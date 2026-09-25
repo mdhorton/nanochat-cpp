@@ -141,7 +141,7 @@ namespace nanochat {
 
         nlohmann::json options_to_json(const TrainOptions &o) {
             return {{"depth", o.depth}, {"aspect_ratio", o.aspect_ratio}, {"head_dim", o.head_dim},
-                    {"max_seq_len", o.max_seq_len}, {"window_pattern", o.window_pattern},
+                    {"max_seq_len", o.max_seq_len}, {"window_pattern", o.window_pattern}, {"attention", o.attention}, {"loss_chunk_rows", o.loss_chunk_rows},
                     {"num_iterations", o.num_iterations}, {"target_flops", o.target_flops},
                     {"target_param_data_ratio", o.target_param_data_ratio},
                     {"device_batch_size", o.device_batch_size}, {"total_batch_size", o.total_batch_size},
@@ -171,8 +171,10 @@ namespace nanochat {
         const auto device_name = std::string(at::cuda::getDeviceProperties(device.index())->name);
         const double gpu_peak_flops = o.peak_flops > 0 ? o.peak_flops : peak_flops(device_name);
         print(std::format("GPU: {} | Peak FLOPS (BF16): {:.2e}", device_name, gpu_peak_flops));
-        if (o.window_pattern != "L")
-            print("NOTE: sliding windows use SDPA with an explicit mask, which is slow (see --window-pattern L)");
+        const auto attention = attention_from_string(o.attention);
+        print("Attention: " + o.attention);
+        if (attention == Attention::SDPA && o.window_pattern != "L")
+            print("NOTE: SDPA sliding windows use an explicit mask, which is slow (see --attention fa2)");
 
         const auto tokenizer = Tokenizer::load(o.base_dir / "tokenizer" / "tokenizer.json");
         const auto token_bytes = load_token_bytes(o.base_dir / "tokenizer" / "token_bytes.bin", device);
@@ -184,6 +186,8 @@ namespace nanochat {
         print("Model config:\n" + config_to_json(config).dump(2));
         GPT model(config, device);
         model->init_weights();
+        model->set_attention(attention);
+        model->set_loss_chunk_rows(o.loss_chunk_rows);
 
         const auto checkpoint_dir =
                 o.base_dir / "base_checkpoints" / (o.model_tag.empty() ? "d" + std::to_string(o.depth) : o.model_tag);

@@ -16,6 +16,11 @@ namespace nanochat {
     // Activations and matmuls run in bf16; master weights stay fp32 except the embeddings.
     inline constexpr auto kComputeDtype = torch::kBFloat16;
 
+    // FA2: PyTorch's built-in FlashAttention-2, with native sliding windows (fast).
+    // SDPA: nanochat's fallback (explicit mask for sliding windows); bit-identical to Python nanochat on sm_120.
+    enum class Attention { FA2, SDPA };
+    Attention attention_from_string(const std::string &name); // "fa2" or "sdpa"
+
     struct GPTConfig {
         int64_t sequence_len = 2048;
         int64_t vocab_size = 32768;
@@ -68,6 +73,7 @@ namespace nanochat {
 
         static constexpr int64_t kVeGateChannels = 12;
         int64_t n_head, n_kv_head, head_dim;
+        Attention attention = Attention::FA2;
         Linear c_q{nullptr}, c_k{nullptr}, c_v{nullptr}, c_proj{nullptr}, ve_gate{nullptr};
     };
     TORCH_MODULE(CausalSelfAttention);
@@ -126,6 +132,11 @@ namespace nanochat {
         const GPTConfig &config() const { return config_; }
         const std::vector<int64_t> &windows() const { return windows_; }
 
+        void set_attention(Attention attention);
+        // > 0: compute the training loss a chunk of rows at a time (softcap_ce.h), never materializing all logits.
+        // 0: unchunked, as Python.
+        void set_loss_chunk_rows(int64_t rows) { loss_chunk_rows_ = rows; }
+
         Transformer transformer{nullptr};
         Linear lm_head{nullptr};
         torch::Tensor resid_lambdas, x0_lambdas, smear_lambda, backout_lambda;
@@ -137,6 +148,7 @@ namespace nanochat {
 
         GPTConfig config_;
         std::vector<int64_t> windows_;
+        int64_t loss_chunk_rows_ = 0;
         torch::Tensor cos_, sin_; // (1, 10 * sequence_len, 1, head_dim / 2), not saved
     };
     TORCH_MODULE(GPT);
