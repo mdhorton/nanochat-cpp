@@ -3,8 +3,8 @@
 All dependencies (compiler, CUDA, C++ libs, Python oracle incl. torch) come from pixi.
 
 ```bash
-curl -fsSL https://pixi.sh/install.sh | bash   # install pixi
-pixi install                                   # create .pixi/ env
+curl -fsSL https://pixi.sh/install.sh | bash   
+pixi install                                   
 ```
 
 # common tasks
@@ -19,4 +19,6 @@ pixi run export-pretrained                # gpt2 / cl100k_base for tok-eval
 python tools/convert_checkpoint.py SRC DST --to safetensors|pt   # Python <-> C++ checkpoints
 ```
 
-CLion: use the "Debug (pixi)" / "RelWithDebInfo (pixi)" CMake presets with the Default toolchain.
+# CLion
+
+use the "Debug (pixi)" / "RelWithDebInfo (pixi)" CMake presets with the Default toolchain.

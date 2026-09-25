@@ -230,6 +230,7 @@ namespace nanochat {
         smear_lambda.zero_();
         backout_lambda.fill_(0.2);
         smear_gate->weight.uniform_(0.0, 0.02);
+
         for (const auto &item: value_embeds->items())
             item.second->as<EmbeddingImpl>()->weight.uniform_(-s, s);
         for (const auto &m: *transformer->h) {
