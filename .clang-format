@@ -1,0 +1,64 @@
+---
+Language: Cpp
+BasedOnStyle: LLVM
+
+AccessModifierOffset: -2
+ColumnLimit: 120
+
+ContinuationIndentWidth: 6
+IndentWidth: 2
+TabWidth: 2
+UseTab: Never
+
+InsertNewlineAtEOF: true
+MaxEmptyLinesToKeep: 1
+SeparateDefinitionBlocks: Always
+
+IndentCaseLabels: true
+NamespaceIndentation: None
+
+DerivePointerAlignment: false
+PointerAlignment: Left
+ReferenceAlignment: Pointer
+
+BreakAfterAttributes: Always
+BreakTemplateDeclarations: Yes
+
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortBlocksOnASingleLine: Empty
+AllowShortLambdasOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: Never
+
+BinPackParameters: BinPack
+BinPackArguments: true
+AllowAllArgumentsOnNextLine: false
+AllowAllConstructorInitializersOnNextLine: false
+AllowAllParametersOfDeclarationOnNextLine: false
+
+BreakConstructorInitializers: BeforeComma
+BreakAfterOpenBracketFunction: true
+BreakAfterOpenBracketBracedList: true
+
+BreakBeforeBraces: Custom
+BraceWrapping:
+  BeforeCatch: true
+  BeforeElse: true
+  BeforeWhile: true
+
+RemoveBracesLLVM: true
+
+PenaltyBreakOpenParenthesis: 10
+PenaltyBreakAssignment: 100
+PenaltyReturnTypeOnItsOwnLine: 1000
+
+#PenaltyBreakScopeResolution: 1000
+
+#AlignAfterOpenBracket: AlwaysBreak
+#AlignEscapedNewlines: LeftWithLastLine
+#AlignOperands: DontAlign
+#
+#AllowShortLoopsOnASingleLine: false
+#
+#ConstructorInitializerIndentWidth: 0
+#PackConstructorInitializers: NextLine
+---

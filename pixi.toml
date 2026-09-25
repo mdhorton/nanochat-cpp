@@ -1,0 +1,53 @@
+[workspace]
+name = "nanochat-cpp"
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[system-requirements]
+cuda = "13"                   # lets the solver pick CUDA builds
+
+[dependencies]
+# C++ toolchain
+cuda-version = "13.0.*"       # pins the whole CUDA toolkit; matches the PyPI torch wheel (cu130)
+cuda-nvcc = "*"
+cuda-cudart-dev = "*"
+cxx-compiler = "*"            # gcc version that nvcc accepts
+cmake = ">=3.28"
+ninja = "*"
+pkg-config = "*"
+
+# C++ libraries
+gtest = "*"
+libarrow = "*"
+libparquet = "*"
+nlohmann_json = "*"
+pcre2 = "*"
+
+# Python oracle (nanochat) for golden data; pytorch also provides libtorch for C++
+python = "3.12.*"
+pyarrow = "*"                 # same build as libarrow
+numpy = "*"
+regex = "*"
+requests = "*"
+filelock = "*"
+psutil = "*"
+tiktoken = "*"
+
+[pypi-dependencies]
+rustbpe = "*"
+torch = "==2.14.*"            # not on conda-forge; PyPI wheel bundles CUDA 13.0 libs
+
+[activation.env]
+NANOCHAT_BASE_DIR = "$PIXI_PROJECT_ROOT/cache"   # Python nanochat shares the C++ cache
+PYTHONDONTWRITEBYTECODE = "1"                    # keep the nanochat tree untouched
+
+[tasks]
+configure = "cmake -S . -B cmake-build-pixi -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH=$CONDA_PREFIX"
+build = { cmd = "cmake --build cmake-build-pixi", depends-on = ["configure"] }
+test = { cmd = "ctest --test-dir cmake-build-pixi --output-on-failure", depends-on = ["build"] }
+tok-train = { cmd = "cmake-build-pixi/tok_train", depends-on = ["build"] }
+tok-eval = { cmd = "cmake-build-pixi/tok_eval", depends-on = ["build"] }
+export-golden = "python tools/export_golden.py"
+export-pretrained = "python tools/export_tokenizer.py --pretrained gpt2 cl100k_base"
+# run a nanochat module against the shared cache, e.g. `pixi run nanochat nanochat.dataset -n 8`
+nanochat = "cd /remote/projects/pycharm/nanochat && python -m"
