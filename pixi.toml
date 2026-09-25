@@ -2,6 +2,7 @@
 name = "nanochat-cpp"
 channels = ["conda-forge"]
 # this requires a driver that supports cuda 13+.
+# we're using 13+ because the target GPU is sm120.
 platforms = [{ name = "linux-64-cuda", platform = "linux-64", cuda = "13" }]
 
 [dependencies]
@@ -35,6 +36,7 @@ tiktoken = "*"
 # pytorch is 2.14 not on conda-forge yet (bundles cuda libs).
 [pypi-dependencies]
 rustbpe = "*"
+safetensors = "*"
 torch = { version = "==2.14.*", index = "https://download.pytorch.org/whl/cu132" }
 
 [activation.env]
@@ -48,7 +50,9 @@ build = { cmd = "cmake --build cmake-build-pixi", depends-on = ["configure"] }
 test = { cmd = "ctest --test-dir cmake-build-pixi --output-on-failure", depends-on = ["build"] }
 tok-train = { cmd = "cmake-build-pixi/tok_train", depends-on = ["build"] }
 tok-eval = { cmd = "cmake-build-pixi/tok_eval", depends-on = ["build"] }
+base-train = { cmd = "cmake-build-pixi/base_train", depends-on = ["build"] }
 export-golden = "python tools/export_golden.py"
+export-train-golden = "python tools/export_train_golden.py"
 export-pretrained = "python tools/export_tokenizer.py --pretrained gpt2 cl100k_base"
 # run a nanochat module against the shared cache, e.g. `pixi run nanochat nanochat.dataset -n 8`
 nanochat = { cmd = "python -m", cwd = "external/nanochat" }

@@ -174,6 +174,7 @@ environments:
       - pypi: https://download-r2.pytorch.org/whl/cu132/torch-2.14.0%2Bcu132-cp312-cp312-manylinux_2_28_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/1d/6b/eef7a9e32872b8f41e145bf10cddc9af26e153c338852811fe9a9baddf9e/nvidia_nvjitlink-13.4.92-py3-none-manylinux2010_x86_64.manylinux_2_12_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/23/c5/661a73a9042fc5f81cdd5fe6e89f4170b3b33f7962e709987e2b5e5f1381/nvidia_cufile-1.17.1.22-py3-none-manylinux_2_27_x86_64.whl
+      - pypi: https://files.pythonhosted.org/packages/28/50/f203ff3a3ddfe19308efc83c5a3a29ed02bf786732ec35e68bf9162f3365/safetensors-0.8.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/34/7d/2661f2fb3ac4302f3a246f5fc030213ac60c1fe0bce84f9783dbd831dbb7/nvidia_cusparselt_cu13-0.8.1-py3-none-manylinux2014_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/36/3e/8d717a6e1f6e27b85b64650b1104dbcf6108c9dc7e27e9e26a0d8e936cc5/nvidia_cufft-12.2.0.46-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/3c/2e/8d0c2ab90a8c1d9a24f0399058ab8519a3279d1bd4289511d74e909f060e/markupsafe-3.0.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl
@@ -2645,6 +2646,48 @@ packages:
   version: 1.17.1.22
   sha256: 87feaf8c3ad20d3d03a01933181801ff6892bace5c8f0b1e4b48f319d3e62d36
   requires_python: '>=3'
+- pypi: https://files.pythonhosted.org/packages/28/50/f203ff3a3ddfe19308efc83c5a3a29ed02bf786732ec35e68bf9162f3365/safetensors-0.8.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+  name: safetensors
+  version: 0.8.0
+  sha256: fd6f3f93c9a0a7cc2788ee63fb763353d4bd2e89b0751bc78fcf7dda00bea774
+  requires_dist:
+  - safetensors[torch] ; extra == 'all'
+  - safetensors[numpy] ; extra == 'all'
+  - safetensors[jax] ; extra == 'all'
+  - safetensors[paddlepaddle] ; extra == 'all'
+  - safetensors[convert] ; extra == 'all'
+  - safetensors[quality] ; extra == 'all'
+  - safetensors[testing] ; extra == 'all'
+  - safetensors[torch] ; extra == 'convert'
+  - huggingface-hub>=1.4 ; extra == 'convert'
+  - safetensors[all] ; extra == 'dev'
+  - safetensors[pinned-tf] ; extra == 'dev'
+  - safetensors[numpy] ; extra == 'jax'
+  - flax>=0.6.3 ; extra == 'jax'
+  - jax>=0.3.25 ; extra == 'jax'
+  - jaxlib>=0.3.25 ; extra == 'jax'
+  - mlx>=0.0.9 ; extra == 'mlx'
+  - numpy>=1.24.6 ; extra == 'numpy'
+  - safetensors[numpy] ; extra == 'paddlepaddle'
+  - paddlepaddle>=2.4.1 ; extra == 'paddlepaddle'
+  - safetensors[numpy] ; extra == 'pinned-tf'
+  - tensorflow==2.18.0 ; extra == 'pinned-tf'
+  - ruff ; extra == 'quality'
+  - safetensors[numpy] ; extra == 'tensorflow'
+  - tensorflow>=2.11.0 ; extra == 'tensorflow'
+  - safetensors[numpy] ; extra == 'testing'
+  - h5py>=3.7.0 ; extra == 'testing'
+  - setuptools-rust>=1.12.0 ; extra == 'testing'
+  - pytest>=9.0 ; extra == 'testing'
+  - pytest-benchmark>=5.2 ; extra == 'testing'
+  - hypothesis>=6.70.2 ; extra == 'testing'
+  - fsspec>=2024.6.0 ; extra == 'testing'
+  - s3fs>=2024.6.0 ; extra == 'testing'
+  - safetensors[numpy] ; extra == 'tf-nightly'
+  - tf-nightly ; extra == 'tf-nightly'
+  - safetensors[numpy] ; extra == 'torch'
+  - torch>=2.4 ; extra == 'torch'
+  requires_python: '>=3.10'
 - pypi: https://files.pythonhosted.org/packages/34/7d/2661f2fb3ac4302f3a246f5fc030213ac60c1fe0bce84f9783dbd831dbb7/nvidia_cusparselt_cu13-0.8.1-py3-none-manylinux2014_x86_64.whl
   name: nvidia-cusparselt-cu13
   version: 0.8.1

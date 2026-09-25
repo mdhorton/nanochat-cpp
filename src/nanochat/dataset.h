@@ -18,6 +18,22 @@ namespace nanochat {
     // Sorted paths of all *.parquet files in data_dir.
     std::vector<std::filesystem::path> list_parquet_files(const std::filesystem::path &data_dir);
 
+    // The "text" column of one parquet file, read one row group at a time.
+    class ParquetTextFile {
+    public:
+        explicit ParquetTextFile(const std::filesystem::path &path);
+        ~ParquetTextFile();
+
+        int num_row_groups() const { return num_row_groups_; }
+        // Replaces texts with row group rg.
+        void read_row_group(int rg, std::vector<std::string> &texts);
+
+    private:
+        std::unique_ptr<parquet::arrow::FileReader> reader_;
+        int text_col_ = -1;
+        int num_row_groups_ = 0;
+    };
+
     // Yields the texts of one row group per next() call. The last file is val, the rest train.
     // start/step stride over row groups within each file (e.g. start=rank, step=world_size).
     class ParquetBatches {
@@ -34,10 +50,8 @@ namespace nanochat {
         std::vector<std::filesystem::path> files_;
         int start_, step_;
         size_t file_idx_ = 0;
-        std::unique_ptr<parquet::arrow::FileReader> reader_;
-        int text_col_ = -1;
+        std::unique_ptr<ParquetTextFile> file_;
         int rg_idx_ = 0;
-        int num_row_groups_ = 0;
     };
 
     // Documents cropped to doc_cap code points, stopping after the doc that takes the total past max_chars.

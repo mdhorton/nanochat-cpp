@@ -42,7 +42,12 @@ namespace nanochat {
     bool ParquetBatches::open_next_file() {
         if (file_idx_ >= files_.size())
             return false;
-        const auto &path = files_[file_idx_++];
+        file_ = std::make_unique<ParquetTextFile>(files_[file_idx_++]);
+        rg_idx_ = start_;
+        return true;
+    }
+
+    ParquetTextFile::ParquetTextFile(const fs::path &path) {
         auto infile = arrow::io::ReadableFile::Open(path.string()).ValueOrDie();
         reader_ = parquet::arrow::OpenFile(infile, arrow::default_memory_pool()).ValueOrDie();
         std::shared_ptr<arrow::Schema> schema;
@@ -51,9 +56,9 @@ namespace nanochat {
         if (text_col_ < 0)
             throw std::runtime_error("no 'text' column in " + path.string());
         num_row_groups_ = reader_->num_row_groups();
-        rg_idx_ = start_;
-        return true;
     }
+
+    ParquetTextFile::~ParquetTextFile() = default;
 
     template<typename ArrayT>
     static void append_texts(const arrow::Array &chunk, std::vector<std::string> &texts) {
@@ -66,13 +71,17 @@ namespace nanochat {
     }
 
     bool ParquetBatches::next(std::vector<std::string> &texts) {
-        while (!reader_ || rg_idx_ >= num_row_groups_) {
+        while (!file_ || rg_idx_ >= file_->num_row_groups()) {
             if (!open_next_file())
                 return false;
         }
-        auto table = reader_->ReadRowGroup(rg_idx_, {text_col_}).ValueOrDie();
+        file_->read_row_group(rg_idx_, texts);
         rg_idx_ += step_;
+        return true;
+    }
 
+    void ParquetTextFile::read_row_group(int rg, std::vector<std::string> &texts) {
+        auto table = reader_->ReadRowGroup(rg, {text_col_}).ValueOrDie();
         texts.clear();
         for (const auto &chunk: table->column(0)->chunks()) {
             switch (chunk->type_id()) {
@@ -89,7 +98,6 @@ namespace nanochat {
                     throw std::runtime_error("unsupported 'text' column type: " + chunk->type()->ToString());
             }
         }
-        return true;
     }
 
     CappedTexts::CappedTexts(ParquetBatches &batches, int64_t max_chars, int64_t doc_cap, size_t batch_size) :

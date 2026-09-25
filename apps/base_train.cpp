@@ -1,0 +1,60 @@
+// Pretrain a base model. Port of scripts/base_train.py (no CORE eval or sampling yet; single GPU).
+#include <cstdlib>
+#include <iostream>
+
+#include "nanochat/common.h"
+#include "nanochat/flags.h"
+#include "nanochat/trainer.h"
+
+using namespace nanochat;
+
+static int run(int argc, char **argv) {
+    Flags flags(argc, argv, "Pretrain a base model");
+    TrainOptions o;
+    o.base_dir = flags.str("base-dir", default_base_dir().string(), "nanochat data directory");
+    // model
+    o.depth = flags.i64("depth", o.depth, "depth of the Transformer model");
+    o.aspect_ratio = flags.i64("aspect-ratio", o.aspect_ratio, "model_dim = depth * aspect_ratio");
+    o.head_dim = flags.i64("head-dim", o.head_dim, "target head dimension for attention");
+    o.max_seq_len = flags.i64("max-seq-len", o.max_seq_len, "max context length");
+    o.window_pattern = flags.str("window-pattern", o.window_pattern,
+                                 "sliding window pattern tiled across layers: L=full, S=quarter context");
+    // horizon
+    o.num_iterations = flags.i64("num-iterations", o.num_iterations, "explicit number of steps (-1 = disable)");
+    o.target_flops = flags.f64("target-flops", o.target_flops, "steps to reach target FLOPs (-1 = disable)");
+    o.target_param_data_ratio = flags.f64("target-param-data-ratio", o.target_param_data_ratio,
+                                          "steps for this data:param ratio (-1 = disable)");
+    // optimization
+    o.device_batch_size = flags.i64("device-batch-size", o.device_batch_size, "per-device batch size (reduce on OOM)");
+    o.total_batch_size = flags.i64("total-batch-size", o.total_batch_size, "total batch size in tokens (-1 = auto)");
+    o.embedding_lr = flags.f64("embedding-lr", o.embedding_lr, "learning rate for embeddings (AdamW)");
+    o.unembedding_lr = flags.f64("unembedding-lr", o.unembedding_lr, "learning rate for lm_head (AdamW)");
+    o.weight_decay = flags.f64("weight-decay", o.weight_decay, "cautious weight decay for Muon");
+    o.matrix_lr = flags.f64("matrix-lr", o.matrix_lr, "learning rate for matrices (Muon)");
+    o.scalar_lr = flags.f64("scalar-lr", o.scalar_lr, "learning rate for scalars (AdamW)");
+    o.warmup_steps = flags.i64("warmup-steps", o.warmup_steps, "LR warmup steps");
+    o.warmdown_ratio = flags.f64("warmdown-ratio", o.warmdown_ratio, "fraction of steps for LR warmdown");
+    o.final_lr_frac = flags.f64("final-lr-frac", o.final_lr_frac, "final LR as a fraction of the initial LR");
+    o.resume_from_step = flags.i64("resume-from-step", o.resume_from_step, "resume from this checkpoint (-1 = no)");
+    // evaluation and output
+    o.eval_every = flags.i64("eval-every", o.eval_every, "evaluate val bpb every N steps (-1 = disable)");
+    o.eval_tokens = flags.i64("eval-tokens", o.eval_tokens, "tokens to evaluate val bpb on");
+    o.save_every = flags.i64("save-every", o.save_every, "save a checkpoint every N steps (-1 = only at the end)");
+    o.save = flags.boolean("save", o.save, "save checkpoints");
+    o.model_tag = flags.str("model-tag", o.model_tag, "checkpoint directory name (default d<depth>)");
+    o.peak_flops = flags.f64("peak-tflops", 0, "GPU BF16 peak TFLOPS for MFU (0 = look up the GPU name)") * 1e12;
+    flags.done();
+    train(o);
+    return 0;
+}
+
+int main(int argc, char **argv) {
+    // as base_train.py; read when the CUDA allocator initializes
+    setenv("PYTORCH_ALLOC_CONF", "expandable_segments:True", 0);
+    try {
+        return run(argc, argv);
+    } catch (const std::exception &e) {
+        std::cerr << "error: " << e.what() << std::endl;
+        return 1;
+    }
+}
