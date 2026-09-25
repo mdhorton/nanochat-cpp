@@ -197,3 +197,30 @@ TEST(GPTGolden, ForwardBackwardMatchPython) {
         EXPECT_LE(rel, 2e-2) << item.key();
     }
 }
+
+TEST(GPTGolden, Fp8ForwardBackwardMatchPython) {
+    REQUIRE_TRAIN_GOLDEN("fp8_outputs.safetensors");
+    GPT model(golden_config());
+    model->set_attention(Attention::SDPA);
+    model->load_state(st::load(golden("gpt_perturbed.safetensors"), torch::kCUDA));
+    EXPECT_EQ(model->set_fp8(true), 4 * 6 + 1); // c_q, c_k, c_v, c_proj, c_fc, mlp c_proj per layer, and lm_head
+    const auto batch = st::load(golden("gpt_batch.safetensors"), torch::kCUDA);
+    const auto want = st::load(golden("fp8_outputs.safetensors"), torch::kCUDA);
+    auto loss = model->forward(batch.at("idx"), batch.at("targets"));
+    EXPECT_EQ(loss.item<float>(), want.at("loss").item<float>());
+    loss.backward();
+    int exact = 0, total = 0;
+    for (const auto &item: model->named_parameters(true)) {
+        const auto &g = want.at("grad." + item.key());
+        const auto &got = item.value().grad();
+        ASSERT_TRUE(got.defined()) << item.key();
+        EXPECT_EQ(got.scalar_type(), item.value().scalar_type()) << item.key();
+        exact += torch::equal(got, g);
+        ++total;
+        const double scale = g.to(torch::kFloat64).abs().max().item<double>() + 1e-12;
+        EXPECT_LE(max_abs_diff(got, g) / scale, 2e-2) << item.key();
+    }
+    RecordProperty("exact_grads", std::to_string(exact) + "/" + std::to_string(total));
+    if (std::getenv("NANOCHAT_TEST_VERBOSE"))
+        std::cout << exact << "/" << total << " grads bit-identical to Python\n";
+}

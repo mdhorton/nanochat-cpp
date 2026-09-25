@@ -60,4 +60,11 @@ steps:
    tok/s, 9.1 vs 16.9GB. `0` = python's unchunked path (parity tests).
    todo: d24 batch 2 fits (21.2GB, 7.3k tok/s), batch 4 OOMs: needs activation recompute or ZeRO on 2 GPUs.
 10. 2 GPUs: NCCL, ZeRO-2 MuonAdamW, launcher.
+    done: `base_train --nproc 2` (c10d ProcessGroupNCCL + TCPStore, `train/dist.{h,cpp}`), ZeRO-2 MuonAdamW as
+    `optim.py`. tiny 2-GPU run bit-identical to python under torchrun (`train_ddp2` golden). d12: 122k vs 61.7k tok/s.
+    d24 batch 2: 22.7k tok/s at 18.8GB/GPU (~3 days at ratio 8); batch 4 OOMs.
 11. FP8.
+    done: `--fp8`, port of `fp8.py` (tensorwise `_scaled_mm`, e4m3/e5m2, eval in bf16). quantization is fused into CUDA
+    kernels (`model/fp8_kernel.cu`), which also write the transposed copies backward needs; bit-identical to python
+    (`fp8`, `train_fp8` goldens). the chunked loss keeps lm_head in bf16. d12 1 GPU: 67.7k vs 60.0k tok/s. d24 2 GPUs:
+    30.0k (dbs 2) / 31.1k (dbs 4, 22.9GB) vs 22.7k tok/s. d6/d12 300-step val bpb same as bf16.

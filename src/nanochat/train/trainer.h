@@ -20,6 +20,7 @@ namespace nanochat {
         std::string window_pattern = "SSSL";
         std::string attention = "fa2"; // fa2 or sdpa (bit-identical to Python nanochat)
         int64_t loss_chunk_rows = 4096; // > 0: fused chunked lm_head + loss (never all logits at once); 0: as Python
+        bool fp8 = false; // FP8 matmuls for training (eval stays bf16)
         // training horizon: the first one set wins
         int64_t num_iterations = -1;
         double target_flops = -1, target_param_data_ratio = 12;
@@ -36,7 +37,10 @@ namespace nanochat {
         std::filesystem::path base_dir; // data, tokenizer and checkpoints
         std::string model_tag; // checkpoint dir name, default d<depth>
         double peak_flops = 0; // for MFU; 0 = look up the GPU name
+        // multi-GPU: this process's rank (= GPU index), rank 0 hosts the TCPStore at master_addr:master_port
         int rank = 0, world_size = 1;
+        std::string master_addr = "127.0.0.1";
+        int master_port = 29500;
         bool verbose = true;
     };
 

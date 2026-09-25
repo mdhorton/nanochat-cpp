@@ -1,5 +1,6 @@
 #include "nanochat/model/gpt.h"
 
+#include "nanochat/model/fp8.h"
 #include "nanochat/model/softcap_ce.h"
 
 #include <cmath>
@@ -98,7 +99,14 @@ namespace nanochat {
         weight = register_parameter("weight", torch::empty({out_features, in_features}, options));
     }
 
-    torch::Tensor LinearImpl::forward(const torch::Tensor &x) { return F::linear(x, weight.to(x.scalar_type())); }
+    torch::Tensor LinearImpl::forward(const torch::Tensor &x) {
+        if (!fp8)
+            return F::linear(x, weight.to(x.scalar_type()));
+        const auto input = x.to(kComputeDtype);
+        auto out_shape = input.sizes().vec();
+        out_shape.back() = weight.size(0);
+        return fp8_matmul(input.reshape({-1, input.size(-1)}), weight).reshape(out_shape);
+    }
 
     EmbeddingImpl::EmbeddingImpl(int64_t num_embeddings, int64_t dim, const torch::TensorOptions &options) {
         weight = register_parameter("weight", torch::empty({num_embeddings, dim}, options));
@@ -303,6 +311,24 @@ namespace nanochat {
             return logits;
         return F::cross_entropy(logits.view({-1, logits.size(-1)}), targets.view(-1),
                                 F::CrossEntropyFuncOptions().ignore_index(-1).reduction(reduction));
+    }
+
+    int GPTImpl::set_fp8(bool enabled) {
+        int n = 0;
+        for (const auto &m: modules(false))
+            if (auto *linear = dynamic_cast<LinearImpl *>(m.get()))
+                if (fp8_eligible(linear->weight.size(1), linear->weight.size(0))) {
+                    linear->fp8 = enabled;
+                    ++n;
+                }
+        return n;
+    }
+
+    int GPTImpl::num_linears() {
+        int n = 0;
+        for (const auto &m: modules(false))
+            n += dynamic_cast<LinearImpl *>(m.get()) != nullptr;
+        return n;
     }
 
     void GPTImpl::set_attention(Attention attention) {

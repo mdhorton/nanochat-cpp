@@ -19,7 +19,8 @@ namespace nanochat {
         return t.to(device);
     }
 
-    double evaluate_bpb(GPTImpl &model, DataLoader &batches, int64_t steps, const torch::Tensor &token_bytes) {
+    double evaluate_bpb(GPTImpl &model, DataLoader &batches, int64_t steps, const torch::Tensor &token_bytes,
+                        Dist *dist) {
         torch::NoGradGuard no_grad;
         const auto device = token_bytes.device();
         auto total_nats = torch::zeros({}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
@@ -40,6 +41,10 @@ namespace nanochat {
             }
             total_nats += (loss * (num_bytes > 0)).sum();
             total_bytes += num_bytes.sum();
+        }
+        if (dist != nullptr) {
+            Dist::wait(dist->all_reduce(total_nats, Dist::Op::Sum));
+            Dist::wait(dist->all_reduce(total_bytes, Dist::Op::Sum));
         }
         const double nats = total_nats.item<float>();
         const auto bytes = total_bytes.item<int64_t>();

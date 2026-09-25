@@ -12,6 +12,7 @@
 
 #include "nanochat/train/checkpoint.h"
 #include "nanochat/train/dataloader.h"
+#include "nanochat/train/dist.h"
 #include "nanochat/train/loss_eval.h"
 #include "nanochat/train/optim.h"
 #include "nanochat/tokenizer/tokenizer.h"
@@ -141,7 +142,8 @@ namespace nanochat {
 
         nlohmann::json options_to_json(const TrainOptions &o) {
             return {{"depth", o.depth}, {"aspect_ratio", o.aspect_ratio}, {"head_dim", o.head_dim},
-                    {"max_seq_len", o.max_seq_len}, {"window_pattern", o.window_pattern}, {"attention", o.attention}, {"loss_chunk_rows", o.loss_chunk_rows},
+                    {"max_seq_len", o.max_seq_len}, {"window_pattern", o.window_pattern}, {"attention", o.attention},
+                    {"loss_chunk_rows", o.loss_chunk_rows}, {"fp8", o.fp8},
                     {"num_iterations", o.num_iterations}, {"target_flops", o.target_flops},
                     {"target_param_data_ratio", o.target_param_data_ratio},
                     {"device_batch_size", o.device_batch_size}, {"total_batch_size", o.total_batch_size},
@@ -166,7 +168,9 @@ namespace nanochat {
                 std::cout << line << std::endl;
         };
         const torch::Device device(torch::kCUDA, static_cast<c10::DeviceIndex>(o.rank));
-        torch::manual_seed(42);
+        Dist dist(o.rank, o.world_size, o.master_addr, o.master_port); // also makes `device` the current GPU
+        print(std::format("Distributed world size: {}", o.world_size));
+        torch::manual_seed(42); // every rank initializes the same weights
         at::globalContext().setFloat32MatmulPrecision("high"); // TF32
         const auto device_name = std::string(at::cuda::getDeviceProperties(device.index())->name);
         const double gpu_peak_flops = o.peak_flops > 0 ? o.peak_flops : peak_flops(device_name);
@@ -188,6 +192,12 @@ namespace nanochat {
         model->init_weights();
         model->set_attention(attention);
         model->set_loss_chunk_rows(o.loss_chunk_rows);
+        if (o.fp8) {
+            const int num_linear = model->num_linears(), num_fp8 = model->set_fp8(true);
+            print(std::format("FP8 training enabled (tensorwise scaling) - converted {}/{} linear layers, skipped {} "
+                              "(too small){}", num_fp8, num_linear, num_linear - num_fp8,
+                              o.loss_chunk_rows > 0 ? "; lm_head stays bf16 in the chunked loss" : ""));
+        }
 
         const auto checkpoint_dir =
                 o.base_dir / "base_checkpoints" / (o.model_tag.empty() ? "d" + std::to_string(o.depth) : o.model_tag);
@@ -222,7 +232,7 @@ namespace nanochat {
 
         const double bs = plan.batch_lr_scale;
         auto optimizer = setup_optimizer(*model, o.unembedding_lr * bs, o.embedding_lr * bs, o.matrix_lr * bs,
-                                         plan.weight_decay_scaled, o.scalar_lr * bs);
+                                         plan.weight_decay_scaled, o.scalar_lr * bs, &dist);
         if (resuming) {
             optimizer.load_state_dict(ckpt->optimizer, ckpt->optimizer_metadata);
             ckpt->optimizer.clear();
@@ -266,7 +276,9 @@ namespace nanochat {
                 val_opts.device = device;
                 DataLoader val_loader(tokenizer, o.device_batch_size, o.max_seq_len, Split::Val, data_dir, val_opts);
                 const int64_t eval_steps = o.eval_tokens / (o.device_batch_size * o.max_seq_len * o.world_size);
-                val_bpb = evaluate_bpb(*model, val_loader, eval_steps, token_bytes);
+                model->set_fp8(false); // evaluate in bf16, as disable_fp8
+                val_bpb = evaluate_bpb(*model, val_loader, eval_steps, token_bytes, &dist);
+                model->set_fp8(o.fp8);
                 print(std::format("Step {:05d} | Validation bpb: {:.6f}", step, *val_bpb));
                 min_val_bpb = std::min(min_val_bpb, *val_bpb);
                 if (callbacks.on_eval)

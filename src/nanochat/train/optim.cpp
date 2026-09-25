@@ -111,7 +111,7 @@ namespace nanochat {
 
     } // namespace
 
-    MuonAdamW::MuonAdamW(std::vector<OptimGroup> groups) : groups_(std::move(groups)) {
+    MuonAdamW::MuonAdamW(std::vector<OptimGroup> groups, Dist *dist) : dist_(dist), groups_(std::move(groups)) {
         adamw_states_.resize(groups_.size());
         muon_states_.resize(groups_.size());
         for (size_t i = 0; i < groups_.size(); ++i) {
@@ -127,54 +127,144 @@ namespace nanochat {
         }
     }
 
+    // As Python: launch every group's reduce, then per group wait, update and launch the gathers, then finish them.
     void MuonAdamW::step() {
         torch::NoGradGuard no_grad;
+        std::vector<Pending> pending;
+        pending.reserve(groups_.size());
+        for (const auto &group: groups_)
+            pending.push_back(group.kind == OptimGroup::Kind::AdamW ? reduce_adamw(group) : reduce_muon(group));
+        std::vector<Gather> gathers;
         for (size_t i = 0; i < groups_.size(); ++i) {
             if (groups_[i].kind == OptimGroup::Kind::AdamW)
-                step_adamw(groups_[i], adamw_states_[i]);
+                compute_adamw(groups_[i], pending[i], adamw_states_[i], gathers);
             else
-                step_muon(groups_[i], muon_states_[i]);
+                compute_muon(groups_[i], pending[i], muon_states_[i], gathers);
+        }
+        for (auto &g: gathers) {
+            Dist::wait(g.work);
+            if (g.params != nullptr)
+                for (size_t j = 0; j < g.params->size(); ++j)
+                    (*g.params)[j].copy_(g.stacked[static_cast<int64_t>(j)]);
         }
     }
 
-    void MuonAdamW::step_adamw(const OptimGroup &group, std::vector<AdamWState> &states) {
+    MuonAdamW::Pending MuonAdamW::reduce_adamw(const OptimGroup &group) {
+        Pending pending;
+        const int world = world_size();
+        for (const auto &p: group.params) {
+            auto grad = p.grad();
+            if (world == 1) {
+                pending.works.emplace_back();
+                pending.grads.push_back(grad);
+                pending.sharded.push_back(false);
+            }
+            else if (p.numel() < 1024) {
+                pending.works.push_back(dist_->all_reduce(grad, Dist::Op::Avg));
+                pending.grads.push_back(grad);
+                pending.sharded.push_back(false);
+            }
+            else {
+                if (grad.size(0) % world != 0)
+                    throw std::invalid_argument(group.name + ": dim 0 must be divisible by the world size");
+                auto slice = torch::empty_like(grad.slice(0, 0, grad.size(0) / world));
+                pending.works.push_back(dist_->reduce_scatter(slice, grad, Dist::Op::Avg));
+                pending.grads.push_back(slice);
+                pending.sharded.push_back(true);
+            }
+        }
+        return pending;
+    }
+
+    MuonAdamW::Pending MuonAdamW::reduce_muon(const OptimGroup &group) {
+        Pending pending;
+        std::vector<torch::Tensor> grads;
+        for (const auto &p: group.params)
+            grads.push_back(p.grad());
+        const int world = world_size();
+        const auto k = static_cast<int64_t>(grads.size());
+        if (world == 1) { // this rank owns every param: the stacked grads are the chunk
+            pending.works.emplace_back();
+            pending.grads.push_back(torch::stack(grads));
+            pending.chunk_size = k;
+            return pending;
+        }
+        const int64_t chunk = (k + world - 1) / world;
+        const auto &p = group.params[0];
+        auto stacked = torch::empty({chunk * world, p.size(0), p.size(1)}, p.options());
+        stacked.slice(0, 0, k).copy_(torch::stack(grads));
+        if (k < chunk * world)
+            stacked.slice(0, k).zero_();
+        auto grad_chunk = torch::empty({chunk, p.size(0), p.size(1)}, p.options());
+        pending.works.push_back(dist_->reduce_scatter(grad_chunk, stacked, Dist::Op::Avg));
+        pending.grads.push_back(grad_chunk);
+        pending.stacked = stacked;
+        pending.chunk_size = chunk;
+        return pending;
+    }
+
+    void MuonAdamW::compute_adamw(const OptimGroup &group, Pending &pending, std::vector<AdamWState> &states,
+                                  std::vector<Gather> &gathers) {
         const auto lr_t = cpu_scalar(group.lr), beta1_t = cpu_scalar(group.beta1), beta2_t = cpu_scalar(group.beta2);
         const auto eps_t = cpu_scalar(group.eps), wd_t = cpu_scalar(group.weight_decay);
         for (size_t j = 0; j < group.params.size(); ++j) {
-            const auto &p = group.params[j];
+            Dist::wait(pending.works[j]);
+            auto p = group.params[j];
+            auto p_slice = p;
+            if (pending.sharded[j]) {
+                const int64_t rows = p.size(0) / world_size();
+                p_slice = p.slice(0, rank() * rows, (rank() + 1) * rows);
+            }
             auto &state = states[j];
             if (!state.exp_avg.defined()) {
-                state.exp_avg = torch::zeros_like(p);
-                state.exp_avg_sq = torch::zeros_like(p);
+                state.exp_avg = torch::zeros_like(p_slice);
+                state.exp_avg_sq = torch::zeros_like(p_slice);
             }
             ++state.step;
-            adamw_update(p, p.grad(), state.exp_avg, state.exp_avg_sq, cpu_scalar(static_cast<double>(state.step)),
-                         lr_t, beta1_t, beta2_t, eps_t, wd_t);
+            adamw_update(p_slice, pending.grads[j], state.exp_avg, state.exp_avg_sq,
+                         cpu_scalar(static_cast<double>(state.step)), lr_t, beta1_t, beta2_t, eps_t, wd_t);
+            if (pending.sharded[j])
+                gathers.push_back({dist_->all_gather(p, p_slice), {}, nullptr});
         }
     }
 
-    void MuonAdamW::step_muon(const OptimGroup &group, MuonState &state) {
+    void MuonAdamW::compute_muon(const OptimGroup &group, Pending &pending, MuonState &state,
+                                 std::vector<Gather> &gathers) {
+        Dist::wait(pending.works[0]);
         const auto &params = group.params;
         const int64_t m = params[0].size(0), n = params[0].size(1), k = static_cast<int64_t>(params.size());
+        const int64_t chunk = pending.chunk_size;
         const auto options = params[0].options();
         if (!state.momentum_buffer.defined()) {
-            state.momentum_buffer = torch::zeros({k, m, n}, options);
-            state.second_momentum_buffer = m >= n ? torch::zeros({k, m, 1}, options) : torch::zeros({k, 1, n}, options);
+            state.momentum_buffer = torch::zeros({chunk, m, n}, options);
+            state.second_momentum_buffer =
+                    m >= n ? torch::zeros({chunk, m, 1}, options) : torch::zeros({chunk, 1, n}, options);
         }
         const int64_t red_dim = m >= n ? -1 : -2;
 
-        std::vector<torch::Tensor> grads;
-        for (const auto &p: params)
-            grads.push_back(p.grad());
-        auto stacked_grads = torch::stack(grads);
-        auto stacked_params = torch::stack(params);
-        // tall matrices get a larger lr
-        const double lr = group.lr * std::pow(std::max(1.0, static_cast<double>(m) / static_cast<double>(n)), 0.5);
-        muon_update(stacked_grads, stacked_params, state.momentum_buffer, state.second_momentum_buffer,
-                    cpu_scalar(group.momentum), cpu_scalar(lr), cpu_scalar(group.weight_decay),
-                    cpu_scalar(group.beta2), group.ns_steps, red_dim);
-        for (int64_t j = 0; j < k; ++j)
-            params[j].copy_(stacked_params[j]);
+        // this rank updates params [start, start + num_owned)
+        const int64_t start = rank() * chunk;
+        const int64_t num_owned = std::min(chunk, std::max<int64_t>(0, k - start));
+        torch::Tensor owned;
+        if (num_owned > 0) {
+            owned = torch::stack(std::vector<torch::Tensor>(params.begin() + start, params.begin() + start + num_owned));
+            // tall matrices get a larger lr
+            const double lr = group.lr * std::pow(std::max(1.0, static_cast<double>(m) / static_cast<double>(n)), 0.5);
+            muon_update(pending.grads[0].slice(0, 0, num_owned), owned, state.momentum_buffer.slice(0, 0, num_owned),
+                        state.second_momentum_buffer.slice(0, 0, num_owned), cpu_scalar(group.momentum),
+                        cpu_scalar(lr), cpu_scalar(group.weight_decay), cpu_scalar(group.beta2), group.ns_steps,
+                        red_dim);
+        }
+        if (!pending.stacked.defined()) { // one rank: the updated stack maps onto the params
+            gathers.push_back({{}, owned, &params});
+            return;
+        }
+        auto updated = torch::empty({chunk, m, n}, options);
+        if (num_owned > 0)
+            updated.slice(0, 0, num_owned).copy_(owned);
+        if (num_owned < chunk)
+            updated.slice(0, num_owned).zero_();
+        gathers.push_back({dist_->all_gather(pending.stacked, updated), pending.stacked, &params});
     }
 
     safetensors::TensorMap MuonAdamW::state_dict(safetensors::Metadata &metadata) const {
@@ -264,7 +354,7 @@ namespace nanochat {
     }
 
     MuonAdamW setup_optimizer(GPTImpl &model, double unembedding_lr, double embedding_lr, double matrix_lr,
-                              double weight_decay, double scalar_lr) {
+                              double weight_decay, double scalar_lr, Dist *dist) {
         using Kind = OptimGroup::Kind;
         const double dmodel_lr_scale = std::pow(static_cast<double>(model.config().n_embd) / 768.0, -0.5);
         auto adamw = [](std::string name, std::vector<torch::Tensor> params, double lr, double beta1, double beta2,
@@ -291,7 +381,7 @@ namespace nanochat {
                               .name = "muon_" + std::to_string(shape[0]) + "x" + std::to_string(shape[1]),
                               .params = std::move(params), .lr = matrix_lr, .initial_lr = matrix_lr,
                               .weight_decay = weight_decay, .beta2 = 0.9, .momentum = 0.95, .ns_steps = 5});
-        return MuonAdamW(std::move(groups));
+        return MuonAdamW(std::move(groups), dist);
     }
 
 } // namespace nanochat

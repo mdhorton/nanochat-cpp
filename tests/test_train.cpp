@@ -7,6 +7,7 @@
 #include "nanochat/train/safetensors.h"
 #include "nanochat/train/trainer.h"
 #include "test_env.h"
+#include "train_golden.h"
 
 using namespace nanochat;
 namespace fs = std::filesystem;
@@ -14,31 +15,6 @@ namespace fs = std::filesystem;
 namespace {
 
     fs::path golden(const std::string &name) { return test_env().golden_dir / "train" / name; }
-
-    TrainOptions options_from_json(const nlohmann::json &j) {
-        TrainOptions o;
-        o.depth = j["depth"];
-        o.aspect_ratio = j["aspect_ratio"];
-        o.head_dim = j["head_dim"];
-        o.max_seq_len = j["max_seq_len"];
-        o.window_pattern = j["window_pattern"];
-        o.num_iterations = j["num_iterations"];
-        o.target_flops = j["target_flops"];
-        o.target_param_data_ratio = j["target_param_data_ratio"];
-        o.device_batch_size = j["device_batch_size"];
-        o.total_batch_size = j["total_batch_size"];
-        o.embedding_lr = j["embedding_lr"];
-        o.unembedding_lr = j["unembedding_lr"];
-        o.weight_decay = j["weight_decay"];
-        o.matrix_lr = j["matrix_lr"];
-        o.scalar_lr = j["scalar_lr"];
-        o.warmup_steps = j["warmup_steps"];
-        o.warmdown_ratio = j["warmdown_ratio"];
-        o.final_lr_frac = j["final_lr_frac"];
-        o.eval_every = j["eval_every"];
-        o.eval_tokens = j["eval_tokens"];
-        return o;
-    }
 
     class TrainGolden : public testing::Test {
     protected:
@@ -105,30 +81,51 @@ TEST_F(TrainGolden, PlanAndSchedulesMatchPython) {
     }
 }
 
-TEST_F(TrainGolden, LossCurveMatchesPython) {
-    std::vector<double> losses;
-    std::map<int64_t, double> evals;
-    safetensors::TensorMap final_state;
-    train(options_, {.on_step = [&](const StepInfo &s) { losses.push_back(s.train_loss); },
-                     .on_eval = [&](int64_t step, double bpb) { evals[step] = bpb; },
-                     .on_end = [&](GPTImpl &model) { final_state = model.state_dict(); }});
+namespace {
 
-    const auto &want_losses = golden_["losses"];
-    ASSERT_EQ(losses.size(), want_losses.size());
-    for (size_t i = 0; i < losses.size(); ++i)
-        EXPECT_NEAR(losses[i], want_losses[i].get<double>(), 1e-3) << "step " << i;
-    for (const auto &[step, bpb]: golden_["evals"].items())
-        EXPECT_NEAR(evals.at(std::stol(step)), bpb.get<double>(), 1e-4) << "val bpb at step " << step;
+    // Runs the tiny training of golden <prefix>.json and compares losses, val bpb and final weights.
+    void check_train_golden(const std::string &prefix) {
+        if (!fs::exists(golden(prefix + ".json")))
+            GTEST_SKIP() << "missing " << golden(prefix + ".json") << " (run tools/export_train_golden.py)";
+        std::ifstream in(golden(prefix + ".json"));
+        const auto golden_json = nlohmann::json::parse(in);
+        auto options = options_from_json(golden_json["options"]);
+        options.base_dir = test_env().base_dir;
+        options.save = false;
+        options.attention = "sdpa"; // as Python on this GPU
+        options.loss_chunk_rows = 0;
+        options.verbose = std::getenv("NANOCHAT_TEST_VERBOSE") != nullptr;
 
-    const auto want = safetensors::load(golden("train_final.safetensors"), torch::kCUDA);
-    int exact = 0;
-    for (const auto &[name, t]: want) {
-        exact += torch::equal(final_state.at(name), t);
-        const double scale = t.to(torch::kFloat64).abs().max().item<double>() + 1e-12;
-        const double diff = (final_state.at(name).to(torch::kFloat64) - t.to(torch::kFloat64)).abs().max().item<double>();
-        EXPECT_LE(diff / scale, 1e-2) << name;
+        std::vector<double> losses;
+        std::map<int64_t, double> evals;
+        safetensors::TensorMap final_state;
+        train(options, {.on_step = [&](const StepInfo &s) { losses.push_back(s.train_loss); },
+                        .on_eval = [&](int64_t step, double bpb) { evals[step] = bpb; },
+                        .on_end = [&](GPTImpl &model) { final_state = model.state_dict(); }});
+
+        const auto &want_losses = golden_json["losses"];
+        ASSERT_EQ(losses.size(), want_losses.size());
+        for (size_t i = 0; i < losses.size(); ++i)
+            EXPECT_NEAR(losses[i], want_losses[i].get<double>(), 1e-3) << "step " << i;
+        for (const auto &[step, bpb]: golden_json["evals"].items())
+            EXPECT_NEAR(evals.at(std::stol(step)), bpb.get<double>(), 1e-4) << "val bpb at step " << step;
+
+        const auto want = safetensors::load(golden(prefix + "_final.safetensors"), torch::kCUDA);
+        int exact = 0;
+        for (const auto &[name, t]: want) {
+            exact += torch::equal(final_state.at(name), t);
+            const double scale = t.to(torch::kFloat64).abs().max().item<double>() + 1e-12;
+            const double diff =
+                    (final_state.at(name).to(torch::kFloat64) - t.to(torch::kFloat64)).abs().max().item<double>();
+            EXPECT_LE(diff / scale, 1e-2) << name;
+        }
+        testing::Test::RecordProperty("exact_params", std::to_string(exact) + "/" + std::to_string(want.size()));
+        if (options.verbose)
+            std::cout << exact << "/" << want.size() << " final params bit-identical to Python\n";
     }
-    RecordProperty("exact_params", std::to_string(exact) + "/" + std::to_string(want.size()));
-    if (options_.verbose)
-        std::cout << exact << "/" << want.size() << " final params bit-identical to Python\n";
-}
+
+} // namespace
+
+TEST(TrainGoldenRun, LossCurveMatchesPython) { check_train_golden("train"); }
+
+TEST(TrainGoldenRun, Fp8LossCurveMatchesPython) { check_train_golden("train_fp8"); }

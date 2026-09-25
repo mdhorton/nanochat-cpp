@@ -46,11 +46,14 @@ target_link_libraries(nanochat PUBLIC
 
 # pre-training (libtorch)
 add_library(nanochat_train
+        src/nanochat/model/fp8.cpp
+        src/nanochat/model/fp8_kernel.cu
         src/nanochat/model/gpt.cpp
         src/nanochat/model/softcap_ce.cpp
         src/nanochat/model/softcap_ce_kernel.cu
         src/nanochat/train/checkpoint.cpp
         src/nanochat/train/dataloader.cpp
+        src/nanochat/train/dist.cpp
         src/nanochat/train/loss_eval.cpp
         src/nanochat/train/optim.cpp
         src/nanochat/train/safetensors.cpp
@@ -58,6 +61,7 @@ add_library(nanochat_train
 target_link_libraries(nanochat_train PUBLIC nanochat ${TORCH_LIBRARIES})
 # ATen/cuda headers need the CUDA library headers (cuBLAS, cuSPARSE, ...), which come with the NVIDIA wheels
 target_include_directories(nanochat_train SYSTEM PUBLIC "${TORCH_DIR}/../nvidia/cu13/include")
+target_include_directories(nanochat_train SYSTEM PRIVATE "${TORCH_DIR}/../nvidia/nccl/include") # ProcessGroupNCCL
 
 add_executable(nanochat_cpp main.cpp)
 
@@ -87,6 +91,8 @@ add_executable(train_tests
         tests/main.cpp
         tests/test_checkpoint.cpp
         tests/test_dataloader.cpp
+        tests/test_dist.cpp
+        tests/test_fp8.cpp
         tests/test_gpt.cpp
         tests/test_loss_eval.cpp
         tests/test_optim.cpp
@@ -95,4 +101,9 @@ add_executable(train_tests
         tests/test_torch.cpp
         tests/test_train.cpp)
 target_link_libraries(train_tests PRIVATE nanochat_train GTest::gtest)
+target_compile_definitions(train_tests PRIVATE NANOCHAT_DIST_WORKER="$<TARGET_FILE:dist_worker>")
+
+add_executable(dist_worker tests/dist_worker.cpp)
+target_link_libraries(dist_worker PRIVATE nanochat_train)
+add_dependencies(train_tests dist_worker)
 gtest_discover_tests(train_tests DISCOVERY_TIMEOUT 60)

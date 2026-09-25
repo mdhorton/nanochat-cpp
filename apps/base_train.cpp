@@ -1,9 +1,12 @@
-// Pretrain a base model. Port of scripts/base_train.py (no CORE eval or sampling yet; single GPU).
+// Pretrain a base model. Port of scripts/base_train.py (no CORE eval or sampling yet).
+// --nproc N runs one process per GPU (as torchrun --nproc_per_node=N).
+#include <algorithm>
 #include <cstdlib>
 #include <iostream>
 
 #include "nanochat/common.h"
 #include "nanochat/flags.h"
+#include "nanochat/train/dist.h"
 #include "nanochat/train/trainer.h"
 
 using namespace nanochat;
@@ -22,6 +25,7 @@ static int run(int argc, char **argv) {
     o.attention = flags.str("attention", o.attention, "fa2 (FlashAttention-2) or sdpa (bit-identical to Python)");
     o.loss_chunk_rows = flags.i64("loss-chunk-rows", o.loss_chunk_rows,
                                   "rows per chunk of the fused lm_head + loss (0 = unchunked, as Python)");
+    o.fp8 = flags.boolean("fp8", o.fp8, "FP8 training (tensorwise scaling; eval stays bf16)");
     // horizon
     o.num_iterations = flags.i64("num-iterations", o.num_iterations, "explicit number of steps (-1 = disable)");
     o.target_flops = flags.f64("target-flops", o.target_flops, "steps to reach target FLOPs (-1 = disable)");
@@ -46,7 +50,16 @@ static int run(int argc, char **argv) {
     o.save = flags.boolean("save", o.save, "save checkpoints");
     o.model_tag = flags.str("model-tag", o.model_tag, "checkpoint directory name (default d<depth>)");
     o.peak_flops = flags.f64("peak-tflops", 0, "GPU BF16 peak TFLOPS for MFU (0 = look up the GPU name)") * 1e12;
+    // distributed
+    const auto nproc = static_cast<int>(flags.i64("nproc", 1, "number of GPUs (one process each)"));
+    const auto rank = static_cast<int>(flags.i64("rank", -1, "internal: set by --nproc for each process"));
+    o.master_addr = flags.str("master-addr", o.master_addr, "rank 0's address, for the rendezvous");
+    o.master_port = static_cast<int>(flags.i64("master-port", o.master_port, "rank 0's port, for the rendezvous"));
     flags.done();
+    if (nproc > 1 && rank < 0)
+        return launch_ranks({argv + 1, argv + argc}, nproc);
+    o.rank = std::max(rank, 0);
+    o.world_size = nproc;
     train(o);
     return 0;
 }

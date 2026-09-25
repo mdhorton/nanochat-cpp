@@ -47,12 +47,14 @@ namespace nanochat {
     // Parameter-free RMSNorm over the last dim, default eps.
     torch::Tensor rms_norm(const torch::Tensor &x);
 
-    // Linear without bias whose weight is cast to the input dtype in forward (replaces autocast).
+    // Linear without bias whose weight is cast to the input dtype in forward (replaces autocast). With fp8 set, the
+    // matmuls run in FP8 (fp8.h), as Python's Float8Linear.
     class LinearImpl : public torch::nn::Module {
     public:
         LinearImpl(int64_t in_features, int64_t out_features, const torch::TensorOptions &options);
         torch::Tensor forward(const torch::Tensor &x);
         torch::Tensor weight;
+        bool fp8 = false;
     };
     TORCH_MODULE(Linear);
 
@@ -136,6 +138,10 @@ namespace nanochat {
         // > 0: compute the training loss a chunk of rows at a time (softcap_ce.h), never materializing all logits.
         // 0: unchunked, as Python.
         void set_loss_chunk_rows(int64_t rows) { loss_chunk_rows_ = rows; }
+        // FP8 matmuls for the Linears that qualify (fp8_eligible), as convert_to_float8_training; false = bf16 (eval).
+        // Returns the number of Linears switched. The chunked loss keeps lm_head in bf16.
+        int set_fp8(bool enabled);
+        int num_linears();
 
         Transformer transformer{nullptr};
         Linear lm_head{nullptr};

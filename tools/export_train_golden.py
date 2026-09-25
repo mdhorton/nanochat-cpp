@@ -10,8 +10,12 @@ Writes to --out-dir (default <base-dir>/golden/train):
 - bpb*: val bits per byte of a small real-vocab model
 - ckpt*: a Python checkpoint converted to safetensors (tools/convert_checkpoint.py), and the step after it
 - train*: a tiny base_train run (per-step losses, val bpb, schedules, final weights)
+- train_ddp2*: the same run on 2 GPUs (torchrun --nproc-per-node 2 ... --sections train)
+- fp8_*: the perturbed tiny model's loss and grads with FP8 Linears (nanochat/fp8.py)
+- train_fp8*: the tiny base_train run with --fp8
 """
 import argparse
+import contextlib
 import json
 import os
 import struct
@@ -112,6 +116,43 @@ def export_gpt(out):
     grads = {f"grad.{name}": p.grad for name, p in model.named_parameters()}
     save(out("gpt_outputs.safetensors"), {"loss": loss, "logits": logits, **grads})
     print(f"wrote gpt goldens (loss {loss.item():.6f})")
+
+
+def convert_fp8(model):
+    import torch.nn as nn
+    from nanochat.fp8 import convert_to_float8_training
+
+    def fp8_module_filter(mod, fqn):  # as base_train.py
+        return (isinstance(mod, nn.Linear) and mod.in_features % 16 == 0 and mod.out_features % 16 == 0
+                and min(mod.in_features, mod.out_features) >= 128)
+    convert_to_float8_training(model, module_filter_fn=fp8_module_filter)
+
+
+@contextlib.contextmanager
+def disable_fp8(model):
+    # base_train.py swaps Float8Linear for Linear (sharing the weight) during eval; swapping the class is equivalent
+    from nanochat.fp8 import Float8Linear
+    from nanochat.gpt import Linear
+    fp8 = [m for m in model.modules() if isinstance(m, Float8Linear)]
+    for m in fp8:
+        m.__class__ = Linear
+    try:
+        yield
+    finally:
+        for m in fp8:
+            m.__class__ = Float8Linear
+
+
+def export_fp8(out):
+    model = build_tiny_model()
+    perturb(model, seed=1)  # the weights of gpt_perturbed
+    convert_fp8(model)
+    idx, targets = random_batch(seed=2)
+    loss = model(idx, targets)
+    loss.backward()
+    grads = {f"grad.{name}": p.grad for name, p in model.named_parameters()}
+    save(out("fp8_outputs.safetensors"), {"loss": loss, **grads})
+    print(f"wrote fp8 goldens (loss {loss.item():.6f})")
 
 
 def export_optim(out):
@@ -256,9 +297,10 @@ TRAIN = dict(depth=4, aspect_ratio=64, head_dim=64, max_seq_len=256, window_patt
              warmdown_ratio=0.65, final_lr_frac=0.05, eval_every=10, eval_tokens=4 * 8 * 256)
 
 
-def export_train(out):
-    # scripts/base_train.py transcribed (it imports wandb/jinja2), minus compile, wandb, CORE, sampling and fp8
+def export_train(out, fp8=False):
+    # scripts/base_train.py transcribed (it imports wandb/jinja2), minus compile, wandb, CORE and sampling
     import math
+    import torch.distributed as dist
     from nanochat.dataloader import tokenizing_distributed_data_loader_bos_bestfit as val_loader_fn
     from nanochat.dataloader import tokenizing_distributed_data_loader_with_state_bos_bestfit as train_loader_fn
     from nanochat.gpt import GPT, GPTConfig
@@ -282,6 +324,8 @@ def export_train(out):
     model = build_model_meta(args.depth)
     model.to_empty(device="cuda")
     model.init_weights()
+    if fp8:
+        convert_fp8(model)
 
     def get_scaling_params(m):
         params_counts = m.num_scaling_params()
@@ -334,14 +378,17 @@ def export_train(out):
     def get_weight_decay(it):
         return weight_decay_scaled * 0.5 * (1 + math.cos(math.pi * it / num_iterations))
 
-    grad_accum_steps = total_batch_size // (args.device_batch_size * args.max_seq_len)
+    ddp = dist.is_initialized()
+    rank, world_size = (dist.get_rank(), dist.get_world_size()) if ddp else (0, 1)
+    grad_accum_steps = total_batch_size // (args.device_batch_size * args.max_seq_len * world_size)
     losses, evals, schedule = [], {}, []
     step = 0
     while True:
         last_step = step == num_iterations
         if args.eval_every > 0 and (last_step or step % args.eval_every == 0):
-            eval_steps = args.eval_tokens // (args.device_batch_size * args.max_seq_len)
-            evals[step] = evaluate_bpb(model, build_val_loader(), eval_steps, token_bytes)
+            eval_steps = args.eval_tokens // (args.device_batch_size * args.max_seq_len * world_size)
+            with disable_fp8(model):
+                evals[step] = evaluate_bpb(model, build_val_loader(), eval_steps, token_bytes)
         if last_step:
             break
         for micro_step in range(grad_accum_steps):
@@ -361,18 +408,23 @@ def export_train(out):
         model.zero_grad(set_to_none=True)
         losses.append(train_loss.item())
         step += 1
-    save(out("train_final.safetensors"), model.state_dict())
+    if rank != 0:
+        return
+    prefix = "train" + ("_fp8" if fp8 else "") + ("" if world_size == 1 else f"_ddp{world_size}")
+    save(out(f"{prefix}_final.safetensors"), model.state_dict())
     plan = dict(num_scaling_params=num_scaling_params, target_tokens=target_tokens, d_ref=D_REF,
                 total_batch_size=total_batch_size, batch_lr_scale=batch_lr_scale,
                 weight_decay_scaled=weight_decay_scaled, num_iterations=num_iterations,
                 grad_accum_steps=grad_accum_steps)
-    with open(out("train.json"), "w") as f:
-        json.dump({"options": TRAIN, "plan": plan, "losses": losses, "evals": evals, "schedule": schedule}, f, indent=1)
-    print(f"wrote train golden: losses {losses[0]:.4f} -> {losses[-1]:.4f}, val bpb {evals}")
+    with open(out(f"{prefix}.json"), "w") as f:
+        json.dump({"options": {**TRAIN, "fp8": fp8}, "world_size": world_size, "plan": plan, "losses": losses, "evals": evals,
+                   "schedule": schedule}, f, indent=1)
+    print(f"wrote {prefix} golden: losses {losses[0]:.4f} -> {losses[-1]:.4f}, val bpb {evals}")
 
 
 SECTIONS = {"safetensors": export_safetensors_check, "gpt": export_gpt, "optim": export_optim,
-            "dataloader": export_dataloader, "bpb": export_bpb, "ckpt": export_ckpt, "train": export_train}
+            "dataloader": export_dataloader, "bpb": export_bpb, "ckpt": export_ckpt, "train": export_train,
+            "fp8": export_fp8, "train_fp8": lambda out: export_train(out, fp8=True)}
 
 
 def main():
@@ -392,11 +444,20 @@ def main():
     from nanochat.common import COMPUTE_DTYPE
     assert COMPUTE_DTYPE == torch.bfloat16, COMPUTE_DTYPE
     torch.set_float32_matmul_precision("high")  # as compute_init
+    if int(os.environ.get("WORLD_SIZE", "1")) > 1:  # under torchrun, as compute_init
+        import torch.distributed as dist
+        assert args.sections in ("train", "train_fp8"), "only the train sections run on several GPUs"
+        device = torch.device("cuda", int(os.environ["LOCAL_RANK"]))
+        torch.cuda.set_device(device)
+        dist.init_process_group(backend="nccl", device_id=device)
+        dist.barrier()
 
     os.makedirs(args.out_dir, exist_ok=True)
     out = lambda name: os.path.join(args.out_dir, name)
     for name in args.sections.split(","):
         SECTIONS[name](out)
+    if int(os.environ.get("WORLD_SIZE", "1")) > 1:
+        torch.distributed.destroy_process_group()
 
 
 if __name__ == "__main__":
