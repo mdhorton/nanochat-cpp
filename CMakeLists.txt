@@ -10,6 +10,7 @@ pkg_check_modules(PCRE2 REQUIRED IMPORTED_TARGET libpcre2-8)
 find_package(Arrow REQUIRED)
 find_package(Parquet REQUIRED)
 find_package(nlohmann_json REQUIRED)
+find_package(Threads REQUIRED)
 
 add_library(nanochat
         src/nanochat/base64.cpp
@@ -22,7 +23,7 @@ add_library(nanochat
 target_include_directories(nanochat PUBLIC src)
 target_compile_definitions(nanochat PUBLIC NANOCHAT_CACHE_DIR="${PROJECT_SOURCE_DIR}/cache")
 target_link_libraries(nanochat PUBLIC
-        PkgConfig::PCRE2 Arrow::arrow_shared Parquet::parquet_shared nlohmann_json::nlohmann_json)
+        PkgConfig::PCRE2 Arrow::arrow_shared Parquet::parquet_shared nlohmann_json::nlohmann_json Threads::Threads)
 
 add_executable(nanochat_cpp main.cpp)
 

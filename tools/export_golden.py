@@ -67,7 +67,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-dir", default=CACHE_DIR, help="nanochat data directory")
     parser.add_argument("--out-dir", help="default: <base-dir>/golden")
-    parser.add_argument("--nanochat-dir", default="/remote/projects/pycharm/nanochat")
+    parser.add_argument("--nanochat-dir", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "external", "nanochat"))
     parser.add_argument("--num-docs", type=int, default=1000, help="val docs in encode.jsonl")
     parser.add_argument("--num-pretrained-docs", type=int, default=300, help="val docs in encode_<pretrained>.jsonl")
     parser.add_argument("--medium-max-chars", type=int, default=20_000_000)

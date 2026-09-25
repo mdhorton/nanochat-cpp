@@ -1,0 +1,30 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "pixi",
+      "hidden": true,
+      "displayName": "pixi env (.pixi/envs/default)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/cmake-build-${presetName}",
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "${sourceDir}/.pixi/envs/default/bin/x86_64-conda-linux-gnu-g++",
+        "CMAKE_MAKE_PROGRAM": "${sourceDir}/.pixi/envs/default/bin/ninja",
+        "CMAKE_PREFIX_PATH": "${sourceDir}/.pixi/envs/default",
+        "PKG_CONFIG_EXECUTABLE": "${sourceDir}/.pixi/envs/default/bin/pkg-config"
+      }
+    },
+    {
+      "name": "pixi-debug",
+      "displayName": "Debug (pixi)",
+      "inherits": "pixi",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "pixi-release",
+      "displayName": "RelWithDebInfo (pixi)",
+      "inherits": "pixi",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo" }
+    }
+  ]
+}

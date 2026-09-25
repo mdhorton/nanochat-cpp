@@ -1,6 +1,6 @@
 # porting nanochat to c++
 
-nanochat is located here: /remote/projects/pycharm/nanochat
+nanochat is cloned here: external/nanochat
 
 do not make any changes to nanochat.
 

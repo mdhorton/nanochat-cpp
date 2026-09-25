@@ -1,4 +1,7 @@
-/cmake-*/
 /.idea/
+/.pixi/
+
+/cmake-*/
+
 /cache/
 /external/
