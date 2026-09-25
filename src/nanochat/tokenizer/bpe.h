@@ -7,7 +7,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "nanochat/splitter.h"
+#include "nanochat/tokenizer/splitter.h"
 
 namespace nanochat {
 

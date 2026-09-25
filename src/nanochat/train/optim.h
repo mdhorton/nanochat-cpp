@@ -7,8 +7,8 @@
 
 #include <torch/torch.h>
 
-#include "nanochat/gpt.h"
-#include "nanochat/safetensors.h"
+#include "nanochat/model/gpt.h"
+#include "nanochat/train/safetensors.h"
 
 namespace nanochat {
 

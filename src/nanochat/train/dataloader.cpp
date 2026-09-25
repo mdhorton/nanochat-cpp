@@ -1,4 +1,4 @@
-#include "nanochat/dataloader.h"
+#include "nanochat/train/dataloader.h"
 
 #include <algorithm>
 #include <stdexcept>

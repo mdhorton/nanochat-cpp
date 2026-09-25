@@ -16,7 +16,7 @@
 #include <torch/torch.h>
 
 #include "nanochat/dataset.h"
-#include "nanochat/tokenizer.h"
+#include "nanochat/tokenizer/tokenizer.h"
 
 namespace nanochat {
 

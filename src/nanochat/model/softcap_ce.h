@@ -1,5 +1,5 @@
 // lm_head + logit softcap + cross-entropy, computed a chunk of rows at a time so the full (N, vocab) logits never
-// exist: forward keeps only the per-row logsumexp, backward recomputes each chunk's logits.
+// exist. A fused CUDA kernel does softcap, loss and the logits' gradient in one pass over each bf16 chunk.
 #pragma once
 
 #include <cstdint>

@@ -1,4 +1,4 @@
-#include "nanochat/tokenizer.h"
+#include "nanochat/tokenizer/tokenizer.h"
 
 #include <algorithm>
 #include <fstream>
@@ -8,9 +8,9 @@
 
 #include <nlohmann/json.hpp>
 
-#include "nanochat/base64.h"
-#include "nanochat/bpe.h"
-#include "nanochat/utf8.h"
+#include "nanochat/tokenizer/base64.h"
+#include "nanochat/tokenizer/bpe.h"
+#include "nanochat/tokenizer/utf8.h"
 
 namespace nanochat {
 

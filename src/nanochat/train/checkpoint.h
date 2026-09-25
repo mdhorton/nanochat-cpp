@@ -9,8 +9,8 @@
 
 #include <nlohmann/json.hpp>
 
-#include "nanochat/gpt.h"
-#include "nanochat/optim.h"
+#include "nanochat/model/gpt.h"
+#include "nanochat/train/optim.h"
 
 namespace nanochat {
 

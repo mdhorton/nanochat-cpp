@@ -4,8 +4,8 @@
 #include <fstream>
 #include <nlohmann/json.hpp>
 
-#include "nanochat/safetensors.h"
-#include "nanochat/trainer.h"
+#include "nanochat/train/safetensors.h"
+#include "nanochat/train/trainer.h"
 #include "test_env.h"
 
 using namespace nanochat;
@@ -51,6 +51,7 @@ namespace {
             options_.base_dir = test_env().base_dir;
             options_.save = false;
             options_.attention = "sdpa"; // as Python on this GPU
+            options_.loss_chunk_rows = 0;
             options_.verbose = std::getenv("NANOCHAT_TEST_VERBOSE") != nullptr;
         }
         nlohmann::json golden_;

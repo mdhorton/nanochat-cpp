@@ -4,7 +4,7 @@
 #include <fstream>
 #include <nlohmann/json.hpp>
 
-#include "nanochat/gpt.h"
+#include "nanochat/model/gpt.h"
 #include "test_env.h"
 
 using namespace nanochat;

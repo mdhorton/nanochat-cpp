@@ -1,4 +1,4 @@
-#include "nanochat/utf8.h"
+#include "nanochat/tokenizer/utf8.h"
 
 namespace nanochat {
 

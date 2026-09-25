@@ -4,7 +4,7 @@
 #include <fstream>
 #include <nlohmann/json.hpp>
 
-#include "nanochat/optim.h"
+#include "nanochat/train/optim.h"
 #include "test_env.h"
 
 using namespace nanochat;

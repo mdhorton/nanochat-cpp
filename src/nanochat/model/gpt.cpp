@@ -1,6 +1,6 @@
-#include "nanochat/gpt.h"
+#include "nanochat/model/gpt.h"
 
-#include "nanochat/softcap_ce.h"
+#include "nanochat/model/softcap_ce.h"
 
 #include <cmath>
 #include <set>

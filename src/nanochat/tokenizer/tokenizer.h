@@ -15,7 +15,7 @@
 
 #include <nlohmann/json_fwd.hpp>
 
-#include "nanochat/splitter.h"
+#include "nanochat/tokenizer/splitter.h"
 
 namespace nanochat {
 

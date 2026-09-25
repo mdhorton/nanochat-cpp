@@ -1,8 +1,8 @@
 // Chunked softcap cross-entropy vs the unchunked ops (as gpt.py): loss and gradients.
 #include <gtest/gtest.h>
 
-#include "nanochat/gpt.h"
-#include "nanochat/softcap_ce.h"
+#include "nanochat/model/gpt.h"
+#include "nanochat/model/softcap_ce.h"
 
 using namespace nanochat;
 namespace F = torch::nn::functional;

@@ -1,4 +1,4 @@
-#include "nanochat/bpe.h"
+#include "nanochat/tokenizer/bpe.h"
 
 #include <algorithm>
 #include <stdexcept>

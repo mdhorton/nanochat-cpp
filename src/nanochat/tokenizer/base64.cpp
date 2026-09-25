@@ -1,4 +1,4 @@
-#include "nanochat/base64.h"
+#include "nanochat/tokenizer/base64.h"
 
 #include <cstdint>
 #include <stdexcept>

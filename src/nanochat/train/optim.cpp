@@ -1,4 +1,4 @@
-#include "nanochat/optim.h"
+#include "nanochat/train/optim.h"
 
 #include <array>
 #include <cmath>

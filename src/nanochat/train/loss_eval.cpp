@@ -1,4 +1,4 @@
-#include "nanochat/loss_eval.h"
+#include "nanochat/train/loss_eval.h"
 
 #include <cmath>
 #include <fstream>

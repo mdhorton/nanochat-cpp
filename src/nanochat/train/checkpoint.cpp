@@ -1,4 +1,4 @@
-#include "nanochat/checkpoint.h"
+#include "nanochat/train/checkpoint.h"
 
 #include <cstdio>
 #include <fstream>

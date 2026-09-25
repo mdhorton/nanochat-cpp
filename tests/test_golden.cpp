@@ -4,9 +4,9 @@
 #include <fstream>
 #include <nlohmann/json.hpp>
 
-#include "nanochat/base64.h"
+#include "nanochat/tokenizer/base64.h"
 #include "nanochat/dataset.h"
-#include "nanochat/tokenizer.h"
+#include "nanochat/tokenizer/tokenizer.h"
 #include "test_env.h"
 
 using namespace nanochat;

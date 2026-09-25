@@ -55,7 +55,9 @@ steps:
 9. memory/throughput for d24 on 1 GPU (chunked cross-entropy, activation recompute if needed).
    done: `--attention fa2` (default), PyTorch's built-in FlashAttention-2 with native sliding windows. parity tests
    use `--attention sdpa`, which is bit-identical to python on sm120.
-   done: `--loss-chunk-rows N` chunked lm_head + softcap + cross-entropy with recompute (plain libtorch). saves ~7GB
-   at d12 but costs ~12% speed, so it's off by default. a fused softcap + cross-entropy kernel would make it faster.
+   done: `--loss-chunk-rows N` (default 4096) chunked lm_head + fused softcap/cross-entropy CUDA kernel
+   (`model/softcap_ce_kernel.cu`); gradients are computed in forward, so nothing is recomputed. d12 batch 8: 59.5k vs 46.1k
+   tok/s, 9.1 vs 16.9GB. `0` = python's unchunked path (parity tests).
+   todo: d24 batch 2 fits (21.2GB, 7.3k tok/s), batch 4 OOMs: needs activation recompute or ZeRO on 2 GPUs.
 10. 2 GPUs: NCCL, ZeRO-2 MuonAdamW, launcher.
 11. FP8.

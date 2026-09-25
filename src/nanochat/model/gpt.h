@@ -9,7 +9,7 @@
 
 #include <torch/torch.h>
 
-#include "nanochat/safetensors.h"
+#include "nanochat/train/safetensors.h"
 
 namespace nanochat {
 

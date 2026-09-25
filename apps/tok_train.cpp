@@ -5,11 +5,11 @@
 #include <format>
 #include <thread>
 
-#include "nanochat/bpe.h"
+#include "nanochat/tokenizer/bpe.h"
 #include "nanochat/common.h"
 #include "nanochat/dataset.h"
 #include "nanochat/flags.h"
-#include "nanochat/tokenizer.h"
+#include "nanochat/tokenizer/tokenizer.h"
 
 using namespace nanochat;
 namespace fs = std::filesystem;

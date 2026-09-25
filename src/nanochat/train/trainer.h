@@ -10,7 +10,7 @@
 
 #include <nlohmann/json.hpp>
 
-#include "nanochat/gpt.h"
+#include "nanochat/model/gpt.h"
 
 namespace nanochat {
 
@@ -19,7 +19,7 @@ namespace nanochat {
         int64_t depth = 20, aspect_ratio = 64, head_dim = 128, max_seq_len = 2048;
         std::string window_pattern = "SSSL";
         std::string attention = "fa2"; // fa2 or sdpa (bit-identical to Python nanochat)
-        int64_t loss_chunk_rows = 0; // > 0: chunked lm_head + loss (never all logits at once); 0: as Python
+        int64_t loss_chunk_rows = 4096; // > 0: fused chunked lm_head + loss (never all logits at once); 0: as Python
         // training horizon: the first one set wins
         int64_t num_iterations = -1;
         double target_flops = -1, target_param_data_ratio = 12;

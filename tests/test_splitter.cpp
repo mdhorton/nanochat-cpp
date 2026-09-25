@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-#include "nanochat/splitter.h"
+#include "nanochat/tokenizer/splitter.h"
 
 using nanochat::Pcre2Splitter;
 

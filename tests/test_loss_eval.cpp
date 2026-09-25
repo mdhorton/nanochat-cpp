@@ -4,7 +4,7 @@
 #include <fstream>
 #include <nlohmann/json.hpp>
 
-#include "nanochat/loss_eval.h"
+#include "nanochat/train/loss_eval.h"
 #include "test_env.h"
 
 using namespace nanochat;

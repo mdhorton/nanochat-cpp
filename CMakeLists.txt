@@ -23,16 +23,22 @@ set(CUDA_TOOLKIT_ROOT_DIR "${PIXI_ENV}/targets/x86_64-linux")
 set(CMAKE_CUDA_COMPILER "${PIXI_ENV}/bin/nvcc")
 set(CMAKE_CUDA_HOST_COMPILER "${CMAKE_CXX_COMPILER}")
 set(CUDA_nvrtc_LIBRARY "${TORCH_DIR}/../nvidia/cu13/lib/libnvrtc.so.13") # not in the conda env
+set(TORCH_CUDA_ARCH_LIST 12.0) # torch sets the nvcc -gencode flags from this
+set(CMAKE_CUDA_STANDARD 20)
+set(CMAKE_CUDA_RUNTIME_LIBRARY None) # use torch's libcudart
+enable_language(CUDA)
+unset(CMAKE_CUDA_ARCHITECTURES CACHE) # torch warns if set
 find_package(Torch REQUIRED)
+set(CMAKE_CUDA_ARCHITECTURES OFF) # torch adds the -gencode flags
 
 add_library(nanochat
-        src/nanochat/base64.cpp
-        src/nanochat/bpe.cpp
         src/nanochat/dataset.cpp
         src/nanochat/flags.cpp
-        src/nanochat/splitter.cpp
-        src/nanochat/tokenizer.cpp
-        src/nanochat/utf8.cpp)
+        src/nanochat/tokenizer/base64.cpp
+        src/nanochat/tokenizer/bpe.cpp
+        src/nanochat/tokenizer/splitter.cpp
+        src/nanochat/tokenizer/tokenizer.cpp
+        src/nanochat/tokenizer/utf8.cpp)
 target_include_directories(nanochat PUBLIC src)
 target_compile_definitions(nanochat PUBLIC NANOCHAT_CACHE_DIR="${PROJECT_SOURCE_DIR}/cache")
 target_link_libraries(nanochat PUBLIC
@@ -40,14 +46,15 @@ target_link_libraries(nanochat PUBLIC
 
 # pre-training (libtorch)
 add_library(nanochat_train
-        src/nanochat/checkpoint.cpp
-        src/nanochat/dataloader.cpp
-        src/nanochat/gpt.cpp
-        src/nanochat/loss_eval.cpp
-        src/nanochat/optim.cpp
-        src/nanochat/safetensors.cpp
-        src/nanochat/softcap_ce.cpp
-        src/nanochat/trainer.cpp)
+        src/nanochat/model/gpt.cpp
+        src/nanochat/model/softcap_ce.cpp
+        src/nanochat/model/softcap_ce_kernel.cu
+        src/nanochat/train/checkpoint.cpp
+        src/nanochat/train/dataloader.cpp
+        src/nanochat/train/loss_eval.cpp
+        src/nanochat/train/optim.cpp
+        src/nanochat/train/safetensors.cpp
+        src/nanochat/train/trainer.cpp)
 target_link_libraries(nanochat_train PUBLIC nanochat ${TORCH_LIBRARIES})
 # ATen/cuda headers need the CUDA library headers (cuBLAS, cuSPARSE, ...), which come with the NVIDIA wheels
 target_include_directories(nanochat_train SYSTEM PUBLIC "${TORCH_DIR}/../nvidia/cu13/include")

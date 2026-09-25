@@ -5,7 +5,7 @@
 #include <nlohmann/json.hpp>
 #include <set>
 
-#include "nanochat/tokenizer.h"
+#include "nanochat/tokenizer/tokenizer.h"
 
 using namespace nanochat;
 using json = nlohmann::json;

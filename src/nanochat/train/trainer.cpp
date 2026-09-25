@@ -1,4 +1,4 @@
-#include "nanochat/trainer.h"
+#include "nanochat/train/trainer.h"
 
 #include <algorithm>
 #include <chrono>
@@ -10,11 +10,11 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 
-#include "nanochat/checkpoint.h"
-#include "nanochat/dataloader.h"
-#include "nanochat/loss_eval.h"
-#include "nanochat/optim.h"
-#include "nanochat/tokenizer.h"
+#include "nanochat/train/checkpoint.h"
+#include "nanochat/train/dataloader.h"
+#include "nanochat/train/loss_eval.h"
+#include "nanochat/train/optim.h"
+#include "nanochat/tokenizer/tokenizer.h"
 
 namespace nanochat {
 

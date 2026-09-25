@@ -1,4 +1,4 @@
-#include "nanochat/splitter.h"
+#include "nanochat/tokenizer/splitter.h"
 
 #include <stdexcept>
 #include <string>
