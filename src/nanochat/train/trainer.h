@@ -33,10 +33,10 @@ namespace nanochat {
         // evaluation and checkpoints
         int64_t eval_every = 250, eval_tokens = 80 * 524288, save_every = -1;
         bool save = true; // save at the end (and every save_every)
+        // run name: checkpoint dir and wandb name. "dummy" (as base_train.py): dir d<depth>, no metrics.jsonl
+        std::string run = "dummy";
         // paths
         std::filesystem::path base_dir; // data, tokenizer and checkpoints
-        std::string model_tag; // checkpoint dir name, default d<depth>
-        double peak_flops = 0; // for MFU; 0 = look up the GPU name
         // multi-GPU: this process's rank (= GPU index), rank 0 hosts the TCPStore at master_addr:master_port
         int rank = 0, world_size = 1;
         std::string master_addr = "127.0.0.1";

@@ -44,12 +44,11 @@ static int run(int argc, char **argv) {
     o.final_lr_frac = flags.f64("final-lr-frac", o.final_lr_frac, "final LR as a fraction of the initial LR");
     o.resume_from_step = flags.i64("resume-from-step", o.resume_from_step, "resume from this checkpoint (-1 = no)");
     // evaluation and output
-    o.eval_every = flags.i64("eval-every", o.eval_every, "evaluate val bpb every N steps (-1 = disable)");
+    o.eval_every = flags.i64("eval-every", o.eval_every, "evaluate val bpb every N steps and at the end (-1 = end only, 0 = never)");
     o.eval_tokens = flags.i64("eval-tokens", o.eval_tokens, "tokens to evaluate val bpb on");
     o.save_every = flags.i64("save-every", o.save_every, "save a checkpoint every N steps (-1 = only at the end)");
     o.save = flags.boolean("save", o.save, "save checkpoints");
-    o.model_tag = flags.str("model-tag", o.model_tag, "checkpoint directory name (default d<depth>)");
-    o.peak_flops = flags.f64("peak-tflops", 0, "GPU BF16 peak TFLOPS for MFU (0 = look up the GPU name)") * 1e12;
+    o.run = flags.str("run", o.run, "run name: checkpoint dir and wandb name ('dummy' = d<depth>, no metrics.jsonl)");
     // distributed
     const auto nproc = static_cast<int>(flags.i64("nproc", 1, "number of GPUs (one process each)"));
     const auto rank = static_cast<int>(flags.i64("rank", -1, "internal: set by --nproc for each process"));

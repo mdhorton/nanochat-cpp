@@ -30,6 +30,10 @@ enable_language(CUDA)
 unset(CMAKE_CUDA_ARCHITECTURES CACHE) # torch warns if set
 find_package(Torch REQUIRED)
 set(CMAKE_CUDA_ARCHITECTURES OFF) # torch adds the -gencode flags
+# link and load torch's libcudart, not the copy nvcc brings in. The rpath goes first: conda's LDFLAGS put the env's
+# lib dir (with a libcudart.so.13 symlink) at the front.
+set_property(TARGET CUDA::cudart PROPERTY IMPORTED_LOCATION "${TORCH_DIR}/../nvidia/cu13/lib/libcudart.so.13")
+set(CMAKE_EXE_LINKER_FLAGS "-Wl,-rpath,${TORCH_DIR}/../nvidia/cu13/lib ${CMAKE_EXE_LINKER_FLAGS}")
 
 add_library(nanochat
         src/nanochat/dataset.cpp

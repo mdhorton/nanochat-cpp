@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cmath>
 #include <format>
+#include <fstream>
 #include <iostream>
 #include <stdexcept>
 
@@ -123,8 +124,10 @@ namespace nanochat {
                 {{"h100", "nvl"}, 835e12}, {{"h100", "pcie"}, 756e12}, {{"h100"}, 989e12},
                 {{"h800", "nvl"}, 989e12}, {{"h800"}, 756e12}, {{"a100"}, 312e12}, {{"a800"}, 312e12},
                 {{"a40"}, 149.7e12}, {{"a30"}, 165e12}, {{"l40s"}, 362e12}, {{"l40-s"}, 362e12},
-                {{"l40 s"}, 362e12}, {{"l4"}, 121e12}, {{"5090"}, 209.5e12}, {{"4090"}, 165.2e12},
-                {{"3090"}, 71e12}};
+                {{"l40 s"}, 362e12}, {{"l4"}, 121e12},
+                // 70 SMs x 1024 dense BF16 FLOPs/clk x 2.25 GHz boost (from the datasheet's 1290 sparse FP4 TOPS)
+                {{"rtx pro 4000"}, 161.3e12},
+                {{"5090"}, 209.5e12}, {{"4090"}, 165.2e12}, {{"3090"}, 71e12}};
         for (const auto &[patterns, flops]: table)
             if (std::ranges::all_of(patterns, [&](const auto &p) { return name.find(p) != std::string::npos; }))
                 return flops;
@@ -152,12 +155,41 @@ namespace nanochat {
                     {"warmup_steps", o.warmup_steps}, {"warmdown_ratio", o.warmdown_ratio},
                     {"final_lr_frac", o.final_lr_frac}, {"resume_from_step", o.resume_from_step},
                     {"eval_every", o.eval_every}, {"eval_tokens", o.eval_tokens}, {"save_every", o.save_every},
-                    {"model_tag", o.model_tag}};
+                    {"run", o.run}};
         }
 
         double seconds_since(std::chrono::steady_clock::time_point t0) {
             return std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
         }
+
+        // JSON lines: a header (config), then one line per step and eval, keyed as base_train.py's wandb logs.
+        // Resuming keeps the lines before the resume step.
+        class MetricsLog {
+        public:
+            MetricsLog(const fs::path &path, const nlohmann::json &header, int64_t resume_step) {
+                std::vector<std::string> kept;
+                if (resume_step >= 0 && fs::exists(path)) {
+                    std::ifstream in(path);
+                    for (std::string line; std::getline(in, line);) {
+                        const auto j = nlohmann::json::parse(line, nullptr, false);
+                        if (!j.is_discarded() && (!j.contains("step") || j["step"].get<int64_t>() < resume_step))
+                            kept.push_back(line);
+                    }
+                }
+                fs::create_directories(path.parent_path());
+                out_.open(path, std::ios::trunc);
+                if (kept.empty())
+                    kept.push_back(header.dump());
+                for (const auto &line: kept)
+                    out_ << line << '\n';
+                out_.flush();
+            }
+
+            void log(const nlohmann::json &j) { out_ << j.dump() << '\n' << std::flush; } // flushed for live readers
+
+        private:
+            std::ofstream out_;
+        };
 
     } // namespace
 
@@ -173,7 +205,7 @@ namespace nanochat {
         torch::manual_seed(42); // every rank initializes the same weights
         at::globalContext().setFloat32MatmulPrecision("high"); // TF32
         const auto device_name = std::string(at::cuda::getDeviceProperties(device.index())->name);
-        const double gpu_peak_flops = o.peak_flops > 0 ? o.peak_flops : peak_flops(device_name);
+        const double gpu_peak_flops = peak_flops(device_name);
         print(std::format("GPU: {} | Peak FLOPS (BF16): {:.2e}", device_name, gpu_peak_flops));
         const auto attention = attention_from_string(o.attention);
         print("Attention: " + o.attention);
@@ -200,7 +232,7 @@ namespace nanochat {
         }
 
         const auto checkpoint_dir =
-                o.base_dir / "base_checkpoints" / (o.model_tag.empty() ? "d" + std::to_string(o.depth) : o.model_tag);
+                o.base_dir / "base_checkpoints" / (o.run == "dummy" ? "d" + std::to_string(o.depth) : o.run);
         const bool resuming = o.resume_from_step != -1;
         std::optional<Checkpoint> ckpt;
         if (resuming) {
@@ -220,6 +252,15 @@ namespace nanochat {
         print(std::format("Estimated FLOPs per token: {:e}", static_cast<double>(flops_per_token)));
 
         const auto plan = plan_training(o, vocab_size, flops_per_token);
+        std::optional<MetricsLog> metrics;
+        if (master && o.run != "dummy")
+            metrics.emplace(checkpoint_dir / "metrics.jsonl",
+                            nlohmann::json{{"run", o.run}, {"user_config", options_to_json(o)},
+                                           {"model_config", config_to_json(config)}, {"world_size", o.world_size},
+                                           {"device_name", device_name}, {"num_scaling_params", plan.num_scaling_params},
+                                           {"num_iterations", plan.num_iterations},
+                                           {"total_batch_size", plan.total_batch_size}},
+                            o.resume_from_step);
         print(std::format("Total batch size: {} tokens | LR scale: {:.4f} | weight decay: {:.6f}",
                           with_commas(plan.total_batch_size), plan.batch_lr_scale, plan.weight_decay_scaled));
         const int64_t total_tokens = plan.total_batch_size * plan.num_iterations;
@@ -270,8 +311,11 @@ namespace nanochat {
         const int64_t N = plan.num_iterations;
         while (true) {
             const bool last_step = step == N;
+            const double flops_so_far = static_cast<double>(flops_per_token * plan.total_batch_size) *
+                                        static_cast<double>(step);
 
-            if (o.eval_every > 0 && (last_step || step % o.eval_every == 0)) {
+            // -1: final step only (Python: never), 0: never
+            if ((o.eval_every != 0 && last_step) || (o.eval_every > 0 && step % o.eval_every == 0)) {
                 DataLoaderOptions val_opts{.rank = o.rank, .world_size = o.world_size};
                 val_opts.device = device;
                 DataLoader val_loader(tokenizer, o.device_batch_size, o.max_seq_len, Split::Val, data_dir, val_opts);
@@ -281,6 +325,9 @@ namespace nanochat {
                 model->set_fp8(o.fp8);
                 print(std::format("Step {:05d} | Validation bpb: {:.6f}", step, *val_bpb));
                 min_val_bpb = std::min(min_val_bpb, *val_bpb);
+                if (metrics)
+                    metrics->log({{"step", step}, {"total_training_flops", flops_so_far},
+                                  {"total_training_time", total_training_time}, {"val/bpb", *val_bpb}});
                 if (callbacks.on_eval)
                     callbacks.on_eval(step, *val_bpb);
             }
@@ -354,6 +401,11 @@ namespace nanochat {
                               "bf16_mfu: {:.2f} | epoch: {} pq: {} rg: {} | total time: {:.2f}m{}",
                               step, N, pct_done, debiased, lrm, dt * 1000, with_commas(tok_per_sec), mfu, ls.epoch,
                               ls.pq_idx, ls.rg_idx, total_training_time / 60, eta));
+            if (metrics)
+                metrics->log({{"step", step}, {"total_training_flops", flops_so_far},
+                              {"total_training_time", total_training_time}, {"train/loss", debiased},
+                              {"train/lrm", lrm}, {"train/dt", dt}, {"train/tok_per_sec", tok_per_sec},
+                              {"train/mfu", mfu}, {"train/epoch", ls.epoch}});
             if (callbacks.on_step)
                 callbacks.on_step({step, train_loss_f, lrm, dt});
             ++step;
