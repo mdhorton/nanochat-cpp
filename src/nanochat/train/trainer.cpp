@@ -199,6 +199,21 @@ double seconds_since(std::chrono::steady_clock::time_point t0) {
 }
 
 // NVTX range for nsys timelines (no-op without a profiler)
+// Process-wide NVTX start/end range: unlike push/pop it also covers other threads (autograd runs backward on its own)
+struct NvtxProcessRange {
+  explicit NvtxProcessRange(const char* name)
+      : id(nvtxRangeStartA(name)) {}
+
+  ~NvtxProcessRange() {
+    nvtxRangeEnd(id);
+  }
+
+  NvtxProcessRange(const NvtxProcessRange&) = delete;
+  NvtxProcessRange& operator=(const NvtxProcessRange&) = delete;
+
+  nvtxRangeId_t id;
+};
+
 struct NvtxRange {
   explicit NvtxRange(const char* name) {
     nvtxRangePushA(name);
@@ -249,6 +264,7 @@ private:
 } // namespace
 
 std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbacks) {
+  const auto start = std::chrono::steady_clock::now();
   const bool master = o.rank == 0;
   auto print = [&](const std::string& line) {
     if (o.verbose && master)
@@ -374,7 +390,7 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
   }
 
   const int64_t N = plan.num_iterations;
-  std::optional<NvtxRange> profile_range; // nsys --capture-range=nvtx --nvtx-capture=profile
+  std::optional<NvtxProcessRange> profile_range; // nsys --nvtx-capture=profile, ncu --nvtx-include profile
   while (true) {
     const bool last_step = step == N;
     const double flops_so_far = static_cast<double>(flops_per_token * plan.total_batch_size) *
@@ -516,6 +532,7 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
   print(std::format("Total training time: {:.2f}m", total_training_time / 60));
   if (val_bpb)
     print(std::format("Minimum validation bpb: {:.6f}", min_val_bpb));
+  print(std::format("Total wall-clock time: {:.2f}m (incl. setup, evals, checkpoints)", seconds_since(start) / 60));
   if (callbacks.on_end)
     callbacks.on_end(*model);
   return val_bpb;

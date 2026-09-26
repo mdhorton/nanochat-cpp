@@ -16,7 +16,8 @@ pixi run base-train --depth=12 --run=NAME # checkpoints and metrics.jsonl (for w
 pixi run base-train --depth=24 --nproc=2 --fp8  # one process per GPU (as torchrun), FP8 matmuls
 pixi run quick-d12 | quick-d24            # smoke tests (FP8, 2 GPUs): tok/s, early loss, final val bpb
 pixi run full-d12 | full-d24              # full runs (FP8, 2 GPUs)
-pixi run profile-d12 | profile-d24        # nsys timeline of steps 5-7 -> cache/profiles/*.nsys-rep (open in nsys-ui)
+pixi run profile-d12 | profile-d24        # nsys (2 GPUs, steps 5-7) + ncu (1 GPU, step 2) -> cache/profiles/d12_N.{nsys,ncu}-rep
+pixi run profile-d12 ncu --metrics M --kernel-name regex:K -c 5   # one tool only (nsys|ncu); ncu flags override defaults
 nsys stats --report nvtx_sum,cuda_gpu_kern_sum cache/profiles/d12_1.nsys-rep   # summary tables in the terminal
 pixi run nanochat nanochat.dataset -n 8   # Python nanochat module, shares ./cache
 pixi run export-golden                    # golden data for tokenizer parity tests
