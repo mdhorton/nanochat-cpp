@@ -8,19 +8,20 @@
 
 namespace nanochat {
 
-    // input_2d (N, in) bf16, weight (out, in) any float dtype -> (N, out) in input_2d's dtype.
-    torch::Tensor fp8_matmul(const torch::Tensor &input_2d, const torch::Tensor &weight);
+// input_2d (N, in) bf16, weight (out, in) any float dtype -> (N, out) in input_2d's dtype.
+torch::Tensor fp8_matmul(const torch::Tensor& input_2d, const torch::Tensor& weight);
 
-    // Tensorwise quantization of a 2D tensor: data, its transpose (contiguous), inverse scale. The fused kernels
-    // (fused = true) and the torch ops of fp8.py's _to_fp8 give identical bits.
-    struct Fp8Tensor {
-        torch::Tensor data, data_t, inv_scale;
-    };
-    Fp8Tensor quantize_fp8(const torch::Tensor &x, torch::ScalarType dtype, bool fused = true);
+// Tensorwise quantization of a 2D tensor: data, its transpose (contiguous), inverse scale. The fused kernels
+// (fused = true) and the torch ops of fp8.py's _to_fp8 give identical bits.
+struct Fp8Tensor {
+  torch::Tensor data, data_t, inv_scale;
+};
 
-    // base_train.py's fp8_module_filter: dims divisible by 16 and both >= 128.
-    inline bool fp8_eligible(int64_t in_features, int64_t out_features) {
-        return in_features % 16 == 0 && out_features % 16 == 0 && std::min(in_features, out_features) >= 128;
-    }
+Fp8Tensor quantize_fp8(const torch::Tensor& x, torch::ScalarType dtype, bool fused = true);
+
+// base_train.py's fp8_module_filter: dims divisible by 16 and both >= 128.
+inline bool fp8_eligible(int64_t in_features, int64_t out_features) {
+  return in_features % 16 == 0 && out_features % 16 == 0 && std::min(in_features, out_features) >= 128;
+}
 
 } // namespace nanochat

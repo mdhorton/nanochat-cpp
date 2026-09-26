@@ -17,77 +17,89 @@
 
 namespace nanochat {
 
-    struct OptimGroup {
-        enum class Kind { AdamW, Muon };
-        Kind kind = Kind::AdamW;
-        std::string name; // for logging and checkpoints
-        std::vector<torch::Tensor> params;
-        double lr = 0, initial_lr = 0, weight_decay = 0;
-        // AdamW
-        double beta1 = 0.9, beta2 = 0.999, eps = 1e-8;
-        // Muon (beta2 above is NorMuon's second-moment beta)
-        double momentum = 0.95;
-        int ns_steps = 5;
-    };
+struct OptimGroup {
+  enum class Kind { AdamW, Muon };
+  Kind kind = Kind::AdamW;
+  std::string name; // for logging and checkpoints
+  std::vector<torch::Tensor> params;
+  double lr = 0, initial_lr = 0, weight_decay = 0;
+  // AdamW
+  double beta1 = 0.9, beta2 = 0.999, eps = 1e-8;
+  // Muon (beta2 above is NorMuon's second-moment beta)
+  double momentum = 0.95;
+  int ns_steps = 5;
+};
 
-    class MuonAdamW {
-    public:
-        // dist: null (or world size 1) = one GPU. Must outlive the optimizer.
-        explicit MuonAdamW(std::vector<OptimGroup> groups, Dist *dist = nullptr);
+class MuonAdamW {
+public:
+  // dist: null (or world size 1) = one GPU. Must outlive the optimizer.
+  explicit MuonAdamW(std::vector<OptimGroup> groups, Dist* dist = nullptr);
 
-        void step();
+  void step();
 
-        std::vector<OptimGroup> &groups() { return groups_; }
-        const std::vector<OptimGroup> &groups() const { return groups_; }
+  std::vector<OptimGroup>& groups() {
+    return groups_;
+  }
 
-        // Same structure as Python's Optimizer.state_dict(): per-param state as "state.<i>.<field>", i indexing params
-        // across groups in order (Muon state lives on each group's first param), and the group hyperparameters as
-        // JSON in metadata["param_groups"]. With several ranks, each rank's state is its shard.
-        safetensors::TensorMap state_dict(safetensors::Metadata &metadata) const;
-        void load_state_dict(const safetensors::TensorMap &state, const safetensors::Metadata &metadata);
+  const std::vector<OptimGroup>& groups() const {
+    return groups_;
+  }
 
-    private:
-        struct AdamWState {
-            int64_t step = 0;
-            torch::Tensor exp_avg, exp_avg_sq;
-        };
-        struct MuonState {
-            torch::Tensor momentum_buffer, second_momentum_buffer;
-        };
+  // Same structure as Python's Optimizer.state_dict(): per-param state as "state.<i>.<field>", i indexing params
+  // across groups in order (Muon state lives on each group's first param), and the group hyperparameters as
+  // JSON in metadata["param_groups"]. With several ranks, each rank's state is its shard.
+  safetensors::TensorMap state_dict(safetensors::Metadata& metadata) const;
+  void load_state_dict(const safetensors::TensorMap& state, const safetensors::Metadata& metadata);
 
-        // in-flight communication of one group
-        struct Pending {
-            std::vector<Dist::Work> works; // AdamW: per param; Muon: one
-            std::vector<torch::Tensor> grads; // AdamW: this rank's grad (slice); Muon: the owned chunk
-            std::vector<bool> sharded; // AdamW: reduce_scattered (else all_reduced)
-            torch::Tensor stacked; // Muon: padded stack, reduce_scatter input and all_gather output
-            int64_t chunk_size = 0;
-        };
-        struct Gather {
-            Dist::Work work;
-            torch::Tensor stacked; // Muon: gathered params, copied back after the wait
-            const std::vector<torch::Tensor> *params = nullptr;
-        };
+private:
+  struct AdamWState {
+    int64_t step = 0;
+    torch::Tensor exp_avg, exp_avg_sq;
+  };
 
-        Pending reduce_adamw(const OptimGroup &group);
-        Pending reduce_muon(const OptimGroup &group);
-        void compute_adamw(const OptimGroup &group, Pending &pending, std::vector<AdamWState> &states,
-                           std::vector<Gather> &gathers);
-        void compute_muon(const OptimGroup &group, Pending &pending, MuonState &state, std::vector<Gather> &gathers);
+  struct MuonState {
+    torch::Tensor momentum_buffer, second_momentum_buffer;
+  };
 
-        int rank() const { return dist_ ? dist_->rank() : 0; }
-        int world_size() const { return dist_ ? dist_->world_size() : 1; }
+  // in-flight communication of one group
+  struct Pending {
+    std::vector<Dist::Work> works;    // AdamW: per param; Muon: one
+    std::vector<torch::Tensor> grads; // AdamW: this rank's grad (slice); Muon: the owned chunk
+    std::vector<bool> sharded;        // AdamW: reduce_scattered (else all_reduced)
+    torch::Tensor stacked;            // Muon: padded stack, reduce_scatter input and all_gather output
+    int64_t chunk_size = 0;
+  };
 
-        Dist *dist_;
-        std::vector<OptimGroup> groups_;
-        std::vector<std::vector<AdamWState>> adamw_states_; // per group, per param
-        std::vector<MuonState> muon_states_; // per group
-    };
+  struct Gather {
+    Dist::Work work;
+    torch::Tensor stacked; // Muon: gathered params, copied back after the wait
+    const std::vector<torch::Tensor>* params = nullptr;
+  };
 
-    // GPT.setup_optimizer: AdamW groups (lm_head, wte, value_embeds, resid, x0, smear/backout), then one Muon group
-    // per matrix shape in sorted order. AdamW LRs scale with 1/sqrt(n_embd / 768).
-    MuonAdamW setup_optimizer(GPTImpl &model, double unembedding_lr = 0.004, double embedding_lr = 0.2,
-                              double matrix_lr = 0.02, double weight_decay = 0.0, double scalar_lr = 0.5,
-                              Dist *dist = nullptr);
+  Pending reduce_adamw(const OptimGroup& group);
+  Pending reduce_muon(const OptimGroup& group);
+  void compute_adamw(
+        const OptimGroup& group, Pending& pending, std::vector<AdamWState>& states, std::vector<Gather>& gathers);
+  void compute_muon(const OptimGroup& group, Pending& pending, MuonState& state, std::vector<Gather>& gathers);
+
+  int rank() const {
+    return dist_ ? dist_->rank() : 0;
+  }
+
+  int world_size() const {
+    return dist_ ? dist_->world_size() : 1;
+  }
+
+  Dist* dist_;
+  std::vector<OptimGroup> groups_;
+  std::vector<std::vector<AdamWState>> adamw_states_; // per group, per param
+  std::vector<MuonState> muon_states_;                // per group
+};
+
+// GPT.setup_optimizer: AdamW groups (lm_head, wte, value_embeds, resid, x0, smear/backout), then one Muon group
+// per matrix shape in sorted order. AdamW LRs scale with 1/sqrt(n_embd / 768).
+MuonAdamW setup_optimizer(
+      GPTImpl& model, double unembedding_lr = 0.004, double embedding_lr = 0.2, double matrix_lr = 0.02,
+      double weight_decay = 0.0, double scalar_lr = 0.5, Dist* dist = nullptr);
 
 } // namespace nanochat

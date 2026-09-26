@@ -10,16 +10,16 @@
 
 namespace nanochat::safetensors {
 
-    using TensorMap = std::map<std::string, torch::Tensor>;
-    using Metadata = std::map<std::string, std::string>;
+using TensorMap = std::map<std::string, torch::Tensor>;
+using Metadata = std::map<std::string, std::string>;
 
-    // Writes tensors (copied to CPU, contiguous) and optional string metadata.
-    void save(const std::filesystem::path &path, const TensorMap &tensors, const Metadata &metadata = {});
+// Writes tensors (copied to CPU, contiguous) and optional string metadata.
+void save(const std::filesystem::path& path, const TensorMap& tensors, const Metadata& metadata = {});
 
-    // Reads all tensors onto device.
-    TensorMap load(const std::filesystem::path &path, torch::Device device = torch::kCPU);
+// Reads all tensors onto device.
+TensorMap load(const std::filesystem::path& path, torch::Device device = torch::kCPU);
 
-    // Reads only the "__metadata__" entry.
-    Metadata load_metadata(const std::filesystem::path &path);
+// Reads only the "__metadata__" entry.
+Metadata load_metadata(const std::filesystem::path& path);
 
 } // namespace nanochat::safetensors

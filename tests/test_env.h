@@ -3,8 +3,8 @@
 #include <filesystem>
 
 struct TestEnv {
-    std::filesystem::path base_dir;
-    std::filesystem::path golden_dir;
+  std::filesystem::path base_dir;
+  std::filesystem::path golden_dir;
 };
 
-TestEnv &test_env();
+TestEnv& test_env();
