@@ -26,6 +26,7 @@ static int run(int argc, char** argv) {
   o.loss_chunk_rows = flags.i64(
         "loss-chunk-rows", o.loss_chunk_rows, "rows per chunk of the fused lm_head + loss (0 = unchunked, as Python)");
   o.fp8 = flags.boolean("fp8", o.fp8, "FP8 training (tensorwise scaling; eval stays bf16)");
+  o.fused = flags.boolean("fused", o.fused, "fused elementwise CUDA kernels (false = op by op, as Python)");
   // horizon
   o.num_iterations = flags.i64("num-iterations", o.num_iterations, "explicit number of steps (-1 = disable)");
   o.target_flops = flags.f64("target-flops", o.target_flops, "steps to reach target FLOPs (-1 = disable)");

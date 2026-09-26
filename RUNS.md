@@ -24,11 +24,12 @@ Runs based on the sm120 customizations.
 |--:|---------:|---------:|---------:|-------:|------:|-------------------------|
 | 4 |  106,614 | 6.428749 | 1.779237 |  16.0g | 2.46m | --attention=fa2         |
 | 5 |  137,748 | 6.423904 | 1.778217 |   8.2g | 1.90m | --loss-chunk-rows=4096  |
+| 6 |  153,782 | 6.424578 | 1.778360 |   8.2g | 1.70m | --fused=true            |
 
 Run 4: sm120 can't use fa3. however, fa2 works pretty good. --attention=fa2 enabled by default going forward.
 
-Run 5: the python version keeps several GB of logits alive at once. this causes OOM at depth=24 on my setup. this run
-chunks and fuses the CE loss, which reduces vram. --loss-chunk-rows=4096 enabled by default going forward.
+Run 5: the python version keeps several GB of logits alive at once. depth=24 triggers OOM on my setup. this run chunks
+and fuses the CE loss, which reduces vram. --loss-chunk-rows=4096 enabled by default going forward.
 
 # quick runs @ d24
 

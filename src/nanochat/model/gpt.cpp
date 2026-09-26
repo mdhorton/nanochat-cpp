@@ -1,6 +1,7 @@
 #include "nanochat/model/gpt.h"
 
 #include "nanochat/model/fp8.h"
+#include "nanochat/model/rotary_norm.h"
 #include "nanochat/model/softcap_ce.h"
 
 #include <cmath>
@@ -158,10 +159,17 @@ torch::Tensor CausalSelfAttentionImpl::forward(
     v = v + gate.unsqueeze(-1) * ve.view({B, T, n_kv_head, head_dim});
   }
 
-  q = apply_rotary_emb(q, cos, sin);
-  k = apply_rotary_emb(k, cos, sin);
-  q = rms_norm(q) * 1.2; // QK norm, sharper attention split between q and k
-  k = rms_norm(k) * 1.2;
+  // QK norm, sharper attention split between q and k
+  if (fused) {
+    q = rotary_rms_norm(q, cos, sin, 1.2);
+    k = rotary_rms_norm(k, cos, sin, 1.2);
+  }
+  else {
+    q = apply_rotary_emb(q, cos, sin);
+    k = apply_rotary_emb(k, cos, sin);
+    q = rms_norm(q) * 1.2;
+    k = rms_norm(k) * 1.2;
+  }
 
   auto y = attention == Attention::FA2
                  ? fa2_attention(q, k, v, window)
@@ -358,6 +366,11 @@ int GPTImpl::num_linears() {
 void GPTImpl::set_attention(Attention attention) {
   for (const auto& m : *transformer->h)
     m->as<BlockImpl>()->attn->attention = attention;
+}
+
+void GPTImpl::set_fused(bool fused) {
+  for (const auto& m : *transformer->h)
+    m->as<BlockImpl>()->attn->fused = fused;
 }
 
 safetensors::TensorMap GPTImpl::state_dict() const {

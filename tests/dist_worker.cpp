@@ -31,6 +31,7 @@ static int run(int argc, char** argv) {
   o.save = false;
   o.attention = "sdpa"; // as Python on this GPU
   o.loss_chunk_rows = 0;
+  o.fused = false;
   o.verbose = false;
   o.rank = rank;
   o.world_size = nproc;

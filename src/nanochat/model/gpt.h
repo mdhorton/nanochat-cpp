@@ -82,6 +82,7 @@ public:
   static constexpr int64_t kVeGateChannels = 12;
   int64_t n_head, n_kv_head, head_dim;
   Attention attention = Attention::FA2;
+  bool fused = false; // rotary + QK norm in one kernel (rotary_norm.h)
   Linear c_q{nullptr}, c_k{nullptr}, c_v{nullptr}, c_proj{nullptr}, ve_gate{nullptr};
 };
 
@@ -152,6 +153,9 @@ public:
   }
 
   void set_attention(Attention attention);
+
+  // Fused CUDA kernels for elementwise chains (e.g. rotary + QK norm). false = Python's op-by-op path.
+  void set_fused(bool fused);
 
   // > 0: compute the training loss a chunk of rows at a time (softcap_ce.h), never materializing all logits.
   // 0: unchunked, as Python.

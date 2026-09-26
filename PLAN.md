@@ -68,3 +68,7 @@ steps:
     kernels (`model/fp8_kernel.cu`), which also write the transposed copies backward needs; bit-identical to python
     (`fp8`, `train_fp8` goldens). the chunked loss keeps lm_head in bf16. d12 1 GPU: 67.7k vs 60.0k tok/s. d24 2 GPUs:
     30.0k (dbs 2) / 31.1k (dbs 4, 22.9GB) vs 22.7k tok/s. d6/d12 300-step val bpb same as bf16.
+12. fused elementwise kernels (`--fused`, default on; off = python's op-by-op path, used by the parity tests).
+    done: rotary + QK norm (`model/rotary_norm_kernel.cu`), fp32 inside, closer to fp64 than the bf16 ops. d12 FP8 1 GPU:
+    74.5k vs 66.6k tok/s.
+    todo: resid/x0 lambda blend, residual add + rms_norm, value-embedding gate.

@@ -176,6 +176,7 @@ nlohmann::json options_to_json(const TrainOptions& o) {
         {"attention", o.attention},
         {"loss_chunk_rows", o.loss_chunk_rows},
         {"fp8", o.fp8},
+        {"fused", o.fused},
         {"num_iterations", o.num_iterations},
         {"target_flops", o.target_flops},
         {"target_param_data_ratio", o.target_param_data_ratio},
@@ -317,6 +318,7 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
   model->init_weights();
   model->set_attention(attention);
   model->set_loss_chunk_rows(o.loss_chunk_rows);
+  model->set_fused(o.fused);
   if (o.fp8) {
     const int num_linear = model->num_linears(), num_fp8 = model->set_fp8(true);
     print(std::format(

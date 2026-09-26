@@ -30,6 +30,7 @@ protected:
     options_.save = false;
     options_.attention = "sdpa"; // as Python on this GPU
     options_.loss_chunk_rows = 0;
+    options_.fused = false;
     options_.verbose = std::getenv("NANOCHAT_TEST_VERBOSE") != nullptr;
   }
 
@@ -98,6 +99,7 @@ void check_train_golden(const std::string& prefix) {
   options.save = false;
   options.attention = "sdpa"; // as Python on this GPU
   options.loss_chunk_rows = 0;
+  options.fused = false;
   options.verbose = std::getenv("NANOCHAT_TEST_VERBOSE") != nullptr;
 
   std::vector<double> losses;
