@@ -2,7 +2,7 @@
 
 #include <cuda_bf16.h>
 
-namespace nanochat::kernels {
+namespace nanochat {
 
 namespace {
 
@@ -29,7 +29,7 @@ __device__ float block_sum(float v, float* smem) {
 
 // One block per row. |capped| <= softcap, so exp(capped - softcap) needs no running max.
 template <bool kGrad>
-__global__ void __launch_bounds__(kThreads) softcap_ce_kernel(
+__device__ __forceinline__ void softcap_ce_body(
       __nv_bfloat16* logits, int64_t ld, const int64_t* targets, int vocab, int padded, float softcap, float* loss,
       const float* grad_scale, int64_t grad_scale_stride, const int64_t* num_valid) {
   __shared__ float smem[32];
@@ -83,15 +83,32 @@ __global__ void __launch_bounds__(kThreads) softcap_ce_kernel(
 
 } // namespace
 
+} // namespace nanochat
+
+// Kernels: global, non-template nanochat_* names read the same in nsys and ncu (ncu drops the innermost namespace).
+// Not extern "C": ncu's --filter-mode per-launch-config then confuses kernels of equal launch shape.
+#define NANOCHAT_SOFTCAP_CE(name, grad)                                                                                \
+  __global__ void __launch_bounds__(nanochat::kThreads)                                                                \
+        name(__nv_bfloat16* logits, int64_t ld, const int64_t* targets, int vocab, int padded, float softcap,          \
+             float* loss, const float* grad_scale, int64_t grad_scale_stride, const int64_t* num_valid) {              \
+    nanochat::softcap_ce_body<grad>(                                                                                   \
+          logits, ld, targets, vocab, padded, softcap, loss, grad_scale, grad_scale_stride, num_valid);                \
+  }
+
+NANOCHAT_SOFTCAP_CE(nanochat_softcap_ce_loss, false)
+NANOCHAT_SOFTCAP_CE(nanochat_softcap_ce_loss_grad, true)
+
+namespace nanochat::kernels {
+
 void softcap_ce(
       void* logits, int64_t rows, int64_t ld, const int64_t* targets, int vocab, int padded, float softcap, float* loss,
       const float* grad_scale, int64_t grad_scale_stride, const int64_t* num_valid, bool grad, cudaStream_t stream) {
   auto* z = static_cast<__nv_bfloat16*>(logits);
   if (grad)
-    softcap_ce_kernel<true><<<rows, kThreads, 0, stream>>>(
+    nanochat_softcap_ce_loss_grad<<<rows, kThreads, 0, stream>>>(
           z, ld, targets, vocab, padded, softcap, loss, grad_scale, grad_scale_stride, num_valid);
   else
-    softcap_ce_kernel<false><<<rows, kThreads, 0, stream>>>(
+    nanochat_softcap_ce_loss<<<rows, kThreads, 0, stream>>>(
           z, ld, targets, vocab, padded, softcap, loss, grad_scale, grad_scale_stride, num_valid);
 }
 

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <ctime>
 #include <format>
 #include <fstream>
 #include <iostream>
@@ -99,6 +100,7 @@ double Schedules::lr_multiplier(int64_t it) const {
 double Schedules::muon_momentum(int64_t it) const {
   const double warmdown_iters = std::nearbyint(warmdown_ratio * static_cast<double>(num_iterations));
   const double warmdown_start = static_cast<double>(num_iterations) - warmdown_iters;
+
   if (it < 400) {
     const double frac = static_cast<double>(it) / 400;
     return (1 - frac) * 0.85 + frac * 0.97;
@@ -230,6 +232,26 @@ struct NvtxRange {
   NvtxRange& operator=(const NvtxRange&) = delete;
 };
 
+// <dir>/metrics-YYYYmmdd-HHMMSS.jsonl (local time). Resuming continues the newest existing file.
+fs::path metrics_path(const fs::path& dir, bool resuming) {
+  if (resuming && fs::is_directory(dir)) {
+    fs::path newest;
+    for (const auto& entry : fs::directory_iterator(dir)) {
+      const auto name = entry.path().filename().string();
+      if (name.starts_with("metrics-") && name.ends_with(".jsonl") && entry.path() > newest)
+        newest = entry.path(); // timestamps sort as strings
+    }
+    if (!newest.empty())
+      return newest;
+  }
+  const std::time_t now = std::time(nullptr);
+  std::tm tm{};
+  localtime_r(&now, &tm);
+  char stamp[32];
+  std::strftime(stamp, sizeof(stamp), "%Y%m%d-%H%M%S", &tm);
+  return dir / std::format("metrics-{}.jsonl", stamp);
+}
+
 // JSON lines: a header (config), then one line per step and eval, keyed as base_train.py's wandb logs.
 // Resuming keeps the lines before the resume step.
 class MetricsLog {
@@ -317,18 +339,20 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
 
   const auto counts = model->num_scaling_params();
   print(std::format(
-        "Parameter counts:\nwte: {}\nvalue_embeds: {}\nlm_head: {}\ntransformer_matrices: {}\n"
-        "scalars: {}\ntotal: {}",
+        "Parameter counts:\n  wte: {}\n  value_embeds: {}\n  lm_head: {}\n  transformer_matrices: {}\n"
+        "  scalars: {}\n  total: {}",
         with_commas(counts.wte), with_commas(counts.value_embeds), with_commas(counts.lm_head),
         with_commas(counts.transformer_matrices), with_commas(counts.scalars), with_commas(counts.total)));
   const int64_t flops_per_token = model->estimate_flops();
-  print(std::format("Estimated FLOPs per token: {:e}", static_cast<double>(flops_per_token)));
+  print("Estimated FLOPs per token: " + with_commas(flops_per_token));
 
   const auto plan = plan_training(o, vocab_size, flops_per_token);
   std::optional<MetricsLog> metrics;
-  if (master && o.run != "dummy")
+  if (master && o.run != "dummy") {
+    const auto path = metrics_path(o.base_dir / "metrics" / o.run, resuming);
+    print("Metrics: " + path.string());
     metrics.emplace(
-          checkpoint_dir / "metrics.jsonl",
+          path,
           nlohmann::json{
                 {"run", o.run},
                 {"user_config", options_to_json(o)},
@@ -339,6 +363,7 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
                 {"num_iterations", plan.num_iterations},
                 {"total_batch_size", plan.total_batch_size}},
           o.resume_from_step);
+  }
   print(std::format(
         "Total batch size: {} tokens | LR scale: {:.4f} | weight decay: {:.6f}", with_commas(plan.total_batch_size),
         plan.batch_lr_scale, plan.weight_decay_scaled));
@@ -390,6 +415,7 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
   }
 
   const int64_t N = plan.num_iterations;
+  double total_dt = 0; // every step of this run, incl. the first 11 that total_training_time skips
   std::optional<NvtxProcessRange> profile_range; // nsys --nvtx-capture=profile, ncu --nvtx-include profile
   while (true) {
     const bool last_step = step == N;
@@ -497,6 +523,7 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
     const auto tok_per_sec = static_cast<int64_t>(static_cast<double>(plan.total_batch_size) / dt);
     const double flops_per_sec = static_cast<double>(flops_per_token * plan.total_batch_size) / dt;
     const double mfu = 100 * flops_per_sec / (gpu_peak_flops * o.world_size);
+    total_dt += dt;
     if (step > 10)
       total_training_time += dt; // only count the time after the first 10 steps
     std::string eta;
@@ -530,6 +557,7 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
   const auto peak = stats.allocated_bytes[static_cast<size_t>(c10::CachingAllocator::StatType::AGGREGATE)].peak;
   print(std::format("Peak memory usage: {:.2f}MiB", static_cast<double>(peak) / 1024 / 1024));
   print(std::format("Total training time: {:.2f}m", total_training_time / 60));
+  print(std::format("Total DT: {:.2f}m", total_dt / 60));
   if (val_bpb)
     print(std::format("Minimum validation bpb: {:.6f}", min_val_bpb));
   print(std::format("Total wall-clock time: {:.2f}m (incl. setup, evals, checkpoints)", seconds_since(start) / 60));

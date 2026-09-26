@@ -9,6 +9,10 @@ selected ampere kernels.
 
 # goals
 
+5.84B total tokens
+99 minutes
+
+
 After thinking about it, I decided on the following goals (or questions really):
 
 1. how fast can claude port nanochat to c++?

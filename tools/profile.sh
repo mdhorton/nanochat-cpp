@@ -1,42 +1,35 @@
 #!/usr/bin/env bash
 
-# nsys then ncu on base_train, as a report pair cache/profiles/<model>_N.{nsys,ncu}-rep.
-#   nsys: 2 GPUs, steps 5-7 (timeline). ncu: 1 GPU, kernels in step 2 (NVTX range "profile").
-# usage: tools/profile.sh d12|d24 [nsys|ncu|both] [ncu flags...] [-- base_train flags...]
-# e.g.   tools/profile.sh d12 ncu --metrics gpu__time_duration.sum --kernel-name regex:nvjet
+# nsys then ncu on base_train, as a report pair cache/profiles/<tag>_N.{nsys,ncu}-rep.
+#   nsys: steps 2-4 (timeline). ncu: 1 GPU, kernels in step 2 (NVTX range "profile").
+# usage: tools/profile.sh TAG [base_train flags...] [nsys|ncu|both [ncu flags...]]
+# e.g.   tools/profile.sh d12 --depth=12 --device-batch-size=8 ncu --metrics gpu__time_duration.sum
 
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
 usage() {
-  echo "usage: $0 d12|d24 [nsys|ncu|both] [ncu flags...] [-- base_train flags...]" >&2
+  echo "usage: $0 TAG [base_train flags...] [nsys|ncu|both [ncu flags...]]" >&2
   exit 2
 }
 
-case ${1:-} in
-  d12) model=(--depth=12 --device-batch-size=8) ;;
-  d24) model=(--depth=24 --device-batch-size=2) ;;
-  *) usage ;;
-esac
-
+[[ -n ${1:-} && $1 != -* ]] || usage
 tag=$1
 shift
 
-mode=both
-case ${1:-} in
-  nsys | ncu | both) mode=$1 && shift ;;
-esac
-
-ncu_args=() train_args=()
+# base_train flags up to the mode, ncu flags after it
+mode=both train_args=() ncu_args=()
 while (($#)); do
-  if [[ $1 == -- ]]; then
-    shift
-    train_args=("$@")
-    break
-  fi
-  ncu_args+=("$1")
-  shift
+  case $1 in
+    nsys | ncu | both)
+      mode=$1
+      shift
+      ncu_args=("$@")
+      break
+      ;;
+    *) train_args+=("$1") && shift ;;
+  esac
 done
 
 if [[ $mode == nsys && ${#ncu_args[@]} -gt 0 ]]; then
@@ -51,7 +44,7 @@ for ((i = 1; ; ++i)); do
   [[ -e $report.nsys-rep || -e $report.ncu-rep ]] || break
 done
 
-base_train=(cmake-build-pixi/base_train --fp8 "${model[@]}" "${train_args[@]}" --eval-every=0 --save=false)
+base_train=(cmake-build-pixi/base_train "${train_args[@]}" --eval-every=0 --save=false)
 
 # default ncu metrics (used unless --metrics is given)
 ncu_metrics=(
@@ -112,9 +105,10 @@ ncu_metrics=(
 )
 
 if [[ $mode != ncu ]]; then
-  nsys profile --trace=cuda,nvtx,osrt --capture-range=nvtx --nvtx-capture=profile --capture-range-end=stop \
+  nsys profile --trace=cuda,nvtx,osrt --capture-range=nvtx \
+      --nvtx-capture=profile --capture-range-end=stop \
       --env-var=NSYS_NVTX_PROFILER_REGISTER_ONLY=0 -o "$report" \
-    "${base_train[@]}" --nproc=2 --num-iterations=5 --profile-start=2 --profile-steps=3
+    "${base_train[@]}" --num-iterations=5 --profile-start=2 --profile-steps=3
 fi
 
 if [[ $mode != nsys ]]; then

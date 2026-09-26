@@ -53,16 +53,14 @@ tok-eval = { cmd = "cmake-build-pixi/tok_eval", depends-on = ["build"] }
 
 base-train = { cmd = "cmake-build-pixi/base_train", depends-on = ["build"] }
 
-quick-d12 = { cmd = "cmake-build-pixi/base_train --fp8 --nproc=2 --depth=12 --device-batch-size=8 --num-iterations=30 --eval-tokens=4194304 --run=quick-d12 --eval-every=-1 --save=false", depends-on = ["build"] }
-quick-d24 = { cmd = "cmake-build-pixi/base_train --fp8 --nproc=2 --depth=24 --device-batch-size=2 --num-iterations=10 --eval-tokens=4194304 --run=quick-d24 --eval-every=-1 --save=false", depends-on = ["build"] }
+quick-d12 = { cmd = "cmake-build-pixi/base_train --fp8 --nproc=2 --depth=12 --device-batch-size=8 --num-iterations=30 --eval-tokens=4194304 --eval-every=-1 --save=false", depends-on = ["build"] }
+quick-d24 = { cmd = "cmake-build-pixi/base_train --fp8 --nproc=2 --depth=24 --device-batch-size=2 --num-iterations=10 --eval-tokens=4194304 --eval-every=-1 --save=false", depends-on = ["build"] }
 
-full-d12 = { cmd = "cmake-build-pixi/base_train --fp8 --nproc=2 --depth=12 --device-batch-size=8 --run=full-d12 ", depends-on = ["build"] }
-full-d24 = { cmd = "cmake-build-pixi/base_train --fp8 --nproc=2 --depth=24 --device-batch-size=2 --run=full-d24 ", depends-on = ["build"] }
+full-d12 = { cmd = "cmake-build-pixi/base_train --fp8 --nproc=2 --depth=12 --device-batch-size=8 --run=full-d12", depends-on = ["build"] }
+full-d24 = { cmd = "cmake-build-pixi/base_train --fp8 --nproc=2 --depth=24 --device-batch-size=2 --run=full-d24", depends-on = ["build"] }
 
-# nsys (2 GPUs, steps 5-7) then ncu (1 GPU, step 2) -> cache/profiles/d12_N.{nsys,ncu}-rep
-# pixi run profile-d12 [nsys|ncu|both] [ncu flags...] [-- base_train flags...]
-profile-d12 = { cmd = "tools/profile.sh d12", depends-on = ["build"] }
-profile-d24 = { cmd = "tools/profile.sh d24", depends-on = ["build"] }
+profile-d12 = { cmd = "tools/profile.sh d12 --fp8 --nproc=2 --depth=12 --device-batch-size=8", depends-on = ["build"] }
+profile-d24 = { cmd = "tools/profile.sh d24 --fp8 --nproc=2 --depth=24 --device-batch-size=2", depends-on = ["build"] }
 
 export-golden = "python tools/export_golden.py"
 export-train-golden = "python tools/export_train_golden.py"

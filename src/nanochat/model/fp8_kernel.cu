@@ -5,7 +5,7 @@
 #include <cuda_bf16.h>
 #include <cuda_fp8.h>
 
-namespace nanochat::kernels {
+namespace nanochat {
 
 namespace {
 
@@ -38,7 +38,7 @@ __device__ void atomic_max_abs(float* addr, float v) {
 }
 
 template <typename T>
-__global__ void __launch_bounds__(kThreads) amax_kernel(const T* x, int64_t n, float* amax) {
+__device__ __forceinline__ void amax_body(const T* x, int64_t n, float* amax) {
   constexpr int V = Vec<T>::kSize;
   float m = 0.f;
   const int64_t stride = static_cast<int64_t>(gridDim.x) * kThreads;
@@ -89,7 +89,7 @@ __device__ void load8(const T* p, float (&v)[8]) {
 }
 
 template <typename T, __nv_fp8_interpretation_t kFormat>
-__global__ void __launch_bounds__(kTileThreads) cast_kernel(
+__device__ __forceinline__ void cast_body(
       const T* x, int64_t rows, int64_t cols, float fp8_max, const float* amax, __nv_fp8_storage_t* out,
       __nv_fp8_storage_t* out_t, float* inv_scale) {
   __shared__ __align__(16) __nv_fp8_storage_t tile[kTile][kTile + kPad];
@@ -135,6 +135,50 @@ __global__ void __launch_bounds__(kTileThreads) cast_kernel(
       dst[k] = q[k];
 }
 
+} // namespace
+
+} // namespace nanochat
+
+// Kernels: global, non-template nanochat_* names read the same in nsys and ncu (ncu drops the innermost namespace).
+// Not extern "C": ncu's --filter-mode per-launch-config then confuses kernels of equal launch shape.
+#define NANOCHAT_FP8_AMAX(name, T)                                                                                     \
+  __global__ void __launch_bounds__(nanochat::kThreads) name(const T* x, int64_t n, float* amax) {                     \
+    nanochat::amax_body(x, n, amax);                                                                                   \
+  }
+
+#define NANOCHAT_FP8_CAST(name, T, format)                                                                             \
+  __global__ void __launch_bounds__(nanochat::kTileThreads)                                                            \
+        name(const T* x, int64_t rows, int64_t cols, float fp8_max, const float* amax, __nv_fp8_storage_t* out,        \
+             __nv_fp8_storage_t* out_t, float* inv_scale) {                                                            \
+    nanochat::cast_body<T, format>(x, rows, cols, fp8_max, amax, out, out_t, inv_scale);                               \
+  }
+
+NANOCHAT_FP8_AMAX(nanochat_fp8_amax_bf16, __nv_bfloat16)
+NANOCHAT_FP8_AMAX(nanochat_fp8_amax_f32, float)
+NANOCHAT_FP8_CAST(nanochat_fp8_cast_e4m3_bf16, __nv_bfloat16, __NV_E4M3)
+NANOCHAT_FP8_CAST(nanochat_fp8_cast_e5m2_bf16, __nv_bfloat16, __NV_E5M2)
+NANOCHAT_FP8_CAST(nanochat_fp8_cast_e4m3_f32, float, __NV_E4M3)
+NANOCHAT_FP8_CAST(nanochat_fp8_cast_e5m2_f32, float, __NV_E5M2)
+
+namespace nanochat::kernels {
+
+namespace {
+
+template <typename T>
+struct Fp8Kernels;
+
+template <>
+struct Fp8Kernels<__nv_bfloat16> {
+  static constexpr auto amax = nanochat_fp8_amax_bf16;
+  static constexpr auto e4m3 = nanochat_fp8_cast_e4m3_bf16, e5m2 = nanochat_fp8_cast_e5m2_bf16;
+};
+
+template <>
+struct Fp8Kernels<float> {
+  static constexpr auto amax = nanochat_fp8_amax_f32;
+  static constexpr auto e4m3 = nanochat_fp8_cast_e4m3_f32, e5m2 = nanochat_fp8_cast_e5m2_f32;
+};
+
 template <typename T>
 void launch(
       const T* x, int64_t rows, int64_t cols, Fp8Format format, void* out, void* out_t, float* amax, float* inv_scale,
@@ -146,15 +190,15 @@ void launch(
   const int64_t needed = (n / Vec<T>::kSize + kThreads - 1) / kThreads;
   const int blocks = static_cast<int>(std::max<int64_t>(1, std::min<int64_t>(needed, 8LL * sms)));
   cudaMemsetAsync(amax, 0, sizeof(float), stream);
-  amax_kernel<T><<<blocks, kThreads, 0, stream>>>(x, n, amax);
+  Fp8Kernels<T>::amax<<<blocks, kThreads, 0, stream>>>(x, n, amax);
   const dim3 grid(static_cast<unsigned>((cols + kTile - 1) / kTile), static_cast<unsigned>((rows + kTile - 1) / kTile));
   const dim3 block(kTileThreads);
   auto* q = static_cast<__nv_fp8_storage_t*>(out);
   auto* q_t = static_cast<__nv_fp8_storage_t*>(out_t);
   if (format == Fp8Format::E4M3)
-    cast_kernel<T, __NV_E4M3><<<grid, block, 0, stream>>>(x, rows, cols, 448.f, amax, q, q_t, inv_scale);
+    Fp8Kernels<T>::e4m3<<<grid, block, 0, stream>>>(x, rows, cols, 448.f, amax, q, q_t, inv_scale);
   else
-    cast_kernel<T, __NV_E5M2><<<grid, block, 0, stream>>>(x, rows, cols, 57344.f, amax, q, q_t, inv_scale);
+    Fp8Kernels<T>::e5m2<<<grid, block, 0, stream>>>(x, rows, cols, 57344.f, amax, q, q_t, inv_scale);
 }
 
 } // namespace

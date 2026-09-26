@@ -23,7 +23,7 @@ struct TrainOptions {
   bool fp8 = false;               // FP8 matmuls for training (eval stays bf16)
   // training horizon: the first one set wins
   int64_t num_iterations = -1;
-  double target_flops = -1, target_param_data_ratio = 12;
+  double target_flops = -1, target_param_data_ratio = 8; // Python: 12; speedrun.sh uses 8
   // optimization
   int64_t device_batch_size = 32, total_batch_size = -1; // -1: from scaling laws
   double embedding_lr = 0.3, unembedding_lr = 0.008, weight_decay = 0.28, matrix_lr = 0.02, scalar_lr = 0.5;
@@ -33,7 +33,8 @@ struct TrainOptions {
   // evaluation and checkpoints
   int64_t eval_every = 250, eval_tokens = 80 * 524288, save_every = -1;
   bool save = true; // save at the end (and every save_every)
-  // run name: checkpoint dir and wandb name. "dummy" (as base_train.py): dir d<depth>, no metrics.jsonl
+  // run name: checkpoint dir and wandb name; metrics go to <base_dir>/metrics/<run>/metrics-<timestamp>.jsonl.
+  // "dummy" (as base_train.py): checkpoint dir d<depth>, no metrics
   std::string run = "dummy";
   // nsys: NVTX range "profile" around steps [profile_start, profile_start + profile_steps), -1 = off
   int64_t profile_start = -1, profile_steps = 3;

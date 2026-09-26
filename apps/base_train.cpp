@@ -52,7 +52,10 @@ static int run(int argc, char** argv) {
   o.profile_steps = flags.i64("profile-steps", o.profile_steps, "number of steps captured");
   o.save_every = flags.i64("save-every", o.save_every, "save a checkpoint every N steps (-1 = only at the end)");
   o.save = flags.boolean("save", o.save, "save checkpoints");
-  o.run = flags.str("run", o.run, "run name: checkpoint dir and wandb name ('dummy' = d<depth>, no metrics.jsonl)");
+  o.run = flags.str(
+        "run", o.run,
+        "run name: checkpoint dir, metrics/<run>/metrics-<timestamp>.jsonl, wandb name ('dummy' = d<depth>, no "
+        "metrics)");
   // distributed
   const auto nproc = static_cast<int>(flags.i64("nproc", 1, "number of GPUs (one process each)"));
   const auto rank = static_cast<int>(flags.i64("rank", -1, "internal: set by --nproc for each process"));
