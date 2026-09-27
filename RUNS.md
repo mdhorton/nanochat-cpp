@@ -2,7 +2,7 @@
 
 Runs based on the initial nanochat port to c++. No tuning yet.
 
-```
+```bash
 --depth=12 --device-batch-size=8 --num-iterations=100 --eval-tokens=4194304 --eval-every=-1 --save=false
 ```
 
@@ -16,7 +16,7 @@ Runs based on the initial nanochat port to c++. No tuning yet.
 
 Runs based on the sm120 customizations and tuning.
 
-```
+```bash
 --fp8 --nproc=2 --depth=12 --device-batch-size=8 --num-iterations=100 --eval-tokens=4194304 --eval-every=-1 --save=false
 ```
 
@@ -42,14 +42,14 @@ Runs based on the sm120 customizations and tuning.
 
 Run 4: sm120 can't use fa3. however, fa2 works pretty good. --attention=fa2 enabled by default going forward.
 
-Run 5: python nanochat keeps several GB of logits alive at once. this triggers OOM at --depth=24 on my setup. chunk and
-fuse CE loss to reduce vram usage. --loss-chunk-rows=4096 enabled by default going forward.
+Run 5: python nanochat keeps several GB of logits alive at once. this triggers OOM at --depth=24 on my setup. chunked
+and fused CE loss to reduce vram usage. --loss-chunk-rows=4096 enabled by default going forward.
 
-Runs 6-9: sm120 have lower memory bandwidth than datacenter GPUs. for example, my RTX Pro 4000 has ~6x slower dram
-bandwidth vs H100. fusing memory bound kernels is usually worth it. this is also the parts normally covered by pytorch
+Runs 6-9: sm120 have lower memory bandwidth than datacenter GPUs. for example, RTX Pro 4000 has ~6x slower dram
+bandwidth vs H100. fusing memory bound kernels is usually worth it. this is also the area normally covered by pytorch
 inductor.
 
-Runs 14-18: mxfp8 support. this reduced memory traffic around quantization. this worked because several kernels were
+Runs 14-18: mxfp8 support. this reduced memory traffic around quantization. this worked because several kernels are
 memory bound. --fp8-recipe=mxfp8 and --fp8=true enabled by default going forward.
 
 # medium runs @ d24
