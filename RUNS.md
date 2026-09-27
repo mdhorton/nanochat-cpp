@@ -32,7 +32,8 @@ Runs based on the sm120 customizations and tuning.
 |  11 |  192,034 | 4.809634 | 1.437552 |   7.9g | 4.54m | write embed grads straight into .grad |
 |  12 |  206,686 | 4.821239 | 1.441635 |   8.2g | 4.22m | lm_head fp8                           |
 |  13 |  209,310 | 4.822021 | 1.441975 |   8.3g | 4.17m | weight caching                        |
-|  14 |  215,449 | 4.802828 | 1.435484 |   8.4g | 4.04m | mxfp8                                 |
+|  14 |  215,449 | 4.802828 | 1.435484 |   8.4g | 4.04m | --fp8-recipe=mxfp8                    |
+|  15 |  221,792 | 4.805797 | 1.436430 |   8.4g | 3.93m | --fp8-recipe=mxfp8 (relu² backward)   |
 |  15 |          |          |          |        |       |                                       |
 
 Run 4: sm120 can't use fa3. however, fa2 works pretty good. --attention=fa2 enabled by default going forward.
@@ -54,11 +55,11 @@ These runs started at d12 run 5 because otherwise it would OOM.
 --fp8 --nproc=2 --depth=24 --device-batch-size=2 --num-iterations=30 --eval-tokens=4194304 --eval-every=-1 --save=false
 ```
 
-| toks/sec |     loss |      bpb | memory |   time | git tag |
-|---------:|---------:|---------:|-------:|-------:|---------|
-|          |          |          |        |        | run5    |
-|   43,449 | 6.149978 | 1.720151 |  20.3g | 12.05m | run14   |
-|          |          |          |        |        |         |
+| toks/sec |     loss |      bpb | memory |   time | git tag and flags (if any) |
+|---------:|---------:|---------:|-------:|-------:|----------------------------|
+|          |          |          |        |        | run5                       |
+|   43,449 | 6.149978 | 1.720151 |  20.3g | 12.05m | run14 --fp8-recipe=mxfp8   |
+|          |          |          |        |        |                            |
 
 # full run @d12
 

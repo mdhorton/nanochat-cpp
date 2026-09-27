@@ -118,6 +118,30 @@ kernels::MxOut mx_out(const torch::Tensor& data, const torch::Tensor& scale, int
   return {offset(data, row * ld + col), ld, offset(scale, ((row / 128) * tiles + col / 128) * 512), tiles};
 }
 
+// MX buffers for x (R, C): rows / cols allocate data / data_t with their scales
+Fp8Tensor empty_mx(int64_t R, int64_t C, const torch::TensorOptions& options, bool rows = true, bool cols = true) {
+  Fp8Tensor q;
+  if (rows) {
+    q.data = torch::empty({R, C}, options.dtype(torch::kFloat8_e4m3fn));
+    q.inv_scale = empty_mx_scale(R, C, options);
+  }
+  if (cols) {
+    q.data_t = torch::empty({C, R}, options.dtype(torch::kFloat8_e4m3fn));
+    q.inv_scale_t = empty_mx_scale(C, R, options);
+  }
+  return q;
+}
+
+// the kernel's views of q's buffers (none where not allocated)
+std::pair<kernels::MxOut, kernels::MxOut> mx_outs(const Fp8Tensor& q) {
+  kernels::MxOut out{}, out_t{};
+  if (q.data.defined())
+    out = mx_out(q.data, q.inv_scale, 0, 0);
+  if (q.data_t.defined())
+    out_t = mx_out(q.data_t, q.inv_scale_t, 0, 0);
+  return {out, out_t};
+}
+
 void quantize_mx_into(const torch::Tensor& x, bool relu_square, kernels::MxOut out, kernels::MxOut out_t) {
   TORCH_CHECK(
         fusable(x) && x.is_contiguous() && mx_fits(x.size(0), x.size(1)) &&
@@ -182,8 +206,8 @@ public:
 };
 
 // c_proj(relu(c_fc(x)).square()) as two Float8Matmuls, with relu^2 folded into the quantize kernels: forward
-// quantizes it straight from h, backward computes dh (and its amax, tensorwise) in one kernel. Saves h instead of
-// relu(h).
+// quantizes it straight from h, backward computes dh with its amax (tensorwise) or quantizes it without writing it
+// (MX). Saves h instead of relu(h).
 class Fp8ReluSquareMlp : public torch::autograd::Function<Fp8ReluSquareMlp> {
 public:
   static torch::Tensor forward(
@@ -207,14 +231,23 @@ public:
     const auto dtype = grad_output.scalar_type();
     const auto go = quantize_grad(grad_output, mx);
     const auto [ga, grad_proj] = mm_backward(go, s[5], s[6], s[7], s[8], dtype);
-    TORCH_CHECK(ga.scalar_type() == torch::kBFloat16 && ga.is_contiguous());
-    auto dh = torch::empty_like(h);
-    const auto scalars = mx ? torch::Tensor() : empty_scalars(h);
-    kernels::relu_square_bwd(
-          ga.data_ptr(), h.data_ptr(), dh.data_ptr(), mx ? nullptr : scalars.data_ptr<float>(), h.numel(),
-          at::cuda::getCurrentCUDAStream().stream());
-    C10_CUDA_KERNEL_LAUNCH_CHECK();
-    const auto dhq = mx ? quantize_mx(dh) : quantize(dh, torch::kFloat8_e5m2, scalars, true);
+    TORCH_CHECK(ga.scalar_type() == torch::kBFloat16 && ga.is_contiguous() && h.is_contiguous());
+    const auto stream = at::cuda::getCurrentCUDAStream().stream();
+    Fp8Tensor dhq;
+    if (mx) {
+      dhq = empty_mx(h.size(0), h.size(1), h.options());
+      const auto [out, out_t] = mx_outs(dhq);
+      kernels::quantize_mx_relu_square_bwd(ga.data_ptr(), h.data_ptr(), h.size(0), h.size(1), out, out_t, stream);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+    }
+    else {
+      auto dh = torch::empty_like(h);
+      const auto scalars = empty_scalars(h);
+      kernels::relu_square_bwd(
+            ga.data_ptr(), h.data_ptr(), dh.data_ptr(), scalars.data_ptr<float>(), h.numel(), stream);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+      dhq = quantize(dh, torch::kFloat8_e5m2, scalars, true);
+    }
     auto [grad_x, grad_fc] = mm_backward(dhq, s[0], s[1], s[2], s[3], dtype);
     return {grad_x, grad_fc, grad_proj, {}, {}, {}};
   }
@@ -394,20 +427,8 @@ Fp8Tensor quantize_fp8(const torch::Tensor& x, torch::ScalarType dtype, bool fus
 Fp8Tensor quantize_mx(const torch::Tensor& x_in, bool rows, bool cols, bool relu_square) {
   const auto x = x_in.contiguous();
   TORCH_CHECK(x.dim() == 2, "MX: expected a 2D tensor");
-  const int64_t R = x.size(0), C = x.size(1);
-  const auto e4m3 = x.options().dtype(torch::kFloat8_e4m3fn);
-  Fp8Tensor q;
-  kernels::MxOut out{}, out_t{};
-  if (rows) {
-    q.data = torch::empty({R, C}, e4m3);
-    q.inv_scale = empty_mx_scale(R, C, x.options());
-    out = mx_out(q.data, q.inv_scale, 0, 0);
-  }
-  if (cols) {
-    q.data_t = torch::empty({C, R}, e4m3);
-    q.inv_scale_t = empty_mx_scale(C, R, x.options());
-    out_t = mx_out(q.data_t, q.inv_scale_t, 0, 0);
-  }
+  auto q = empty_mx(x.size(0), x.size(1), x.options(), rows, cols);
+  const auto [out, out_t] = mx_outs(q);
   quantize_mx_into(x, relu_square, out, out_t);
   return q;
 }

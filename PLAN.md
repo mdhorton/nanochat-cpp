@@ -98,5 +98,7 @@ steps:
     the transpose (`model/fp8_kernel.cu`). No amax pass; merged q/k/v dgrad becomes one GEMM. Needs dims % 128, else
     tensorwise. GEMMs as fast as tensorwise (bench: 67.9 vs 68.3 ms per micro-step). quick-d12 2 GPUs: 217.3k tok/s
     (+3.1%), bpb 1.7783 vs 1.7792 tensorwise (30 steps).
-    todo: MX quantization in the producer kernels (relu^2 bwd, softcap CE grad, residual_norm, rotary_norm bwd): no
-    bf16 write + re-read. The transposed copy needs 32-row tiles.
+    done: MX relu^2 backward: dh quantized straight from g and h (`quantize_mx_relu_square_bwd`), never written in
+    bf16; bit-identical. quick-d12 2 GPUs: 223.8k tok/s (+3.0%).
+    todo: MX quantization in the other producer kernels (softcap CE grad, residual_norm, rotary_norm bwd): no bf16
+    write + re-read. The transposed copy needs 32-row tiles.

@@ -38,4 +38,8 @@ void quantize_mx(
       const void* x, bool x_bf16, int64_t rows, int64_t cols, MxOut out, MxOut out_t, bool relu_square,
       cudaStream_t stream);
 
+// quantize_mx of relu^2's input gradient dh = bf16(h > 0 ? g * 2h : 0), read from bf16 g, h without writing dh.
+void quantize_mx_relu_square_bwd(
+      const void* g, const void* h, int64_t rows, int64_t cols, MxOut out, MxOut out_t, cudaStream_t stream);
+
 } // namespace nanochat::kernels
