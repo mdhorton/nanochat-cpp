@@ -66,7 +66,7 @@ steps:
 11. FP8.
     done: `--fp8`, port of `fp8.py` (tensorwise `_scaled_mm`, e4m3/e5m2, eval in bf16). quantization is fused into CUDA
     kernels (`model/fp8_kernel.cu`), which also write the transposed copies backward needs; bit-identical to python
-    (`fp8`, `train_fp8` goldens). the chunked loss keeps lm_head in bf16. d12 1 GPU: 67.7k vs 60.0k tok/s. d24 2 GPUs:
+    (`fp8`, `train_fp8` goldens). the chunked loss ran lm_head in bf16 until step 12. d12 1 GPU: 67.7k vs 60.0k tok/s. d24 2 GPUs:
     30.0k (dbs 2) / 31.1k (dbs 4, 22.9GB) vs 22.7k tok/s. d6/d12 300-step val bpb same as bf16.
 12. fused elementwise kernels (`--fused`, default on; off = python's op-by-op path, used by the parity tests).
     done: rotary + QK norm (`model/rotary_norm_kernel.cu`), fp32 inside, closer to fp64 than the bf16 ops. d12 FP8 1 GPU:
@@ -87,5 +87,9 @@ steps:
     done: embedding grads straight into .grad (`model/embedding_kernel.cu`): wte and the value embeddings in one lookup,
     one sort, one kernel summing each touched row in fp32 into .grad (no per-call zero fill and full-size add; ZeRO-2
     reduces in the optimizer step, after the micro-steps). quick-d12 2 GPUs: 193.7k tok/s (+2%).
-    todo: amax in the producer kernels (residual_norm, rotary_norm bwd), lm_head
-    FP8 (python quantizes it), MXFP8 (block scales: producers quantize directly, no global amax).
+    done: FP8 lm_head in the chunked loss (python quantizes it too): x and the weight quantized once, the softcap kernel
+    reports its gradient's amax, each chunk's gradient gets its own e5m2 scale (python: one for all rows), grad_w
+    accumulates in fp32. vs the unchunked fp8 path: grad_x within 2e-5, grad_w 0.2% (python rounds it to bf16).
+    quick-d12 2 GPUs: 208.3k tok/s (+7.5%; --fused=false 145.2k), bpb 1.7791 vs 1.7784 with bf16 lm_head (30 steps).
+    todo: amax in the producer kernels (residual_norm, rotary_norm bwd), MXFP8 (block scales: producers quantize
+    directly, no global amax).

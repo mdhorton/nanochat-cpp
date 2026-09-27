@@ -247,6 +247,12 @@ Fp8Tensor quantize_fp8(const torch::Tensor& x, torch::ScalarType dtype, bool fus
   return to_fp8(x, dtype, fused);
 }
 
+Fp8Tensor quantize_fp8_amax_ready(const torch::Tensor& x, torch::ScalarType dtype, const torch::Tensor& scalars) {
+  TORCH_CHECK(fusable(x) && x.is_contiguous(), "expected an aligned, contiguous 2D tensor");
+  TORCH_CHECK(scalars.scalar_type() == torch::kFloat32 && scalars.numel() == 2 && scalars.is_contiguous());
+  return quantize(x, dtype, scalars, true);
+}
+
 torch::Tensor fp8_matmul(const torch::Tensor& input_2d, const torch::Tensor& weight) {
   return Float8Matmul::apply(input_2d, weight);
 }

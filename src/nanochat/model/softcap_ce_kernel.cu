@@ -27,11 +27,26 @@ __device__ float block_sum(float v, float* smem) {
   return smem[0];
 }
 
+// max over the block, then one atomic on the float bits (v >= 0, as fp8_kernel.cu's amax)
+__device__ void block_max_to(float v, float* smem, float* out) {
+  for (int o = 16; o > 0; o >>= 1)
+    v = fmaxf(v, __shfl_xor_sync(0xffffffff, v, o));
+  __syncthreads(); // smem reuse after block_sum
+  if (threadIdx.x % 32 == 0)
+    smem[threadIdx.x / 32] = v;
+  __syncthreads();
+  if (threadIdx.x == 0) {
+    for (int w = 1; w < kThreads / 32; ++w)
+      v = fmaxf(v, smem[w]);
+    atomicMax(reinterpret_cast<int*>(out), __float_as_int(v));
+  }
+}
+
 // One block per row. |capped| <= softcap, so exp(capped - softcap) needs no running max.
 template <bool kGrad>
 __device__ __forceinline__ void softcap_ce_body(
       __nv_bfloat16* logits, int64_t ld, const int64_t* targets, int vocab, int padded, float softcap, float* loss,
-      const float* grad_scale, int64_t grad_scale_stride, const int64_t* num_valid) {
+      const float* grad_scale, int64_t grad_scale_stride, const int64_t* num_valid, float* grad_amax) {
   __shared__ float smem[32];
   const int64_t row = blockIdx.x;
   auto* z = logits + row * ld;
@@ -63,6 +78,7 @@ __device__ __forceinline__ void softcap_ce_body(
     float scale = grad_scale != nullptr ? grad_scale[row * grad_scale_stride] : 1.f;
     if (num_valid != nullptr)
       scale /= static_cast<float>(*num_valid);
+    float m = 0.f;
     for (int j = threadIdx.x * kVec; j < padded; j += kThreads * kVec) {
       uint4 raw = *reinterpret_cast<const uint4*>(z + j);
       auto* v = reinterpret_cast<__nv_bfloat16*>(&raw);
@@ -75,9 +91,12 @@ __device__ __forceinline__ void softcap_ce_body(
           g = (p - (j + k == t ? 1.f : 0.f)) * (1.f - th * th) * scale;
         }
         v[k] = __float2bfloat16(g);
+        m = fmaxf(m, fabsf(__bfloat162float(v[k])));
       }
       *reinterpret_cast<uint4*>(z + j) = raw;
     }
+    if (grad_amax != nullptr)
+      block_max_to(m, smem, grad_amax);
   }
 }
 
@@ -88,11 +107,11 @@ __device__ __forceinline__ void softcap_ce_body(
 // Kernels: global, non-template nanochat_* names read the same in nsys and ncu (ncu drops the innermost namespace).
 // Not extern "C": ncu's --filter-mode per-launch-config then confuses kernels of equal launch shape.
 #define NANOCHAT_SOFTCAP_CE(name, grad)                                                                                \
-  __global__ void __launch_bounds__(nanochat::kThreads)                                                                \
-        name(__nv_bfloat16* logits, int64_t ld, const int64_t* targets, int vocab, int padded, float softcap,          \
-             float* loss, const float* grad_scale, int64_t grad_scale_stride, const int64_t* num_valid) {              \
+  __global__ void __launch_bounds__(nanochat::kThreads) name(                                                          \
+        __nv_bfloat16* logits, int64_t ld, const int64_t* targets, int vocab, int padded, float softcap, float* loss,  \
+        const float* grad_scale, int64_t grad_scale_stride, const int64_t* num_valid, float* grad_amax) {              \
     nanochat::softcap_ce_body<grad>(                                                                                   \
-          logits, ld, targets, vocab, padded, softcap, loss, grad_scale, grad_scale_stride, num_valid);                \
+          logits, ld, targets, vocab, padded, softcap, loss, grad_scale, grad_scale_stride, num_valid, grad_amax);     \
   }
 
 NANOCHAT_SOFTCAP_CE(nanochat_softcap_ce_loss, false)
@@ -102,14 +121,18 @@ namespace nanochat::kernels {
 
 void softcap_ce(
       void* logits, int64_t rows, int64_t ld, const int64_t* targets, int vocab, int padded, float softcap, float* loss,
-      const float* grad_scale, int64_t grad_scale_stride, const int64_t* num_valid, bool grad, cudaStream_t stream) {
+      const float* grad_scale, int64_t grad_scale_stride, const int64_t* num_valid, bool grad, float* grad_amax,
+      cudaStream_t stream) {
   auto* z = static_cast<__nv_bfloat16*>(logits);
-  if (grad)
+  if (grad) {
+    if (grad_amax != nullptr)
+      cudaMemsetAsync(grad_amax, 0, sizeof(float), stream);
     nanochat_softcap_ce_loss_grad<<<rows, kThreads, 0, stream>>>(
-          z, ld, targets, vocab, padded, softcap, loss, grad_scale, grad_scale_stride, num_valid);
+          z, ld, targets, vocab, padded, softcap, loss, grad_scale, grad_scale_stride, num_valid, grad_amax);
+  }
   else
     nanochat_softcap_ce_loss<<<rows, kThreads, 0, stream>>>(
-          z, ld, targets, vocab, padded, softcap, loss, grad_scale, grad_scale_stride, num_valid);
+          z, ld, targets, vocab, padded, softcap, loss, grad_scale, grad_scale_stride, num_valid, nullptr);
 }
 
 } // namespace nanochat::kernels

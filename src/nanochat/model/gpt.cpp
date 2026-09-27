@@ -407,8 +407,8 @@ torch::Tensor GPTImpl::forward(
                    : std::holds_alternative<torch::enumtype::kSum>(reduction) ? LossReduction::Sum
                                                                               : LossReduction::None;
     return softcap_cross_entropy(
-          x.view({-1, x.size(-1)}), lm_head->weight, targets.view(-1), config_.vocab_size, softcap, loss_chunk_rows_,
-          r);
+          x.view({-1, x.size(-1)}), lm_head->weight, targets.view(-1), config_.vocab_size, softcap, loss_chunk_rows_, r,
+          lm_head->fp8);
   }
   auto logits = lm_head(x).index({"...", Slice(None, config_.vocab_size)}).to(torch::kFloat32);
   logits = softcap * torch::tanh(logits / softcap);

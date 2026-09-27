@@ -1,6 +1,7 @@
 // Chunked softcap cross-entropy vs the unchunked ops (as gpt.py): loss and gradients.
 #include <gtest/gtest.h>
 
+#include "nanochat/model/fp8.h"
 #include "nanochat/model/gpt.h"
 #include "nanochat/model/softcap_ce.h"
 
@@ -12,6 +13,11 @@ namespace {
 double rel_diff(const torch::Tensor& a, const torch::Tensor& b) {
   const auto a64 = a.to(torch::kFloat64), b64 = b.to(torch::kFloat64);
   return ((a64 - b64).abs().max() / (b64.abs().max() + 1e-12)).item<double>();
+}
+
+double rel_norm_diff(const torch::Tensor& a, const torch::Tensor& b) {
+  const auto a64 = a.to(torch::kFloat64), b64 = b.to(torch::kFloat64);
+  return ((a64 - b64).norm() / (b64.norm() + 1e-30)).item<double>();
 }
 
 // What GPT::forward does without chunking.
@@ -73,4 +79,31 @@ TEST(SoftcapCE, ModelLossMatchesUnchunked) {
   const auto [plain, grad_plain] = run(0);
   EXPECT_NEAR(chunked, plain, 1e-5);
   EXPECT_LT(rel_diff(grad_chunked, grad_plain), 2e-2);
+}
+
+// FP8 lm_head: chunked vs the unchunked Float8Matmul path (gpt.py with fp8). One chunk shares python's gradient scale;
+// several chunks scale each chunk's gradient on its own.
+TEST(SoftcapCE, Fp8MatchesUnchunked) {
+  torch::manual_seed(0);
+  const int64_t N = 1024, C = 128, vocab = 1000, padded = 1024;
+  const auto opts = torch::TensorOptions().device(torch::kCUDA);
+  const auto x0 = torch::randn({N, C}, opts).to(torch::kBFloat16);
+  const auto w0 = torch::randn({padded, C}, opts) * 0.5;
+  auto targets = torch::randint(0, vocab, {N}, opts.dtype(torch::kInt64));
+  targets.slice(0, 0, 48).fill_(-1);
+  auto x2 = x0.clone().requires_grad_(), w2 = w0.clone().requires_grad_();
+  auto logits = fp8_matmul(x2, w2).slice(1, 0, vocab).to(torch::kFloat32);
+  logits = 15 * torch::tanh(logits / 15);
+  const auto want = F::cross_entropy(logits, targets, F::CrossEntropyFuncOptions().ignore_index(-1));
+  want.backward();
+  for (const int64_t chunk : {N, N / 4}) {
+    auto x1 = x0.clone().requires_grad_(), w1 = w0.clone().requires_grad_();
+    const auto got = softcap_cross_entropy(x1, w1, targets, vocab, 15, chunk, LossReduction::Mean, true);
+    got.backward();
+    EXPECT_LT(rel_diff(got, want), 1e-5) << chunk;
+    EXPECT_LT(rel_norm_diff(x1.grad(), x2.grad()), 1e-3) << chunk;
+    // Float8Matmul rounds grad_w to bf16; the chunks accumulate it in fp32
+    EXPECT_LT(rel_norm_diff(w1.grad(), w2.grad()), 5e-3) << chunk;
+    EXPECT_EQ(w1.grad().slice(0, vocab).abs().max().item<float>(), 0.0f) << chunk;
+  }
 }

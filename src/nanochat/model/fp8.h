@@ -31,6 +31,10 @@ struct Fp8Tensor {
 
 Fp8Tensor quantize_fp8(const torch::Tensor& x, torch::ScalarType dtype, bool fused = true);
 
+// quantize_fp8 (fused) with max|x| already in scalars[0], e.g. from the kernel that wrote x; scalars: 2 device floats,
+// scalars[1] gets the inverse scale. x: aligned, contiguous 2D bf16 or fp32.
+Fp8Tensor quantize_fp8_amax_ready(const torch::Tensor& x, torch::ScalarType dtype, const torch::Tensor& scalars);
+
 // base_train.py's fp8_module_filter: dims divisible by 16 and both >= 128.
 inline bool fp8_eligible(int64_t in_features, int64_t out_features) {
   return in_features % 16 == 0 && out_features % 16 == 0 && std::min(in_features, out_features) >= 128;
