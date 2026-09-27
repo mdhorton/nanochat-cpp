@@ -29,34 +29,14 @@ One doesn't need to port a python project to c++ just to access these features. 
 I was stunned to find that Opus 5.5 (high) took less than **40 minutes** to translate the bulk of the pre-training code
 from python to c++.
 
-This is probably because libtorch, the c++ library, is what pytorch uses. The main exceptions are torch.compile and
-InductorFusion.
+This is probably because libtorch, the c++ library, is what pytorch uses. The main exception is `torch.compile`, which
+includes inductor fusion.
 
-If the agent
-
-This starts to blur the benefit of python vs c++. Thi
-
-I love python and have used it for 10+ years. This isn't a knock on python. This project is just an experiment.
-
-# goals
+# goal
 
 nanochat (python) trains ~5.84B tokens in 99 minutes using 8x H100. An RTX Pro 4000 is roughly 6x slower than an H100.
-So 8x H100 is roughly 24x faster than 2x RTX Pro 4000.
+8x H100 is roughly 24x faster than 2x RTX Pro 4000. If we plug that ratio in we get the following target:
 
 ```~5.84B tokens in 2376 minutes (39.6 hours)```
 
-99 minutes
-
-After thinking about it, I decided on the following goals (or questions really):
-
-1. how fast can claude port nanochat to c++?
-2. how fast can we train the model using sm120?
-
-# why c++ then?
-
-To be honest, curiosity. This is first and foremost a learning project.
-
-c++ has nothing to do with making nanochat work with sm120 GPUs. By itself, c++ won't speed things up.
-
-Does the language even matter? With powerful LLMs, these porting exercises become almost trivial. Translation from one
-language to another is one of LLMs strongest features.
+The same CORE threshold will be used: 0.256525

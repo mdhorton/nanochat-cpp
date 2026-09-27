@@ -74,4 +74,7 @@ steps:
     done: resid/x0 lambda blend (`model/lambda_blend_kernel.cu`), lambda grads summed in fp32, deterministic. d12 FP8
     1 GPU: 77.3k tok/s (+16% total). forward and dx are bit-identical to python's ops, which round the fp32 lambdas to
     bf16 (type promotion) and each product: full-precision math trained worse (d12 300 steps: val bpb 1.052 vs 1.028).
-    todo: residual add + rms_norm, value-embedding gate.
+    done: relu² (`model/relu_square_kernel.cu`), bit-identical. with FP8 it's folded into the quantize kernels
+    (c_proj's input quantized straight from h; dh's amax in the backward kernel). quick-d12 2 GPUs: 181.9k vs 159.8k
+    tok/s (unfused 139.3k).
+    todo: residual add + rms_norm, value-embedding gate, shared q/k/v input quantization.

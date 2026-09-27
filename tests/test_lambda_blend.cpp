@@ -77,8 +77,10 @@ TEST(LambdaBlend, ModelMatchesOpByOp) {
   model->set_attention(Attention::SDPA); // deterministic
   auto step = [&](bool fused) {
     model->set_fused(fused);
-    for (const auto& m : *model->transformer->h) // blend only
+    for (const auto& m : *model->transformer->h) { // blend only
       m->as<BlockImpl>()->attn->fused = false;
+      m->as<BlockImpl>()->mlp->fused = false;
+    }
     model->zero_grad(true);
     auto loss = model->forward(x, y);
     loss.backward();

@@ -11,6 +11,10 @@ namespace nanochat {
 // input_2d (N, in) bf16, weight (out, in) any float dtype -> (N, out) in input_2d's dtype.
 torch::Tensor fp8_matmul(const torch::Tensor& input_2d, const torch::Tensor& weight);
 
+// The MLP's c_proj(relu(c_fc(x)).square()) with both matmuls as fp8_matmul, bit for bit. x_2d (N, in) bf16 (N % 16
+// == 0), w_fc (hidden, in), w_proj (out, hidden) -> (N, out).
+torch::Tensor fp8_relu_square_mlp(const torch::Tensor& x_2d, const torch::Tensor& w_fc, const torch::Tensor& w_proj);
+
 // Tensorwise quantization of a 2D tensor: data, its transpose (contiguous), inverse scale. The fused kernels
 // (fused = true) and the torch ops of fp8.py's _to_fp8 give identical bits.
 struct Fp8Tensor {

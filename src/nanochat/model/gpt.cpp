@@ -2,6 +2,7 @@
 
 #include "nanochat/model/fp8.h"
 #include "nanochat/model/lambda_blend.h"
+#include "nanochat/model/relu_square.h"
 #include "nanochat/model/rotary_norm.h"
 #include "nanochat/model/softcap_ce.h"
 
@@ -184,7 +185,14 @@ MLPImpl::MLPImpl(const GPTConfig& config, const torch::TensorOptions& options) {
 }
 
 torch::Tensor MLPImpl::forward(const torch::Tensor& x) {
-  return c_proj(torch::relu(c_fc(x)).square());
+  if (!fused)
+    return c_proj(torch::relu(c_fc(x)).square());
+  if (!c_fc->fp8 || !c_proj->fp8)
+    return c_proj(relu_square(c_fc(x)));
+  const auto input = x.to(kComputeDtype);
+  auto out_shape = input.sizes().vec();
+  out_shape.back() = c_proj->weight.size(0);
+  return fp8_relu_square_mlp(input.reshape({-1, input.size(-1)}), c_fc->weight, c_proj->weight).reshape(out_shape);
 }
 
 BlockImpl::BlockImpl(const GPTConfig& config, int64_t layer_idx, const torch::TensorOptions& options) {
@@ -375,8 +383,10 @@ void GPTImpl::set_attention(Attention attention) {
 
 void GPTImpl::set_fused(bool fused) {
   fused_ = fused;
-  for (const auto& m : *transformer->h)
+  for (const auto& m : *transformer->h) {
     m->as<BlockImpl>()->attn->fused = fused;
+    m->as<BlockImpl>()->mlp->fused = fused;
+  }
 }
 
 safetensors::TensorMap GPTImpl::state_dict() const {

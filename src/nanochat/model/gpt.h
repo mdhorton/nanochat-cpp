@@ -92,6 +92,7 @@ class MLPImpl : public torch::nn::Module {
 public:
   MLPImpl(const GPTConfig& config, const torch::TensorOptions& options);
   torch::Tensor forward(const torch::Tensor& x);
+  bool fused = false; // relu^2 in one kernel; with FP8, also folded into the quantization (relu_square.h, fp8.h)
   Linear c_fc{nullptr}, c_proj{nullptr};
 };
 

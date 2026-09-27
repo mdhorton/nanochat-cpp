@@ -20,12 +20,15 @@ Runs based on the sm120 customizations and tuning.
 --fp8 --nproc=2 --depth=12 --device-batch-size=8 --num-iterations=100 --eval-tokens=4194304 --eval-every=-1 --save=false
 ```
 
-|   | toks/sec |     loss |      bpb | memory |  time | notes                  |
-|--:|---------:|---------:|---------:|-------:|------:|------------------------|
-| 4 |  107,091 | 4.820269 | 1.441330 |  16.0g | 8.15m | --attention=fa2        |
-| 5 |  138,679 | 4.804933 | 1.436173 |   8.2g | 6.29m | --loss-chunk-rows=4096 |
-| 6 |  155,024 | 4.808020 | 1.437057 |   8.2g | 5.63m | fused rotary+QK-norm   |
-| 7 |  158,808 | 4.807032 | 1.436761 |   8.2g | 5.49m | fused resid/x0 λ-blend |
+|    | toks/sec |     loss |      bpb | memory |  time | notes                  |
+|---:|---------:|---------:|---------:|-------:|------:|------------------------|
+|  4 |  107,091 | 4.820269 | 1.441330 |  16.0g | 8.15m | --attention=fa2        |
+|  5 |  138,679 | 4.804933 | 1.436173 |   8.2g | 6.29m | --loss-chunk-rows=4096 |
+|  6 |  155,024 | 4.808020 | 1.437057 |   8.2g | 5.63m | fused rotary+QK-norm   |
+|  7 |  158,808 | 4.807032 | 1.436761 |   8.2g | 5.49m | fused resid/x0 λ-blend |
+|  8 |  181,216 | 4.803973 | 1.435802 |   8.2g | 4.82m | fused relu² with amax  |
+|  9 |          |          |          |        |       |                        |
+| 10 |          |          |          |        |       |                        |
 
 Run 4: sm120 can't use fa3. however, fa2 works pretty good. --attention=fa2 enabled by default going forward.
 
@@ -33,7 +36,8 @@ Run 5: python nanochat keeps several GB of logits alive at once. this triggers O
 fuse CE loss to reduce vram. --loss-chunk-rows=4096 enabled by default going forward.
 
 Runs 6-8: sm120 have lower memory bandwidth than datacenter GPUs. for example, my RTX Pro 4000 has ~6x slower dram
-bandwidth vs H100. fusing memory bound kernels is usually worth it.
+bandwidth vs H100. fusing memory bound kernels is usually worth it. this is also the parts normally covered by pytorch
+inductor.
 
 # quick runs @ d24
 

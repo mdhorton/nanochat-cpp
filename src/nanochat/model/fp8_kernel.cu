@@ -32,12 +32,27 @@ __device__ float to_float(float v) {
   return v;
 }
 
+// Applied to each value before quantizing.
+struct Identity {
+  __device__ float operator()(float v) const {
+    return v;
+  }
+};
+
+// bf16(relu(v)^2), as relu(h).square() (relu_square_kernel.cu): quantizes the MLP activation without writing it
+struct ReluSquare {
+  __device__ float operator()(float v) const {
+    const float r = v <= 0.f ? 0.f : v;
+    return __bfloat162float(__float2bfloat16(r * r));
+  }
+};
+
 // |x| >= 0, so float order is int order; NaN (0x7fc...) wins, as torch's max propagates it
 __device__ void atomic_max_abs(float* addr, float v) {
   atomicMax(reinterpret_cast<int*>(addr), __float_as_int(v));
 }
 
-template <typename T>
+template <typename T, typename P>
 __device__ __forceinline__ void amax_body(const T* x, int64_t n, float* amax) {
   constexpr int V = Vec<T>::kSize;
   float m = 0.f;
@@ -48,10 +63,10 @@ __device__ __forceinline__ void amax_body(const T* x, int64_t n, float* amax) {
     const auto* v = reinterpret_cast<const T*>(&raw);
 #pragma unroll
     for (int k = 0; k < V; ++k)
-      m = fmaxf(m, fabsf(to_float(v[k])));
+      m = fmaxf(m, fabsf(P{}(to_float(v[k]))));
   }
   for (int64_t i = n_vec * V + blockIdx.x * kThreads + threadIdx.x; i < n; i += stride)
-    m = fmaxf(m, fabsf(to_float(x[i])));
+    m = fmaxf(m, fabsf(P{}(to_float(x[i]))));
   for (int o = 16; o > 0; o >>= 1)
     m = fmaxf(m, __shfl_xor_sync(0xffffffff, m, o));
   __shared__ float smem[kThreads / 32];
@@ -88,7 +103,7 @@ __device__ void load8(const T* p, float (&v)[8]) {
   }
 }
 
-template <typename T, __nv_fp8_interpretation_t kFormat>
+template <typename T, __nv_fp8_interpretation_t kFormat, typename P>
 __device__ __forceinline__ void cast_body(
       const T* x, int64_t rows, int64_t cols, float fp8_max, const float* amax, __nv_fp8_storage_t* out,
       __nv_fp8_storage_t* out_t, float* inv_scale) {
@@ -110,7 +125,7 @@ __device__ __forceinline__ void cast_body(
     __align__(8) __nv_fp8_storage_t q[8];
 #pragma unroll
     for (int k = 0; k < 8; ++k)
-      q[k] = __nv_cvt_float_to_fp8(fminf(fmaxf(v[k] * scale, -fp8_max), fp8_max), __NV_SATFINITE, kFormat);
+      q[k] = __nv_cvt_float_to_fp8(fminf(fmaxf(P{}(v[k]) * scale, -fp8_max), fp8_max), __NV_SATFINITE, kFormat);
     if (out != nullptr)
       *reinterpret_cast<uint2*>(out + gr * cols + gc) = *reinterpret_cast<const uint2*>(q);
     *reinterpret_cast<uint2*>(&tile[r][c]) = *reinterpret_cast<const uint2*>(q);
@@ -141,75 +156,86 @@ __device__ __forceinline__ void cast_body(
 
 // Kernels: global, non-template nanochat_* names read the same in nsys and ncu (ncu drops the innermost namespace).
 // Not extern "C": ncu's --filter-mode per-launch-config then confuses kernels of equal launch shape.
-#define NANOCHAT_FP8_AMAX(name, T)                                                                                     \
+#define NANOCHAT_FP8_AMAX(name, T, P)                                                                                  \
   __global__ void __launch_bounds__(nanochat::kThreads) name(const T* x, int64_t n, float* amax) {                     \
-    nanochat::amax_body(x, n, amax);                                                                                   \
+    nanochat::amax_body<T, P>(x, n, amax);                                                                             \
   }
 
-#define NANOCHAT_FP8_CAST(name, T, format)                                                                             \
+#define NANOCHAT_FP8_CAST(name, T, format, P)                                                                          \
   __global__ void __launch_bounds__(nanochat::kTileThreads)                                                            \
         name(const T* x, int64_t rows, int64_t cols, float fp8_max, const float* amax, __nv_fp8_storage_t* out,        \
              __nv_fp8_storage_t* out_t, float* inv_scale) {                                                            \
-    nanochat::cast_body<T, format>(x, rows, cols, fp8_max, amax, out, out_t, inv_scale);                               \
+    nanochat::cast_body<T, format, P>(x, rows, cols, fp8_max, amax, out, out_t, inv_scale);                            \
   }
 
-NANOCHAT_FP8_AMAX(nanochat_fp8_amax_bf16, __nv_bfloat16)
-NANOCHAT_FP8_AMAX(nanochat_fp8_amax_f32, float)
-NANOCHAT_FP8_CAST(nanochat_fp8_cast_e4m3_bf16, __nv_bfloat16, __NV_E4M3)
-NANOCHAT_FP8_CAST(nanochat_fp8_cast_e5m2_bf16, __nv_bfloat16, __NV_E5M2)
-NANOCHAT_FP8_CAST(nanochat_fp8_cast_e4m3_f32, float, __NV_E4M3)
-NANOCHAT_FP8_CAST(nanochat_fp8_cast_e5m2_f32, float, __NV_E5M2)
+NANOCHAT_FP8_AMAX(nanochat_fp8_amax_bf16, __nv_bfloat16, nanochat::Identity)
+NANOCHAT_FP8_AMAX(nanochat_fp8_amax_f32, float, nanochat::Identity)
+NANOCHAT_FP8_AMAX(nanochat_fp8_amax_relu_square_bf16, __nv_bfloat16, nanochat::ReluSquare)
+NANOCHAT_FP8_CAST(nanochat_fp8_cast_e4m3_bf16, __nv_bfloat16, __NV_E4M3, nanochat::Identity)
+NANOCHAT_FP8_CAST(nanochat_fp8_cast_e5m2_bf16, __nv_bfloat16, __NV_E5M2, nanochat::Identity)
+NANOCHAT_FP8_CAST(nanochat_fp8_cast_e4m3_f32, float, __NV_E4M3, nanochat::Identity)
+NANOCHAT_FP8_CAST(nanochat_fp8_cast_e5m2_f32, float, __NV_E5M2, nanochat::Identity)
+NANOCHAT_FP8_CAST(nanochat_fp8_cast_e4m3_relu_square_bf16, __nv_bfloat16, __NV_E4M3, nanochat::ReluSquare)
 
 namespace nanochat::kernels {
 
 namespace {
 
 template <typename T>
-struct Fp8Kernels;
-
-template <>
-struct Fp8Kernels<__nv_bfloat16> {
-  static constexpr auto amax = nanochat_fp8_amax_bf16;
-  static constexpr auto e4m3 = nanochat_fp8_cast_e4m3_bf16, e5m2 = nanochat_fp8_cast_e5m2_bf16;
-};
-
-template <>
-struct Fp8Kernels<float> {
-  static constexpr auto amax = nanochat_fp8_amax_f32;
-  static constexpr auto e4m3 = nanochat_fp8_cast_e4m3_f32, e5m2 = nanochat_fp8_cast_e5m2_f32;
-};
+using AmaxKernel = void (*)(const T*, int64_t, float*);
 
 template <typename T>
+using CastKernel = void (*)(
+      const T*, int64_t, int64_t, float, const float*, __nv_fp8_storage_t*, __nv_fp8_storage_t*, float*);
+
+// amax_kernel null: *amax is already set
+template <typename T>
 void launch(
-      const T* x, int64_t rows, int64_t cols, Fp8Format format, void* out, void* out_t, float* amax, float* inv_scale,
-      cudaStream_t stream) {
-  int sms = 0, device = 0;
-  cudaGetDevice(&device);
-  cudaDeviceGetAttribute(&sms, cudaDevAttrMultiProcessorCount, device);
-  const int64_t n = rows * cols;
-  const int64_t needed = (n / Vec<T>::kSize + kThreads - 1) / kThreads;
-  const int blocks = static_cast<int>(std::max<int64_t>(1, std::min<int64_t>(needed, 8LL * sms)));
-  cudaMemsetAsync(amax, 0, sizeof(float), stream);
-  Fp8Kernels<T>::amax<<<blocks, kThreads, 0, stream>>>(x, n, amax);
+      const T* x, int64_t rows, int64_t cols, float fp8_max, AmaxKernel<T> amax_kernel, CastKernel<T> cast_kernel,
+      void* out, void* out_t, float* amax, float* inv_scale, cudaStream_t stream) {
+  if (amax_kernel != nullptr) {
+    int sms = 0, device = 0;
+    cudaGetDevice(&device);
+    cudaDeviceGetAttribute(&sms, cudaDevAttrMultiProcessorCount, device);
+    const int64_t n = rows * cols;
+    const int64_t needed = (n / Vec<T>::kSize + kThreads - 1) / kThreads;
+    const int blocks = static_cast<int>(std::max<int64_t>(1, std::min<int64_t>(needed, 8LL * sms)));
+    cudaMemsetAsync(amax, 0, sizeof(float), stream);
+    amax_kernel<<<blocks, kThreads, 0, stream>>>(x, n, amax);
+  }
   const dim3 grid(static_cast<unsigned>((cols + kTile - 1) / kTile), static_cast<unsigned>((rows + kTile - 1) / kTile));
-  const dim3 block(kTileThreads);
-  auto* q = static_cast<__nv_fp8_storage_t*>(out);
-  auto* q_t = static_cast<__nv_fp8_storage_t*>(out_t);
-  if (format == Fp8Format::E4M3)
-    Fp8Kernels<T>::e4m3<<<grid, block, 0, stream>>>(x, rows, cols, 448.f, amax, q, q_t, inv_scale);
-  else
-    Fp8Kernels<T>::e5m2<<<grid, block, 0, stream>>>(x, rows, cols, 57344.f, amax, q, q_t, inv_scale);
+  cast_kernel<<<grid, kTileThreads, 0, stream>>>(
+        x, rows, cols, fp8_max, amax, static_cast<__nv_fp8_storage_t*>(out), static_cast<__nv_fp8_storage_t*>(out_t),
+        inv_scale);
 }
 
 } // namespace
 
 void quantize_fp8(
       const void* x, bool x_bf16, int64_t rows, int64_t cols, Fp8Format format, void* out, void* out_t, float* amax,
-      float* inv_scale, cudaStream_t stream) {
-  if (x_bf16)
-    launch(static_cast<const __nv_bfloat16*>(x), rows, cols, format, out, out_t, amax, inv_scale, stream);
-  else
-    launch(static_cast<const float*>(x), rows, cols, format, out, out_t, amax, inv_scale, stream);
+      float* inv_scale, cudaStream_t stream, bool amax_ready) {
+  const bool e4m3 = format == Fp8Format::E4M3;
+  const float fp8_max = e4m3 ? 448.f : 57344.f;
+  if (x_bf16) {
+    const auto* xb = static_cast<const __nv_bfloat16*>(x);
+    launch(
+          xb, rows, cols, fp8_max, amax_ready ? nullptr : nanochat_fp8_amax_bf16,
+          e4m3 ? nanochat_fp8_cast_e4m3_bf16 : nanochat_fp8_cast_e5m2_bf16, out, out_t, amax, inv_scale, stream);
+  }
+  else {
+    const auto* xf = static_cast<const float*>(x);
+    launch(
+          xf, rows, cols, fp8_max, amax_ready ? nullptr : nanochat_fp8_amax_f32,
+          e4m3 ? nanochat_fp8_cast_e4m3_f32 : nanochat_fp8_cast_e5m2_f32, out, out_t, amax, inv_scale, stream);
+  }
+}
+
+void quantize_fp8_relu_square(
+      const void* h, int64_t rows, int64_t cols, void* out, void* out_t, float* amax, float* inv_scale,
+      cudaStream_t stream) {
+  launch(
+        static_cast<const __nv_bfloat16*>(h), rows, cols, 448.f, nanochat_fp8_amax_relu_square_bf16,
+        nanochat_fp8_cast_e4m3_relu_square_bf16, out, out_t, amax, inv_scale, stream);
 }
 
 } // namespace nanochat::kernels

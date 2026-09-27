@@ -11,10 +11,16 @@ namespace nanochat::kernels {
 
 enum class Fp8Format { E4M3, E5M2 };
 
-// x: (rows, cols) contiguous bf16 (x_bf16 = true) or fp32. amax: device float scratch. Writes *inv_scale (device
-// float), and out (rows, cols) and/or out_t (cols, rows, the transpose) when non-null.
+// x: (rows, cols) contiguous bf16 (x_bf16 = true) or fp32. amax: device float scratch, or max|x| already when
+// amax_ready. Writes *inv_scale (device float), and out (rows, cols) and/or out_t (cols, rows, the transpose) when
+// non-null.
 void quantize_fp8(
       const void* x, bool x_bf16, int64_t rows, int64_t cols, Fp8Format format, void* out, void* out_t, float* amax,
-      float* inv_scale, cudaStream_t stream);
+      float* inv_scale, cudaStream_t stream, bool amax_ready = false);
+
+// quantize_fp8 of relu(h).square() as E4M3, read from bf16 h without writing the square.
+void quantize_fp8_relu_square(
+      const void* h, int64_t rows, int64_t cols, void* out, void* out_t, float* amax, float* inv_scale,
+      cudaStream_t stream);
 
 } // namespace nanochat::kernels
