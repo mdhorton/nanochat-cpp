@@ -1,17 +1,47 @@
-# c++ port of nanochat
+# introduction
 
 This continues the saga of exploring sm120 GPUs. Specifically 2x RTX Pro 4000, which is my local setup. With the added
-twist that we're going with c++.
+exciting twist of c++.
 
-My first pass created a fork of nanochat and made python only changes, no c++. This worked but it required a good many
-changes. For example, sm120 doesn't support FA3. FA2 works pretty good, but it's also not designed for sm120. It often
-selected ampere kernels.
+# pytorch inductor generated triton kernels vs LLM agent CUDA kernels
+
+[KernelBench](https://github.com/ScalingIntelligence/KernelBench) asked: Can LLMs Write GPU Kernels?
+
+The answer seems to be yes. Not only can it write them, it can write performant kernels in a fraction of the time it
+takes a human.
+
+The problem becomes more of a [verification issue](https://gimletlabs.ai/blog/formally-verifying-ai-generated-kernels).
+For this project, I'm going to side-step this and treat the final result as verification. (This is after all an
+experimental learning project.) Does the trained model's CORE score pass the threshold?
+
+# porting nanochat to c++
+
+My GPUs, 2x RTX Pro 4000, are sm120. Triton does not optimize these as blackwell. Rightly so because they lack important
+datacenter blackwell features.
+
+However, sm120 does have a couple of relevant features that can improve performance and model quality.
+
+- mxfp8
+- nvfp4 (inference)
+
+One doesn't need to port a python project to c++ just to access these features. But I was curious all the same.
+
+I was stunned to find that Opus 5.5 (high) took less than **40 minutes** to translate the bulk of the pre-training code
+from python to c++.
+
+This is probably because libtorch, the c++ library, is what pytorch uses. The main exceptions are torch.compile and
+InductorFusion.
+
+If the agent
+
+This starts to blur the benefit of python vs c++. Thi
+
+I love python and have used it for 10+ years. This isn't a knock on python. This project is just an experiment.
 
 # goals
 
 5.84B total tokens
 99 minutes
-
 
 After thinking about it, I decided on the following goals (or questions really):
 

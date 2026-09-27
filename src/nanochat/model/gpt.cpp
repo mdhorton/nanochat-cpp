@@ -1,6 +1,7 @@
 #include "nanochat/model/gpt.h"
 
 #include "nanochat/model/fp8.h"
+#include "nanochat/model/lambda_blend.h"
 #include "nanochat/model/rotary_norm.h"
 #include "nanochat/model/softcap_ce.h"
 
@@ -311,8 +312,12 @@ torch::Tensor GPTImpl::forward(
   const int64_t backout_layer = config_.n_layer / 2;
   torch::Tensor x_backout;
   for (int64_t i = 0; i < config_.n_layer; ++i) {
-    auto scaled = resid_lambdas[i] * x;
-    x = scaled + x0_lambdas[i] * x0;
+    if (fused_)
+      x = lambda_blend(x, x0, resid_lambdas, x0_lambdas, i);
+    else {
+      auto scaled = resid_lambdas[i] * x;
+      x = scaled + x0_lambdas[i] * x0;
+    }
     torch::Tensor ve;
     if (const auto key = std::to_string(i); value_embeds->contains(key))
       ve = value_embeds[key]->as<EmbeddingImpl>()->forward(idx).to(x.scalar_type());
@@ -369,6 +374,7 @@ void GPTImpl::set_attention(Attention attention) {
 }
 
 void GPTImpl::set_fused(bool fused) {
+  fused_ = fused;
   for (const auto& m : *transformer->h)
     m->as<BlockImpl>()->attn->fused = fused;
 }

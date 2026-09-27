@@ -71,4 +71,7 @@ steps:
 12. fused elementwise kernels (`--fused`, default on; off = python's op-by-op path, used by the parity tests).
     done: rotary + QK norm (`model/rotary_norm_kernel.cu`), fp32 inside, closer to fp64 than the bf16 ops. d12 FP8 1 GPU:
     74.5k vs 66.6k tok/s.
-    todo: resid/x0 lambda blend, residual add + rms_norm, value-embedding gate.
+    done: resid/x0 lambda blend (`model/lambda_blend_kernel.cu`), lambda grads summed in fp32, deterministic. d12 FP8
+    1 GPU: 77.3k tok/s (+16% total). forward and dx are bit-identical to python's ops, which round the fp32 lambdas to
+    bf16 (type promotion) and each product: full-precision math trained worse (d12 300 steps: val bpb 1.052 vs 1.028).
+    todo: residual add + rms_norm, value-embedding gate.

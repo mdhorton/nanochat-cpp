@@ -53,6 +53,8 @@ add_library(nanochat_train
         src/nanochat/model/fp8.cpp
         src/nanochat/model/fp8_kernel.cu
         src/nanochat/model/gpt.cpp
+        src/nanochat/model/lambda_blend.cpp
+        src/nanochat/model/lambda_blend_kernel.cu
         src/nanochat/model/rotary_norm.cpp
         src/nanochat/model/rotary_norm_kernel.cu
         src/nanochat/model/softcap_ce.cpp
@@ -101,6 +103,7 @@ add_executable(train_tests
         tests/test_dist.cpp
         tests/test_fp8.cpp
         tests/test_gpt.cpp
+        tests/test_lambda_blend.cpp
         tests/test_loss_eval.cpp
         tests/test_optim.cpp
         tests/test_rotary_norm.cpp

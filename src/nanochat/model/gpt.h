@@ -154,7 +154,7 @@ public:
 
   void set_attention(Attention attention);
 
-  // Fused CUDA kernels for elementwise chains (e.g. rotary + QK norm). false = Python's op-by-op path.
+  // Fused CUDA kernels for elementwise chains (rotary + QK norm, resid/x0 blend). false = Python's op-by-op path.
   void set_fused(bool fused);
 
   // > 0: compute the training loss a chunk of rows at a time (softcap_ce.h), never materializing all logits.
@@ -180,6 +180,7 @@ private:
   GPTConfig config_;
   std::vector<int64_t> windows_;
   int64_t loss_chunk_rows_ = 0;
+  bool fused_ = false;
   torch::Tensor cos_, sin_; // (1, 10 * sequence_len, 1, head_dim / 2), not saved
 };
 

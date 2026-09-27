@@ -1,35 +1,39 @@
-# quick runs @ d12 (initial port)
+# medium runs @ d12 (initial port)
 
-Runs based on the initial port from python to c++. No tuning yet.
-
-```
---depth=12 --device-batch-size=8 --num-iterations=30 --eval-tokens=4194304 --eval-every=-1 --save=false
-```
-
-|   | toks/sec |     loss |      bpb | memory |  time | extra args or overrides       |
-|--:|---------:|---------:|---------:|-------:|------:|-------------------------------|
-| 1 |   36,013 | 6.415645 | 1.780948 |  17.0g | 7.27m | --nproc=1                     |
-| 2 |   71,778 | 6.423695 | 1.778126 |  16.4g | 3.65m | --nproc=2 (ZeRO-2, MuonAdamW) |
-| 3 |   79,374 | 6.428883 | 1.779265 |  16.0g | 3.30m | --nproc=2 --fp8               |
-
-# quick runs @ d12
-
-Runs based on the sm120 customizations.
+Runs based on the initial nanochat port to c++. No tuning yet.
 
 ```
---fp8 --nproc=2 --depth=12 --device-batch-size=8 --num-iterations=30 --eval-tokens=4194304 --eval-every=-1 --save=false
+--depth=12 --device-batch-size=8 --num-iterations=100 --eval-tokens=4194304 --eval-every=-1 --save=false
 ```
 
-|   | toks/sec |     loss |      bpb | memory |  time | extra args or overrides |
-|--:|---------:|---------:|---------:|-------:|------:|-------------------------|
-| 4 |  106,614 | 6.428749 | 1.779237 |  16.0g | 2.46m | --attention=fa2         |
-| 5 |  137,748 | 6.423904 | 1.778217 |   8.2g | 1.90m | --loss-chunk-rows=4096  |
-| 6 |  153,782 | 6.424578 | 1.778360 |   8.2g | 1.70m | --fused=true            |
+|   | toks/sec |     loss |      bpb | memory |   time | notes                         |
+|--:|---------:|---------:|---------:|-------:|-------:|-------------------------------|
+| 1 |   36,192 | 4.854269 | 1.439428 |  17.0g | 24.11m | --nproc=1                     |
+| 2 |   72,305 | 4.800026 | 1.434599 |  16.4g | 12.08m | --nproc=2 (ZeRO-2, MuonAdamW) |
+| 3 |   80,129 | 4.820226 | 1.441378 |  16.0g | 10.91m | --nproc=2 --fp8               |
+
+# medium runs @ d12 (tuned)
+
+Runs based on the sm120 customizations and tuning.
+
+```
+--fp8 --nproc=2 --depth=12 --device-batch-size=8 --num-iterations=100 --eval-tokens=4194304 --eval-every=-1 --save=false
+```
+
+|   | toks/sec |     loss |      bpb | memory |  time | notes                  |
+|--:|---------:|---------:|---------:|-------:|------:|------------------------|
+| 4 |  107,091 | 4.820269 | 1.441330 |  16.0g | 8.15m | --attention=fa2        |
+| 5 |  138,679 | 4.804933 | 1.436173 |   8.2g | 6.29m | --loss-chunk-rows=4096 |
+| 6 |  155,024 | 4.808020 | 1.437057 |   8.2g | 5.63m | fused rotary+QK-norm   |
+| 7 |  158,808 | 4.807032 | 1.436761 |   8.2g | 5.49m | fused resid/x0 λ-blend |
 
 Run 4: sm120 can't use fa3. however, fa2 works pretty good. --attention=fa2 enabled by default going forward.
 
-Run 5: the python version keeps several GB of logits alive at once. depth=24 triggers OOM on my setup. this run chunks
-and fuses the CE loss, which reduces vram. --loss-chunk-rows=4096 enabled by default going forward.
+Run 5: python nanochat keeps several GB of logits alive at once. this triggers OOM at --depth=24 on my setup. chunk and
+fuse CE loss to reduce vram. --loss-chunk-rows=4096 enabled by default going forward.
+
+Runs 6-8: sm120 have lower memory bandwidth than datacenter GPUs. for example, my RTX Pro 4000 has ~6x slower dram
+bandwidth vs H100. fusing memory bound kernels is usually worth it.
 
 # quick runs @ d24
 

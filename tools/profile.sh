@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
 
-# nsys then ncu on base_train, as a report pair cache/profiles/<tag>_N.{nsys,ncu}-rep.
-#   nsys: steps 2-4 (timeline). ncu: 1 GPU, kernels in step 2 (NVTX range "profile").
-# usage: tools/profile.sh TAG [base_train flags...] [nsys|ncu|both [ncu flags...]]
-# e.g.   tools/profile.sh d12 --depth=12 --device-batch-size=8 ncu --metrics gpu__time_duration.sum
+# run nsys then ncu on base_train, as a report pair cache/profiles/<tag>_N.{nsys,ncu}-rep.
 
 set -euo pipefail
 
@@ -18,7 +15,7 @@ usage() {
 tag=$1
 shift
 
-# base_train flags up to the mode, ncu flags after it
+# extract base_train flags up to the mode, ncu flags after it.
 mode=both train_args=() ncu_args=()
 while (($#)); do
   case $1 in
@@ -37,7 +34,7 @@ if [[ $mode == nsys && ${#ncu_args[@]} -gt 0 ]]; then
   usage
 fi
 
-# next available `i` for both report types
+# next available `i` for both report types.
 mkdir -p cache/profiles
 for ((i = 1; ; ++i)); do
   report=cache/profiles/${tag}_$i
@@ -46,7 +43,7 @@ done
 
 base_train=(cmake-build-pixi/base_train "${train_args[@]}" --eval-every=0 --save=false)
 
-# default ncu metrics (used unless --metrics is given)
+# default ncu metrics (used unless --metrics is given).
 ncu_metrics=(
   sm__ops_path_tensor_op_hmma_src_bf16_dst_fp32.sum
   sm__ops_path_tensor_src_fp8_dst_fp32.sum
@@ -112,13 +109,14 @@ if [[ $mode != ncu ]]; then
 fi
 
 if [[ $mode != nsys ]]; then
-  # defaults unless given (ncu rejects repeated options)
+  # defaults unless given (ncu rejects repeated options).
   has() { printf '%s\n' "${ncu_args[@]}" | grep -qE "^($1)(=|$)"; }
   ncu_defaults=()
   has '-o|--export' || ncu_defaults+=(-o "$report")
   has '--kernel-name-base' || ncu_defaults+=(--kernel-name-base demangled)
   has '--filter-mode' || ncu_defaults+=(--filter-mode per-launch-config)
   has '-c|--launch-count' || ncu_defaults+=(-c 1)
+  has '--call-stack' || ncu_defaults+=(--call-stack)
   has '--metrics' || ncu_defaults+=(--metrics "$(IFS=,; echo "${ncu_metrics[*]}")")
 
   ncu --nvtx --nvtx-include profile "${ncu_defaults[@]}" "${ncu_args[@]}" \
