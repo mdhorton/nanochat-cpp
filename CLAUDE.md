@@ -20,3 +20,9 @@ after making code changes, if you need to run a test that uses the GPU, run the 
 example, usually a simple d4 or d12 test will suffice.
 
 Leave the longer running tests to me.
+
+# target GPU
+
+RTX Pro 4000 Blackwell (sm120)
+
+measured roofline data for this GPU: roofline/cuda-rtx-pro-4000-blackwell-0-peak.json

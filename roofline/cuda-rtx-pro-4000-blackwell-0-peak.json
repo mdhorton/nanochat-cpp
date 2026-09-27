@@ -1,0 +1,5062 @@
+{
+  "derived": {
+    "ridge_points": [
+      {
+        "arithmetic_intensity": 59.8070562108,
+        "basis": "measured",
+        "compute": "compute.cuda_core.fp32.fma",
+        "compute_rate": 37483840935000.0,
+        "device": 0,
+        "memory": "mem.dram.best",
+        "memory_rate": 626746128465.0,
+        "memory_source": "mem.dram.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 1462.31789913,
+        "basis": "measured",
+        "compute": "compute.cuda_core.fp32.fma",
+        "compute_rate": 37483840935000.0,
+        "device": 0,
+        "memory": "mem.host_mapped.best",
+        "memory_rate": 25633168381.1,
+        "memory_source": "mem.host_mapped.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 1.86316350464,
+        "basis": "measured",
+        "compute": "compute.cuda_core.fp32.fma",
+        "compute_rate": 37483840935000.0,
+        "device": 0,
+        "memory": "mem.l1.best",
+        "memory_rate": 20118385123800.0,
+        "memory_source": "mem.l1.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 10.9821765578,
+        "basis": "measured",
+        "compute": "compute.cuda_core.fp32.fma",
+        "compute_rate": 37483840935000.0,
+        "device": 0,
+        "memory": "mem.l2.best",
+        "memory_rate": 3413152277920.0,
+        "memory_source": "mem.l2.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 1.77347134031,
+        "basis": "measured",
+        "compute": "compute.cuda_core.fp32.fma",
+        "compute_rate": 37483840935000.0,
+        "device": 0,
+        "memory": "mem.shared.best",
+        "memory_rate": 21135859420500.0,
+        "memory_source": "mem.shared.write",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 1324.94210482,
+        "basis": "measured",
+        "compute": "compute.cuda_core.fp32.fma",
+        "compute_rate": 37483840935000.0,
+        "device": 0,
+        "memory": "xfer.host.best",
+        "memory_rate": 28290927429.0,
+        "memory_source": "xfer.host.d2h.pinned",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 34.0203491173,
+        "basis": "measured",
+        "compute": "compute.cuda_core.fp32.add",
+        "compute_rate": 21322122098300.0,
+        "device": 0,
+        "memory": "mem.dram.best",
+        "memory_rate": 626746128465.0,
+        "memory_source": "mem.dram.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 831.817658329,
+        "basis": "measured",
+        "compute": "compute.cuda_core.fp32.add",
+        "compute_rate": 21322122098300.0,
+        "device": 0,
+        "memory": "mem.host_mapped.best",
+        "memory_rate": 25633168381.1,
+        "memory_source": "mem.host_mapped.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 1.05983268374,
+        "basis": "measured",
+        "compute": "compute.cuda_core.fp32.add",
+        "compute_rate": 21322122098300.0,
+        "device": 0,
+        "memory": "mem.l1.best",
+        "memory_rate": 20118385123800.0,
+        "memory_source": "mem.l1.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 6.24704682419,
+        "basis": "measured",
+        "compute": "compute.cuda_core.fp32.add",
+        "compute_rate": 21322122098300.0,
+        "device": 0,
+        "memory": "mem.l2.best",
+        "memory_rate": 3413152277920.0,
+        "memory_source": "mem.l2.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 1.008812638,
+        "basis": "measured",
+        "compute": "compute.cuda_core.fp32.add",
+        "compute_rate": 21322122098300.0,
+        "device": 0,
+        "memory": "mem.shared.best",
+        "memory_rate": 21135859420500.0,
+        "memory_source": "mem.shared.write",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 753.673493095,
+        "basis": "measured",
+        "compute": "compute.cuda_core.fp32.add",
+        "compute_rate": 21322122098300.0,
+        "device": 0,
+        "memory": "xfer.host.best",
+        "memory_rate": 28290927429.0,
+        "memory_source": "xfer.host.d2h.pinned",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 1.10905637908,
+        "basis": "measured",
+        "compute": "compute.cuda_core.fp64.fma",
+        "compute_rate": 695096791835.0,
+        "device": 0,
+        "memory": "mem.dram.best",
+        "memory_rate": 626746128465.0,
+        "memory_source": "mem.dram.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 27.1170844549,
+        "basis": "measured",
+        "compute": "compute.cuda_core.fp64.fma",
+        "compute_rate": 695096791835.0,
+        "device": 0,
+        "memory": "mem.host_mapped.best",
+        "memory_rate": 25633168381.1,
+        "memory_source": "mem.host_mapped.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 0.0345503273528,
+        "basis": "measured",
+        "compute": "compute.cuda_core.fp64.fma",
+        "compute_rate": 695096791835.0,
+        "device": 0,
+        "memory": "mem.l1.best",
+        "memory_rate": 20118385123800.0,
+        "memory_source": "mem.l1.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 0.203652440687,
+        "basis": "measured",
+        "compute": "compute.cuda_core.fp64.fma",
+        "compute_rate": 695096791835.0,
+        "device": 0,
+        "memory": "mem.l2.best",
+        "memory_rate": 3413152277920.0,
+        "memory_source": "mem.l2.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 0.0328870843625,
+        "basis": "measured",
+        "compute": "compute.cuda_core.fp64.fma",
+        "compute_rate": 695096791835.0,
+        "device": 0,
+        "memory": "mem.shared.best",
+        "memory_rate": 21135859420500.0,
+        "memory_source": "mem.shared.write",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 24.5696007521,
+        "basis": "measured",
+        "compute": "compute.cuda_core.fp64.fma",
+        "compute_rate": 695096791835.0,
+        "device": 0,
+        "memory": "xfer.host.best",
+        "memory_rate": 28290927429.0,
+        "memory_source": "xfer.host.d2h.pinned",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 68.1990487844,
+        "basis": "measured",
+        "compute": "compute.cuda_core.fp16.fma",
+        "compute_rate": 42743489790600.0,
+        "device": 0,
+        "memory": "mem.dram.best",
+        "memory_rate": 626746128465.0,
+        "memory_source": "mem.dram.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 1667.50708126,
+        "basis": "measured",
+        "compute": "compute.cuda_core.fp16.fma",
+        "compute_rate": 42743489790600.0,
+        "device": 0,
+        "memory": "mem.host_mapped.best",
+        "memory_rate": 25633168381.1,
+        "memory_source": "mem.host_mapped.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 2.12459844702,
+        "basis": "measured",
+        "compute": "compute.cuda_core.fp16.fma",
+        "compute_rate": 42743489790600.0,
+        "device": 0,
+        "memory": "mem.l1.best",
+        "memory_rate": 20118385123800.0,
+        "memory_source": "mem.l1.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 12.5231710484,
+        "basis": "measured",
+        "compute": "compute.cuda_core.fp16.fma",
+        "compute_rate": 42743489790600.0,
+        "device": 0,
+        "memory": "mem.l2.best",
+        "memory_rate": 3413152277920.0,
+        "memory_source": "mem.l2.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 2.02232087848,
+        "basis": "measured",
+        "compute": "compute.cuda_core.fp16.fma",
+        "compute_rate": 42743489790600.0,
+        "device": 0,
+        "memory": "mem.shared.best",
+        "memory_rate": 21135859420500.0,
+        "memory_source": "mem.shared.write",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 1510.85502227,
+        "basis": "measured",
+        "compute": "compute.cuda_core.fp16.fma",
+        "compute_rate": 42743489790600.0,
+        "device": 0,
+        "memory": "xfer.host.best",
+        "memory_rate": 28290927429.0,
+        "memory_source": "xfer.host.d2h.pinned",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 68.687366735,
+        "basis": "measured",
+        "compute": "compute.cuda_core.bf16.fma",
+        "compute_rate": 43049541175600.0,
+        "device": 0,
+        "memory": "mem.dram.best",
+        "memory_rate": 626746128465.0,
+        "memory_source": "mem.dram.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 1679.44674398,
+        "basis": "measured",
+        "compute": "compute.cuda_core.bf16.fma",
+        "compute_rate": 43049541175600.0,
+        "device": 0,
+        "memory": "mem.host_mapped.best",
+        "memory_rate": 25633168381.1,
+        "memory_source": "mem.host_mapped.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 2.13981096945,
+        "basis": "measured",
+        "compute": "compute.cuda_core.bf16.fma",
+        "compute_rate": 43049541175600.0,
+        "device": 0,
+        "memory": "mem.l1.best",
+        "memory_rate": 20118385123800.0,
+        "memory_source": "mem.l1.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 12.6128392964,
+        "basis": "measured",
+        "compute": "compute.cuda_core.bf16.fma",
+        "compute_rate": 43049541175600.0,
+        "device": 0,
+        "memory": "mem.l2.best",
+        "memory_rate": 3413152277920.0,
+        "memory_source": "mem.l2.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 2.03680107438,
+        "basis": "measured",
+        "compute": "compute.cuda_core.bf16.fma",
+        "compute_rate": 43049541175600.0,
+        "device": 0,
+        "memory": "mem.shared.best",
+        "memory_rate": 21135859420500.0,
+        "memory_source": "mem.shared.write",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 1521.67302693,
+        "basis": "measured",
+        "compute": "compute.cuda_core.bf16.fma",
+        "compute_rate": 43049541175600.0,
+        "device": 0,
+        "memory": "xfer.host.best",
+        "memory_rate": 28290927429.0,
+        "memory_source": "xfer.host.d2h.pinned",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 17.2155811593,
+        "basis": "measured",
+        "compute": "compute.cuda_core.fp32.fma_int32_mix",
+        "compute_rate": 10789798840900.0,
+        "device": 0,
+        "memory": "mem.dram.best",
+        "memory_rate": 626746128465.0,
+        "memory_source": "mem.dram.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 420.931142045,
+        "basis": "measured",
+        "compute": "compute.cuda_core.fp32.fma_int32_mix",
+        "compute_rate": 10789798840900.0,
+        "device": 0,
+        "memory": "mem.host_mapped.best",
+        "memory_rate": 25633168381.1,
+        "memory_source": "mem.host_mapped.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 0.536315354065,
+        "basis": "measured",
+        "compute": "compute.cuda_core.fp32.fma_int32_mix",
+        "compute_rate": 10789798840900.0,
+        "device": 0,
+        "memory": "mem.l1.best",
+        "memory_rate": 20118385123800.0,
+        "memory_source": "mem.l1.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 3.16124156272,
+        "basis": "measured",
+        "compute": "compute.cuda_core.fp32.fma_int32_mix",
+        "compute_rate": 10789798840900.0,
+        "device": 0,
+        "memory": "mem.l2.best",
+        "memory_rate": 3413152277920.0,
+        "memory_source": "mem.l2.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 0.510497284554,
+        "basis": "measured",
+        "compute": "compute.cuda_core.fp32.fma_int32_mix",
+        "compute_rate": 10789798840900.0,
+        "device": 0,
+        "memory": "mem.shared.best",
+        "memory_rate": 21135859420500.0,
+        "memory_source": "mem.shared.write",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 381.387243948,
+        "basis": "measured",
+        "compute": "compute.cuda_core.fp32.fma_int32_mix",
+        "compute_rate": 10789798840900.0,
+        "device": 0,
+        "memory": "xfer.host.best",
+        "memory_rate": 28290927429.0,
+        "memory_source": "xfer.host.d2h.pinned",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 35.2593629983,
+        "basis": "measured",
+        "compute": "compute.int.int32.add",
+        "compute_rate": 22098669251300.0,
+        "device": 0,
+        "memory": "mem.dram.best",
+        "memory_rate": 626746128465.0,
+        "memory_source": "mem.dram.read",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 862.112280574,
+        "basis": "measured",
+        "compute": "compute.int.int32.add",
+        "compute_rate": 22098669251300.0,
+        "device": 0,
+        "memory": "mem.host_mapped.best",
+        "memory_rate": 25633168381.1,
+        "memory_source": "mem.host_mapped.read",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 1.09843156473,
+        "basis": "measured",
+        "compute": "compute.int.int32.add",
+        "compute_rate": 22098669251300.0,
+        "device": 0,
+        "memory": "mem.l1.best",
+        "memory_rate": 20118385123800.0,
+        "memory_source": "mem.l1.read",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 6.47456294121,
+        "basis": "measured",
+        "compute": "compute.int.int32.add",
+        "compute_rate": 22098669251300.0,
+        "device": 0,
+        "memory": "mem.l2.best",
+        "memory_rate": 3413152277920.0,
+        "memory_source": "mem.l2.read",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 1.04555337977,
+        "basis": "measured",
+        "compute": "compute.int.int32.add",
+        "compute_rate": 22098669251300.0,
+        "device": 0,
+        "memory": "mem.shared.best",
+        "memory_rate": 21135859420500.0,
+        "memory_source": "mem.shared.write",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 781.122121458,
+        "basis": "measured",
+        "compute": "compute.int.int32.add",
+        "compute_rate": 22098669251300.0,
+        "device": 0,
+        "memory": "xfer.host.best",
+        "memory_rate": 28290927429.0,
+        "memory_source": "xfer.host.d2h.pinned",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 33.2684268142,
+        "basis": "measured",
+        "compute": "compute.int.int32.mad",
+        "compute_rate": 20850857705900.0,
+        "device": 0,
+        "memory": "mem.dram.best",
+        "memory_rate": 626746128465.0,
+        "memory_source": "mem.dram.read",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 813.432713271,
+        "basis": "measured",
+        "compute": "compute.int.int32.mad",
+        "compute_rate": 20850857705900.0,
+        "device": 0,
+        "memory": "mem.host_mapped.best",
+        "memory_rate": 25633168381.1,
+        "memory_source": "mem.host_mapped.read",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 1.03640812012,
+        "basis": "measured",
+        "compute": "compute.int.int32.mad",
+        "compute_rate": 20850857705900.0,
+        "device": 0,
+        "memory": "mem.l1.best",
+        "memory_rate": 20118385123800.0,
+        "memory_source": "mem.l1.read",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 6.10897376036,
+        "basis": "measured",
+        "compute": "compute.int.int32.mad",
+        "compute_rate": 20850857705900.0,
+        "device": 0,
+        "memory": "mem.l2.best",
+        "memory_rate": 3413152277920.0,
+        "memory_source": "mem.l2.read",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 0.986515726242,
+        "basis": "measured",
+        "compute": "compute.int.int32.mad",
+        "compute_rate": 20850857705900.0,
+        "device": 0,
+        "memory": "mem.shared.best",
+        "memory_rate": 21135859420500.0,
+        "memory_source": "mem.shared.write",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 737.015700821,
+        "basis": "measured",
+        "compute": "compute.int.int32.mad",
+        "compute_rate": 20850857705900.0,
+        "device": 0,
+        "memory": "xfer.host.best",
+        "memory_rate": 28290927429.0,
+        "memory_source": "xfer.host.d2h.pinned",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 140.172342343,
+        "basis": "measured",
+        "compute": "compute.int.int8.dp4a",
+        "compute_rate": 87852472881500.0,
+        "device": 0,
+        "memory": "mem.dram.best",
+        "memory_rate": 626746128465.0,
+        "memory_source": "mem.dram.read",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 3427.29667966,
+        "basis": "measured",
+        "compute": "compute.int.int8.dp4a",
+        "compute_rate": 87852472881500.0,
+        "device": 0,
+        "memory": "mem.host_mapped.best",
+        "memory_rate": 25633168381.1,
+        "memory_source": "mem.host_mapped.read",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 4.36677558069,
+        "basis": "measured",
+        "compute": "compute.int.int8.dp4a",
+        "compute_rate": 87852472881500.0,
+        "device": 0,
+        "memory": "mem.l1.best",
+        "memory_rate": 20118385123800.0,
+        "memory_source": "mem.l1.read",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 25.7393944741,
+        "basis": "measured",
+        "compute": "compute.int.int8.dp4a",
+        "compute_rate": 87852472881500.0,
+        "device": 0,
+        "memory": "mem.l2.best",
+        "memory_rate": 3413152277920.0,
+        "memory_source": "mem.l2.read",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 4.15656023887,
+        "basis": "measured",
+        "compute": "compute.int.int8.dp4a",
+        "compute_rate": 87852472881500.0,
+        "device": 0,
+        "memory": "mem.shared.best",
+        "memory_rate": 21135859420500.0,
+        "memory_source": "mem.shared.write",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 3105.32318539,
+        "basis": "measured",
+        "compute": "compute.int.int8.dp4a",
+        "compute_rate": 87852472881500.0,
+        "device": 0,
+        "memory": "xfer.host.best",
+        "memory_rate": 28290927429.0,
+        "memory_source": "xfer.host.d2h.pinned",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 4.41460840643,
+        "basis": "measured",
+        "compute": "compute.sfu.rsqrt",
+        "compute_rate": 2766838727420.0,
+        "device": 0,
+        "memory": "mem.dram.best",
+        "memory_rate": 626746128465.0,
+        "memory_source": "mem.dram.read",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 107.939786697,
+        "basis": "measured",
+        "compute": "compute.sfu.rsqrt",
+        "compute_rate": 2766838727420.0,
+        "device": 0,
+        "memory": "mem.host_mapped.best",
+        "memory_rate": 25633168381.1,
+        "memory_source": "mem.host_mapped.read",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 0.137527873654,
+        "basis": "measured",
+        "compute": "compute.sfu.rsqrt",
+        "compute_rate": 2766838727420.0,
+        "device": 0,
+        "memory": "mem.l1.best",
+        "memory_rate": 20118385123800.0,
+        "memory_source": "mem.l1.read",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 0.810640282684,
+        "basis": "measured",
+        "compute": "compute.sfu.rsqrt",
+        "compute_rate": 2766838727420.0,
+        "device": 0,
+        "memory": "mem.l2.best",
+        "memory_rate": 3413152277920.0,
+        "memory_source": "mem.l2.read",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 0.1309073207,
+        "basis": "measured",
+        "compute": "compute.sfu.rsqrt",
+        "compute_rate": 2766838727420.0,
+        "device": 0,
+        "memory": "mem.shared.best",
+        "memory_rate": 21135859420500.0,
+        "memory_source": "mem.shared.write",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 97.7995060206,
+        "basis": "measured",
+        "compute": "compute.sfu.rsqrt",
+        "compute_rate": 2766838727420.0,
+        "device": 0,
+        "memory": "xfer.host.best",
+        "memory_rate": 28290927429.0,
+        "memory_source": "xfer.host.d2h.pinned",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 4.41425569898,
+        "basis": "measured",
+        "compute": "compute.sfu.exp2",
+        "compute_rate": 2766617669390.0,
+        "device": 0,
+        "memory": "mem.dram.best",
+        "memory_rate": 626746128465.0,
+        "memory_source": "mem.dram.read",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 107.931162791,
+        "basis": "measured",
+        "compute": "compute.sfu.exp2",
+        "compute_rate": 2766617669390.0,
+        "device": 0,
+        "memory": "mem.host_mapped.best",
+        "memory_rate": 25633168381.1,
+        "memory_source": "mem.host_mapped.read",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 0.137516885792,
+        "basis": "measured",
+        "compute": "compute.sfu.exp2",
+        "compute_rate": 2766617669390.0,
+        "device": 0,
+        "memory": "mem.l1.best",
+        "memory_rate": 20118385123800.0,
+        "memory_source": "mem.l1.read",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 0.810575516154,
+        "basis": "measured",
+        "compute": "compute.sfu.exp2",
+        "compute_rate": 2766617669390.0,
+        "device": 0,
+        "memory": "mem.l2.best",
+        "memory_rate": 3413152277920.0,
+        "memory_source": "mem.l2.read",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 0.130896861791,
+        "basis": "measured",
+        "compute": "compute.sfu.exp2",
+        "compute_rate": 2766617669390.0,
+        "device": 0,
+        "memory": "mem.shared.best",
+        "memory_rate": 21135859420500.0,
+        "memory_source": "mem.shared.write",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 97.7916922779,
+        "basis": "measured",
+        "compute": "compute.sfu.exp2",
+        "compute_rate": 2766617669390.0,
+        "device": 0,
+        "memory": "xfer.host.best",
+        "memory_rate": 28290927429.0,
+        "memory_source": "xfer.host.d2h.pinned",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 4.41138531475,
+        "basis": "measured",
+        "compute": "compute.sfu.sin",
+        "compute_rate": 2764818667180.0,
+        "device": 0,
+        "memory": "mem.dram.best",
+        "memory_rate": 626746128465.0,
+        "memory_source": "mem.dram.read",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 107.860980199,
+        "basis": "measured",
+        "compute": "compute.sfu.sin",
+        "compute_rate": 2764818667180.0,
+        "device": 0,
+        "memory": "mem.host_mapped.best",
+        "memory_rate": 25633168381.1,
+        "memory_source": "mem.host_mapped.read",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 0.137427464987,
+        "basis": "measured",
+        "compute": "compute.sfu.sin",
+        "compute_rate": 2764818667180.0,
+        "device": 0,
+        "memory": "mem.l1.best",
+        "memory_rate": 20118385123800.0,
+        "memory_source": "mem.l1.read",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 0.810048436769,
+        "basis": "measured",
+        "compute": "compute.sfu.sin",
+        "compute_rate": 2764818667180.0,
+        "device": 0,
+        "memory": "mem.l2.best",
+        "memory_rate": 3413152277920.0,
+        "memory_source": "mem.l2.read",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 0.130811745677,
+        "basis": "measured",
+        "compute": "compute.sfu.sin",
+        "compute_rate": 2764818667180.0,
+        "device": 0,
+        "memory": "mem.shared.best",
+        "memory_rate": 21135859420500.0,
+        "memory_source": "mem.shared.write",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 97.7281029096,
+        "basis": "measured",
+        "compute": "compute.sfu.sin",
+        "compute_rate": 2764818667180.0,
+        "device": 0,
+        "memory": "xfer.host.best",
+        "memory_rate": 28290927429.0,
+        "memory_source": "xfer.host.d2h.pinned",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 199.867756005,
+        "basis": "measured",
+        "compute": "compute.tensor.fp16.acc_fp16",
+        "compute_rate": 125266342281000.0,
+        "device": 0,
+        "memory": "mem.dram.best",
+        "memory_rate": 626746128465.0,
+        "memory_source": "mem.dram.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 4886.88485243,
+        "basis": "measured",
+        "compute": "compute.tensor.fp16.acc_fp16",
+        "compute_rate": 125266342281000.0,
+        "device": 0,
+        "memory": "mem.host_mapped.best",
+        "memory_rate": 25633168381.1,
+        "memory_source": "mem.host_mapped.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 6.22646109568,
+        "basis": "measured",
+        "compute": "compute.tensor.fp16.acc_fp16",
+        "compute_rate": 125266342281000.0,
+        "device": 0,
+        "memory": "mem.l1.best",
+        "memory_rate": 20118385123800.0,
+        "memory_source": "mem.l1.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 36.7010704712,
+        "basis": "measured",
+        "compute": "compute.tensor.fp16.acc_fp16",
+        "compute_rate": 125266342281000.0,
+        "device": 0,
+        "memory": "mem.l2.best",
+        "memory_rate": 3413152277920.0,
+        "memory_source": "mem.l2.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 5.92672101896,
+        "basis": "measured",
+        "compute": "compute.tensor.fp16.acc_fp16",
+        "compute_rate": 125266342281000.0,
+        "device": 0,
+        "memory": "mem.shared.best",
+        "memory_rate": 21135859420500.0,
+        "memory_source": "mem.shared.write",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 4427.7920049,
+        "basis": "measured",
+        "compute": "compute.tensor.fp16.acc_fp16",
+        "compute_rate": 125266342281000.0,
+        "device": 0,
+        "memory": "xfer.host.best",
+        "memory_rate": 28290927429.0,
+        "memory_source": "xfer.host.d2h.pinned",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 201.855709774,
+        "basis": "measured",
+        "compute": "compute.tensor.fp16.acc_fp32",
+        "compute_rate": 126512284609000.0,
+        "device": 0,
+        "memory": "mem.dram.best",
+        "memory_rate": 626746128465.0,
+        "memory_source": "mem.dram.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 4935.49149792,
+        "basis": "measured",
+        "compute": "compute.tensor.fp16.acc_fp32",
+        "compute_rate": 126512284609000.0,
+        "device": 0,
+        "memory": "mem.host_mapped.best",
+        "memory_rate": 25633168381.1,
+        "memory_source": "mem.host_mapped.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 6.2883916294,
+        "basis": "measured",
+        "compute": "compute.tensor.fp16.acc_fp32",
+        "compute_rate": 126512284609000.0,
+        "device": 0,
+        "memory": "mem.l1.best",
+        "memory_rate": 20118385123800.0,
+        "memory_source": "mem.l1.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 37.0661120008,
+        "basis": "measured",
+        "compute": "compute.tensor.fp16.acc_fp32",
+        "compute_rate": 126512284609000.0,
+        "device": 0,
+        "memory": "mem.l2.best",
+        "memory_rate": 3413152277920.0,
+        "memory_source": "mem.l2.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 5.98567023429,
+        "basis": "measured",
+        "compute": "compute.tensor.fp16.acc_fp32",
+        "compute_rate": 126512284609000.0,
+        "device": 0,
+        "memory": "mem.shared.best",
+        "memory_rate": 21135859420500.0,
+        "memory_source": "mem.shared.write",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 4471.83235428,
+        "basis": "measured",
+        "compute": "compute.tensor.fp16.acc_fp32",
+        "compute_rate": 126512284609000.0,
+        "device": 0,
+        "memory": "xfer.host.best",
+        "memory_rate": 28290927429.0,
+        "memory_source": "xfer.host.d2h.pinned",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 195.115490044,
+        "basis": "measured",
+        "compute": "compute.tensor.bf16.acc_fp32",
+        "compute_rate": 122287877988000.0,
+        "device": 0,
+        "memory": "mem.dram.best",
+        "memory_rate": 626746128465.0,
+        "memory_source": "mem.dram.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 4770.68913879,
+        "basis": "measured",
+        "compute": "compute.tensor.bf16.acc_fp32",
+        "compute_rate": 122287877988000.0,
+        "device": 0,
+        "memory": "mem.host_mapped.best",
+        "memory_rate": 25633168381.1,
+        "memory_source": "mem.host_mapped.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 6.07841420849,
+        "basis": "measured",
+        "compute": "compute.tensor.bf16.acc_fp32",
+        "compute_rate": 122287877988000.0,
+        "device": 0,
+        "memory": "mem.l1.best",
+        "memory_rate": 20118385123800.0,
+        "memory_source": "mem.l1.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 35.8284272223,
+        "basis": "measured",
+        "compute": "compute.tensor.bf16.acc_fp32",
+        "compute_rate": 122287877988000.0,
+        "device": 0,
+        "memory": "mem.l2.best",
+        "memory_rate": 3413152277920.0,
+        "memory_source": "mem.l2.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 5.78580106706,
+        "basis": "measured",
+        "compute": "compute.tensor.bf16.acc_fp32",
+        "compute_rate": 122287877988000.0,
+        "device": 0,
+        "memory": "mem.shared.best",
+        "memory_rate": 21135859420500.0,
+        "memory_source": "mem.shared.write",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 4322.51216562,
+        "basis": "measured",
+        "compute": "compute.tensor.bf16.acc_fp32",
+        "compute_rate": 122287877988000.0,
+        "device": 0,
+        "memory": "xfer.host.best",
+        "memory_rate": 28290927429.0,
+        "memory_source": "xfer.host.d2h.pinned",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 108.027871187,
+        "basis": "measured",
+        "compute": "compute.tensor.tf32.acc_fp32",
+        "compute_rate": 67706050033000.0,
+        "device": 0,
+        "memory": "mem.dram.best",
+        "memory_rate": 626746128465.0,
+        "memory_source": "mem.dram.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 2641.34534703,
+        "basis": "measured",
+        "compute": "compute.tensor.tf32.acc_fp32",
+        "compute_rate": 67706050033000.0,
+        "device": 0,
+        "memory": "mem.host_mapped.best",
+        "memory_rate": 25633168381.1,
+        "memory_source": "mem.host_mapped.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 3.36538194375,
+        "basis": "measured",
+        "compute": "compute.tensor.tf32.acc_fp32",
+        "compute_rate": 67706050033000.0,
+        "device": 0,
+        "memory": "mem.l1.best",
+        "memory_rate": 20118385123800.0,
+        "memory_source": "mem.l1.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 19.8368090609,
+        "basis": "measured",
+        "compute": "compute.tensor.tf32.acc_fp32",
+        "compute_rate": 67706050033000.0,
+        "device": 0,
+        "memory": "mem.l2.best",
+        "memory_rate": 3413152277920.0,
+        "memory_source": "mem.l2.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 3.20337340848,
+        "basis": "measured",
+        "compute": "compute.tensor.tf32.acc_fp32",
+        "compute_rate": 67706050033000.0,
+        "device": 0,
+        "memory": "mem.shared.best",
+        "memory_rate": 21135859420500.0,
+        "memory_source": "mem.shared.write",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 2393.20715813,
+        "basis": "measured",
+        "compute": "compute.tensor.tf32.acc_fp32",
+        "compute_rate": 67706050033000.0,
+        "device": 0,
+        "memory": "xfer.host.best",
+        "memory_rate": 28290927429.0,
+        "memory_source": "xfer.host.d2h.pinned",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 386.594049318,
+        "basis": "measured",
+        "compute": "compute.tensor.int8.acc_int32",
+        "compute_rate": 242296323698000.0,
+        "device": 0,
+        "memory": "mem.dram.best",
+        "memory_rate": 626746128465.0,
+        "memory_source": "mem.dram.read",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 9452.45316911,
+        "basis": "measured",
+        "compute": "compute.tensor.int8.acc_int32",
+        "compute_rate": 242296323698000.0,
+        "device": 0,
+        "memory": "mem.host_mapped.best",
+        "memory_rate": 25633168381.1,
+        "memory_source": "mem.host_mapped.read",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 12.0435274604,
+        "basis": "measured",
+        "compute": "compute.tensor.int8.acc_int32",
+        "compute_rate": 242296323698000.0,
+        "device": 0,
+        "memory": "mem.l1.best",
+        "memory_rate": 20118385123800.0,
+        "memory_source": "mem.l1.read",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 70.9890165947,
+        "basis": "measured",
+        "compute": "compute.tensor.int8.acc_int32",
+        "compute_rate": 242296323698000.0,
+        "device": 0,
+        "memory": "mem.l2.best",
+        "memory_rate": 3413152277920.0,
+        "memory_source": "mem.l2.read",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 11.4637554536,
+        "basis": "measured",
+        "compute": "compute.tensor.int8.acc_int32",
+        "compute_rate": 242296323698000.0,
+        "device": 0,
+        "memory": "mem.shared.best",
+        "memory_rate": 21135859420500.0,
+        "memory_source": "mem.shared.write",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 8564.45319109,
+        "basis": "measured",
+        "compute": "compute.tensor.int8.acc_int32",
+        "compute_rate": 242296323698000.0,
+        "device": 0,
+        "memory": "xfer.host.best",
+        "memory_rate": 28290927429.0,
+        "memory_source": "xfer.host.d2h.pinned",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 368.211521208,
+        "basis": "measured",
+        "compute": "compute.tensor.fp8.acc_fp32",
+        "compute_rate": 230775145373000.0,
+        "device": 0,
+        "memory": "mem.dram.best",
+        "memory_rate": 626746128465.0,
+        "memory_source": "mem.dram.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 9002.98948387,
+        "basis": "measured",
+        "compute": "compute.tensor.fp8.acc_fp32",
+        "compute_rate": 230775145373000.0,
+        "device": 0,
+        "memory": "mem.host_mapped.best",
+        "memory_rate": 25633168381.1,
+        "memory_source": "mem.host_mapped.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 11.4708583196,
+        "basis": "measured",
+        "compute": "compute.tensor.fp8.acc_fp32",
+        "compute_rate": 230775145373000.0,
+        "device": 0,
+        "memory": "mem.l1.best",
+        "memory_rate": 20118385123800.0,
+        "memory_source": "mem.l1.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 67.6134923325,
+        "basis": "measured",
+        "compute": "compute.tensor.fp8.acc_fp32",
+        "compute_rate": 230775145373000.0,
+        "device": 0,
+        "memory": "mem.l2.best",
+        "memory_rate": 3413152277920.0,
+        "memory_source": "mem.l2.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 10.9186544432,
+        "basis": "measured",
+        "compute": "compute.tensor.fp8.acc_fp32",
+        "compute_rate": 230775145373000.0,
+        "device": 0,
+        "memory": "mem.shared.best",
+        "memory_rate": 21135859420500.0,
+        "memory_source": "mem.shared.write",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 8157.21386132,
+        "basis": "measured",
+        "compute": "compute.tensor.fp8.acc_fp32",
+        "compute_rate": 230775145373000.0,
+        "device": 0,
+        "memory": "xfer.host.best",
+        "memory_rate": 28290927429.0,
+        "memory_source": "xfer.host.d2h.pinned",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 750.826180383,
+        "basis": "measured",
+        "compute": "compute.tensor.fp4.acc_fp32",
+        "compute_rate": 470577401705000.0,
+        "device": 0,
+        "memory": "mem.dram.best",
+        "memory_rate": 626746128465.0,
+        "memory_source": "mem.dram.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 18358.1442102,
+        "basis": "measured",
+        "compute": "compute.tensor.fp4.acc_fp32",
+        "compute_rate": 470577401705000.0,
+        "device": 0,
+        "memory": "mem.host_mapped.best",
+        "memory_rate": 25633168381.1,
+        "memory_source": "mem.host_mapped.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 23.3904162193,
+        "basis": "measured",
+        "compute": "compute.tensor.fp4.acc_fp32",
+        "compute_rate": 470577401705000.0,
+        "device": 0,
+        "memory": "mem.l1.best",
+        "memory_rate": 20118385123800.0,
+        "memory_source": "mem.l1.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 137.871786368,
+        "basis": "measured",
+        "compute": "compute.tensor.fp4.acc_fp32",
+        "compute_rate": 470577401705000.0,
+        "device": 0,
+        "memory": "mem.l2.best",
+        "memory_rate": 3413152277920.0,
+        "memory_source": "mem.l2.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 22.2644081957,
+        "basis": "measured",
+        "compute": "compute.tensor.fp4.acc_fp32",
+        "compute_rate": 470577401705000.0,
+        "device": 0,
+        "memory": "mem.shared.best",
+        "memory_rate": 21135859420500.0,
+        "memory_source": "mem.shared.write",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 16633.5092014,
+        "basis": "measured",
+        "compute": "compute.tensor.fp4.acc_fp32",
+        "compute_rate": 470577401705000.0,
+        "device": 0,
+        "memory": "xfer.host.best",
+        "memory_rate": 28290927429.0,
+        "memory_source": "xfer.host.d2h.pinned",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 82.3941147061,
+        "basis": "theoretical",
+        "compute": "compute.cuda_core.fp32.fma",
+        "compute_rate": 55372800000000.0,
+        "device": 0,
+        "memory": "mem.dram.best",
+        "memory_rate": 672048000000.0,
+        "memory_source": "mem.dram.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 1757.4375,
+        "basis": "theoretical",
+        "compute": "compute.cuda_core.fp32.fma",
+        "compute_rate": 55372800000000.0,
+        "device": 0,
+        "memory": "mem.host_mapped.best",
+        "memory_rate": 31507692307.7,
+        "memory_source": "mem.host_mapped.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 2.0,
+        "basis": "theoretical",
+        "compute": "compute.cuda_core.fp32.fma",
+        "compute_rate": 55372800000000.0,
+        "device": 0,
+        "memory": "mem.shared.best",
+        "memory_rate": 27686400000000.0,
+        "memory_source": "mem.shared.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 1757.4375,
+        "basis": "theoretical",
+        "compute": "compute.cuda_core.fp32.fma",
+        "compute_rate": 55372800000000.0,
+        "device": 0,
+        "memory": "xfer.host.best",
+        "memory_rate": 31507692307.7,
+        "memory_source": "xfer.host.h2d.pinned",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 41.197057353,
+        "basis": "theoretical",
+        "compute": "compute.cuda_core.fp32.add",
+        "compute_rate": 27686400000000.0,
+        "device": 0,
+        "memory": "mem.dram.best",
+        "memory_rate": 672048000000.0,
+        "memory_source": "mem.dram.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 878.71875,
+        "basis": "theoretical",
+        "compute": "compute.cuda_core.fp32.add",
+        "compute_rate": 27686400000000.0,
+        "device": 0,
+        "memory": "mem.host_mapped.best",
+        "memory_rate": 31507692307.7,
+        "memory_source": "mem.host_mapped.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 1.0,
+        "basis": "theoretical",
+        "compute": "compute.cuda_core.fp32.add",
+        "compute_rate": 27686400000000.0,
+        "device": 0,
+        "memory": "mem.shared.best",
+        "memory_rate": 27686400000000.0,
+        "memory_source": "mem.shared.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 878.71875,
+        "basis": "theoretical",
+        "compute": "compute.cuda_core.fp32.add",
+        "compute_rate": 27686400000000.0,
+        "device": 0,
+        "memory": "xfer.host.best",
+        "memory_rate": 31507692307.7,
+        "memory_source": "xfer.host.h2d.pinned",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 1.28740804228,
+        "basis": "theoretical",
+        "compute": "compute.cuda_core.fp64.fma",
+        "compute_rate": 865200000000.0,
+        "device": 0,
+        "memory": "mem.dram.best",
+        "memory_rate": 672048000000.0,
+        "memory_source": "mem.dram.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 27.4599609375,
+        "basis": "theoretical",
+        "compute": "compute.cuda_core.fp64.fma",
+        "compute_rate": 865200000000.0,
+        "device": 0,
+        "memory": "mem.host_mapped.best",
+        "memory_rate": 31507692307.7,
+        "memory_source": "mem.host_mapped.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 0.03125,
+        "basis": "theoretical",
+        "compute": "compute.cuda_core.fp64.fma",
+        "compute_rate": 865200000000.0,
+        "device": 0,
+        "memory": "mem.shared.best",
+        "memory_rate": 27686400000000.0,
+        "memory_source": "mem.shared.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 27.4599609375,
+        "basis": "theoretical",
+        "compute": "compute.cuda_core.fp64.fma",
+        "compute_rate": 865200000000.0,
+        "device": 0,
+        "memory": "xfer.host.best",
+        "memory_rate": 31507692307.7,
+        "memory_source": "xfer.host.h2d.pinned",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 82.3941147061,
+        "basis": "theoretical",
+        "compute": "compute.cuda_core.fp16.fma",
+        "compute_rate": 55372800000000.0,
+        "device": 0,
+        "memory": "mem.dram.best",
+        "memory_rate": 672048000000.0,
+        "memory_source": "mem.dram.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 1757.4375,
+        "basis": "theoretical",
+        "compute": "compute.cuda_core.fp16.fma",
+        "compute_rate": 55372800000000.0,
+        "device": 0,
+        "memory": "mem.host_mapped.best",
+        "memory_rate": 31507692307.7,
+        "memory_source": "mem.host_mapped.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 2.0,
+        "basis": "theoretical",
+        "compute": "compute.cuda_core.fp16.fma",
+        "compute_rate": 55372800000000.0,
+        "device": 0,
+        "memory": "mem.shared.best",
+        "memory_rate": 27686400000000.0,
+        "memory_source": "mem.shared.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 1757.4375,
+        "basis": "theoretical",
+        "compute": "compute.cuda_core.fp16.fma",
+        "compute_rate": 55372800000000.0,
+        "device": 0,
+        "memory": "xfer.host.best",
+        "memory_rate": 31507692307.7,
+        "memory_source": "xfer.host.h2d.pinned",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 82.3941147061,
+        "basis": "theoretical",
+        "compute": "compute.cuda_core.bf16.fma",
+        "compute_rate": 55372800000000.0,
+        "device": 0,
+        "memory": "mem.dram.best",
+        "memory_rate": 672048000000.0,
+        "memory_source": "mem.dram.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 1757.4375,
+        "basis": "theoretical",
+        "compute": "compute.cuda_core.bf16.fma",
+        "compute_rate": 55372800000000.0,
+        "device": 0,
+        "memory": "mem.host_mapped.best",
+        "memory_rate": 31507692307.7,
+        "memory_source": "mem.host_mapped.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 2.0,
+        "basis": "theoretical",
+        "compute": "compute.cuda_core.bf16.fma",
+        "compute_rate": 55372800000000.0,
+        "device": 0,
+        "memory": "mem.shared.best",
+        "memory_rate": 27686400000000.0,
+        "memory_source": "mem.shared.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 1757.4375,
+        "basis": "theoretical",
+        "compute": "compute.cuda_core.bf16.fma",
+        "compute_rate": 55372800000000.0,
+        "device": 0,
+        "memory": "xfer.host.best",
+        "memory_rate": 31507692307.7,
+        "memory_source": "xfer.host.h2d.pinned",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 82.3941147061,
+        "basis": "theoretical",
+        "compute": "compute.cuda_core.fp32.fma_int32_mix",
+        "compute_rate": 55372800000000.0,
+        "device": 0,
+        "memory": "mem.dram.best",
+        "memory_rate": 672048000000.0,
+        "memory_source": "mem.dram.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 1757.4375,
+        "basis": "theoretical",
+        "compute": "compute.cuda_core.fp32.fma_int32_mix",
+        "compute_rate": 55372800000000.0,
+        "device": 0,
+        "memory": "mem.host_mapped.best",
+        "memory_rate": 31507692307.7,
+        "memory_source": "mem.host_mapped.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 2.0,
+        "basis": "theoretical",
+        "compute": "compute.cuda_core.fp32.fma_int32_mix",
+        "compute_rate": 55372800000000.0,
+        "device": 0,
+        "memory": "mem.shared.best",
+        "memory_rate": 27686400000000.0,
+        "memory_source": "mem.shared.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 1757.4375,
+        "basis": "theoretical",
+        "compute": "compute.cuda_core.fp32.fma_int32_mix",
+        "compute_rate": 55372800000000.0,
+        "device": 0,
+        "memory": "xfer.host.best",
+        "memory_rate": 31507692307.7,
+        "memory_source": "xfer.host.h2d.pinned",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 41.197057353,
+        "basis": "theoretical",
+        "compute": "compute.int.int32.add",
+        "compute_rate": 27686400000000.0,
+        "device": 0,
+        "memory": "mem.dram.best",
+        "memory_rate": 672048000000.0,
+        "memory_source": "mem.dram.read",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 878.71875,
+        "basis": "theoretical",
+        "compute": "compute.int.int32.add",
+        "compute_rate": 27686400000000.0,
+        "device": 0,
+        "memory": "mem.host_mapped.best",
+        "memory_rate": 31507692307.7,
+        "memory_source": "mem.host_mapped.read",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 1.0,
+        "basis": "theoretical",
+        "compute": "compute.int.int32.add",
+        "compute_rate": 27686400000000.0,
+        "device": 0,
+        "memory": "mem.shared.best",
+        "memory_rate": 27686400000000.0,
+        "memory_source": "mem.shared.read",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 878.71875,
+        "basis": "theoretical",
+        "compute": "compute.int.int32.add",
+        "compute_rate": 27686400000000.0,
+        "device": 0,
+        "memory": "xfer.host.best",
+        "memory_rate": 31507692307.7,
+        "memory_source": "xfer.host.h2d.pinned",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 41.197057353,
+        "basis": "theoretical",
+        "compute": "compute.int.int32.mad",
+        "compute_rate": 27686400000000.0,
+        "device": 0,
+        "memory": "mem.dram.best",
+        "memory_rate": 672048000000.0,
+        "memory_source": "mem.dram.read",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 878.71875,
+        "basis": "theoretical",
+        "compute": "compute.int.int32.mad",
+        "compute_rate": 27686400000000.0,
+        "device": 0,
+        "memory": "mem.host_mapped.best",
+        "memory_rate": 31507692307.7,
+        "memory_source": "mem.host_mapped.read",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 1.0,
+        "basis": "theoretical",
+        "compute": "compute.int.int32.mad",
+        "compute_rate": 27686400000000.0,
+        "device": 0,
+        "memory": "mem.shared.best",
+        "memory_rate": 27686400000000.0,
+        "memory_source": "mem.shared.read",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 878.71875,
+        "basis": "theoretical",
+        "compute": "compute.int.int32.mad",
+        "compute_rate": 27686400000000.0,
+        "device": 0,
+        "memory": "xfer.host.best",
+        "memory_rate": 31507692307.7,
+        "memory_source": "xfer.host.h2d.pinned",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 5.14963216913,
+        "basis": "theoretical",
+        "compute": "compute.sfu.rsqrt",
+        "compute_rate": 3460800000000.0,
+        "device": 0,
+        "memory": "mem.dram.best",
+        "memory_rate": 672048000000.0,
+        "memory_source": "mem.dram.read",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 109.83984375,
+        "basis": "theoretical",
+        "compute": "compute.sfu.rsqrt",
+        "compute_rate": 3460800000000.0,
+        "device": 0,
+        "memory": "mem.host_mapped.best",
+        "memory_rate": 31507692307.7,
+        "memory_source": "mem.host_mapped.read",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 0.125,
+        "basis": "theoretical",
+        "compute": "compute.sfu.rsqrt",
+        "compute_rate": 3460800000000.0,
+        "device": 0,
+        "memory": "mem.shared.best",
+        "memory_rate": 27686400000000.0,
+        "memory_source": "mem.shared.read",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 109.83984375,
+        "basis": "theoretical",
+        "compute": "compute.sfu.rsqrt",
+        "compute_rate": 3460800000000.0,
+        "device": 0,
+        "memory": "xfer.host.best",
+        "memory_rate": 31507692307.7,
+        "memory_source": "xfer.host.h2d.pinned",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 5.14963216913,
+        "basis": "theoretical",
+        "compute": "compute.sfu.exp2",
+        "compute_rate": 3460800000000.0,
+        "device": 0,
+        "memory": "mem.dram.best",
+        "memory_rate": 672048000000.0,
+        "memory_source": "mem.dram.read",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 109.83984375,
+        "basis": "theoretical",
+        "compute": "compute.sfu.exp2",
+        "compute_rate": 3460800000000.0,
+        "device": 0,
+        "memory": "mem.host_mapped.best",
+        "memory_rate": 31507692307.7,
+        "memory_source": "mem.host_mapped.read",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 0.125,
+        "basis": "theoretical",
+        "compute": "compute.sfu.exp2",
+        "compute_rate": 3460800000000.0,
+        "device": 0,
+        "memory": "mem.shared.best",
+        "memory_rate": 27686400000000.0,
+        "memory_source": "mem.shared.read",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 109.83984375,
+        "basis": "theoretical",
+        "compute": "compute.sfu.exp2",
+        "compute_rate": 3460800000000.0,
+        "device": 0,
+        "memory": "xfer.host.best",
+        "memory_rate": 31507692307.7,
+        "memory_source": "xfer.host.h2d.pinned",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 5.14963216913,
+        "basis": "theoretical",
+        "compute": "compute.sfu.sin",
+        "compute_rate": 3460800000000.0,
+        "device": 0,
+        "memory": "mem.dram.best",
+        "memory_rate": 672048000000.0,
+        "memory_source": "mem.dram.read",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 109.83984375,
+        "basis": "theoretical",
+        "compute": "compute.sfu.sin",
+        "compute_rate": 3460800000000.0,
+        "device": 0,
+        "memory": "mem.host_mapped.best",
+        "memory_rate": 31507692307.7,
+        "memory_source": "mem.host_mapped.read",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 0.125,
+        "basis": "theoretical",
+        "compute": "compute.sfu.sin",
+        "compute_rate": 3460800000000.0,
+        "device": 0,
+        "memory": "mem.shared.best",
+        "memory_rate": 27686400000000.0,
+        "memory_source": "mem.shared.read",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 109.83984375,
+        "basis": "theoretical",
+        "compute": "compute.sfu.sin",
+        "compute_rate": 3460800000000.0,
+        "device": 0,
+        "memory": "xfer.host.best",
+        "memory_rate": 31507692307.7,
+        "memory_source": "xfer.host.h2d.pinned",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 329.576458824,
+        "basis": "theoretical",
+        "compute": "compute.tensor.fp16.acc_fp16",
+        "compute_rate": 221491200000000.0,
+        "device": 0,
+        "memory": "mem.dram.best",
+        "memory_rate": 672048000000.0,
+        "memory_source": "mem.dram.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 7029.75,
+        "basis": "theoretical",
+        "compute": "compute.tensor.fp16.acc_fp16",
+        "compute_rate": 221491200000000.0,
+        "device": 0,
+        "memory": "mem.host_mapped.best",
+        "memory_rate": 31507692307.7,
+        "memory_source": "mem.host_mapped.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 8.0,
+        "basis": "theoretical",
+        "compute": "compute.tensor.fp16.acc_fp16",
+        "compute_rate": 221491200000000.0,
+        "device": 0,
+        "memory": "mem.shared.best",
+        "memory_rate": 27686400000000.0,
+        "memory_source": "mem.shared.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 7029.75,
+        "basis": "theoretical",
+        "compute": "compute.tensor.fp16.acc_fp16",
+        "compute_rate": 221491200000000.0,
+        "device": 0,
+        "memory": "xfer.host.best",
+        "memory_rate": 31507692307.7,
+        "memory_source": "xfer.host.h2d.pinned",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 329.576458824,
+        "basis": "theoretical",
+        "compute": "compute.tensor.fp16.acc_fp32",
+        "compute_rate": 221491200000000.0,
+        "device": 0,
+        "memory": "mem.dram.best",
+        "memory_rate": 672048000000.0,
+        "memory_source": "mem.dram.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 7029.75,
+        "basis": "theoretical",
+        "compute": "compute.tensor.fp16.acc_fp32",
+        "compute_rate": 221491200000000.0,
+        "device": 0,
+        "memory": "mem.host_mapped.best",
+        "memory_rate": 31507692307.7,
+        "memory_source": "mem.host_mapped.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 8.0,
+        "basis": "theoretical",
+        "compute": "compute.tensor.fp16.acc_fp32",
+        "compute_rate": 221491200000000.0,
+        "device": 0,
+        "memory": "mem.shared.best",
+        "memory_rate": 27686400000000.0,
+        "memory_source": "mem.shared.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 7029.75,
+        "basis": "theoretical",
+        "compute": "compute.tensor.fp16.acc_fp32",
+        "compute_rate": 221491200000000.0,
+        "device": 0,
+        "memory": "xfer.host.best",
+        "memory_rate": 31507692307.7,
+        "memory_source": "xfer.host.h2d.pinned",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 329.576458824,
+        "basis": "theoretical",
+        "compute": "compute.tensor.bf16.acc_fp32",
+        "compute_rate": 221491200000000.0,
+        "device": 0,
+        "memory": "mem.dram.best",
+        "memory_rate": 672048000000.0,
+        "memory_source": "mem.dram.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 7029.75,
+        "basis": "theoretical",
+        "compute": "compute.tensor.bf16.acc_fp32",
+        "compute_rate": 221491200000000.0,
+        "device": 0,
+        "memory": "mem.host_mapped.best",
+        "memory_rate": 31507692307.7,
+        "memory_source": "mem.host_mapped.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 8.0,
+        "basis": "theoretical",
+        "compute": "compute.tensor.bf16.acc_fp32",
+        "compute_rate": 221491200000000.0,
+        "device": 0,
+        "memory": "mem.shared.best",
+        "memory_rate": 27686400000000.0,
+        "memory_source": "mem.shared.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 7029.75,
+        "basis": "theoretical",
+        "compute": "compute.tensor.bf16.acc_fp32",
+        "compute_rate": 221491200000000.0,
+        "device": 0,
+        "memory": "xfer.host.best",
+        "memory_rate": 31507692307.7,
+        "memory_source": "xfer.host.h2d.pinned",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 164.788229412,
+        "basis": "theoretical",
+        "compute": "compute.tensor.tf32.acc_fp32",
+        "compute_rate": 110745600000000.0,
+        "device": 0,
+        "memory": "mem.dram.best",
+        "memory_rate": 672048000000.0,
+        "memory_source": "mem.dram.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 3514.875,
+        "basis": "theoretical",
+        "compute": "compute.tensor.tf32.acc_fp32",
+        "compute_rate": 110745600000000.0,
+        "device": 0,
+        "memory": "mem.host_mapped.best",
+        "memory_rate": 31507692307.7,
+        "memory_source": "mem.host_mapped.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 4.0,
+        "basis": "theoretical",
+        "compute": "compute.tensor.tf32.acc_fp32",
+        "compute_rate": 110745600000000.0,
+        "device": 0,
+        "memory": "mem.shared.best",
+        "memory_rate": 27686400000000.0,
+        "memory_source": "mem.shared.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 3514.875,
+        "basis": "theoretical",
+        "compute": "compute.tensor.tf32.acc_fp32",
+        "compute_rate": 110745600000000.0,
+        "device": 0,
+        "memory": "xfer.host.best",
+        "memory_rate": 31507692307.7,
+        "memory_source": "xfer.host.h2d.pinned",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 659.152917649,
+        "basis": "theoretical",
+        "compute": "compute.tensor.int8.acc_int32",
+        "compute_rate": 442982400000000.0,
+        "device": 0,
+        "memory": "mem.dram.best",
+        "memory_rate": 672048000000.0,
+        "memory_source": "mem.dram.read",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 14059.5,
+        "basis": "theoretical",
+        "compute": "compute.tensor.int8.acc_int32",
+        "compute_rate": 442982400000000.0,
+        "device": 0,
+        "memory": "mem.host_mapped.best",
+        "memory_rate": 31507692307.7,
+        "memory_source": "mem.host_mapped.read",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 16.0,
+        "basis": "theoretical",
+        "compute": "compute.tensor.int8.acc_int32",
+        "compute_rate": 442982400000000.0,
+        "device": 0,
+        "memory": "mem.shared.best",
+        "memory_rate": 27686400000000.0,
+        "memory_source": "mem.shared.read",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 14059.5,
+        "basis": "theoretical",
+        "compute": "compute.tensor.int8.acc_int32",
+        "compute_rate": 442982400000000.0,
+        "device": 0,
+        "memory": "xfer.host.best",
+        "memory_rate": 31507692307.7,
+        "memory_source": "xfer.host.h2d.pinned",
+        "unit": "OP/byte"
+      },
+      {
+        "arithmetic_intensity": 659.152917649,
+        "basis": "theoretical",
+        "compute": "compute.tensor.fp8.acc_fp32",
+        "compute_rate": 442982400000000.0,
+        "device": 0,
+        "memory": "mem.dram.best",
+        "memory_rate": 672048000000.0,
+        "memory_source": "mem.dram.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 14059.5,
+        "basis": "theoretical",
+        "compute": "compute.tensor.fp8.acc_fp32",
+        "compute_rate": 442982400000000.0,
+        "device": 0,
+        "memory": "mem.host_mapped.best",
+        "memory_rate": 31507692307.7,
+        "memory_source": "mem.host_mapped.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 16.0,
+        "basis": "theoretical",
+        "compute": "compute.tensor.fp8.acc_fp32",
+        "compute_rate": 442982400000000.0,
+        "device": 0,
+        "memory": "mem.shared.best",
+        "memory_rate": 27686400000000.0,
+        "memory_source": "mem.shared.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 14059.5,
+        "basis": "theoretical",
+        "compute": "compute.tensor.fp8.acc_fp32",
+        "compute_rate": 442982400000000.0,
+        "device": 0,
+        "memory": "xfer.host.best",
+        "memory_rate": 31507692307.7,
+        "memory_source": "xfer.host.h2d.pinned",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 1318.3058353,
+        "basis": "theoretical",
+        "compute": "compute.tensor.fp4.acc_fp32",
+        "compute_rate": 885964800000000.0,
+        "device": 0,
+        "memory": "mem.dram.best",
+        "memory_rate": 672048000000.0,
+        "memory_source": "mem.dram.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 28119.0,
+        "basis": "theoretical",
+        "compute": "compute.tensor.fp4.acc_fp32",
+        "compute_rate": 885964800000000.0,
+        "device": 0,
+        "memory": "mem.host_mapped.best",
+        "memory_rate": 31507692307.7,
+        "memory_source": "mem.host_mapped.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 32.0,
+        "basis": "theoretical",
+        "compute": "compute.tensor.fp4.acc_fp32",
+        "compute_rate": 885964800000000.0,
+        "device": 0,
+        "memory": "mem.shared.best",
+        "memory_rate": 27686400000000.0,
+        "memory_source": "mem.shared.read",
+        "unit": "FLOP/byte"
+      },
+      {
+        "arithmetic_intensity": 28119.0,
+        "basis": "theoretical",
+        "compute": "compute.tensor.fp4.acc_fp32",
+        "compute_rate": 885964800000000.0,
+        "device": 0,
+        "memory": "xfer.host.best",
+        "memory_rate": 31507692307.7,
+        "memory_source": "xfer.host.h2d.pinned",
+        "unit": "FLOP/byte"
+      }
+    ],
+    "shared_conflicts": [
+      {
+        "baseline": "mem.shared.read",
+        "baseline_rate": 20566031800900.0,
+        "device": 0,
+        "id": "mem.shared.conflict_2way",
+        "rate": 11797416379900.0,
+        "ratio": 0.573636007867,
+        "ratio_per_clock": 0.503457134564,
+        "ways": 2
+      },
+      {
+        "baseline": "mem.shared.read",
+        "baseline_rate": 20566031800900.0,
+        "device": 0,
+        "id": "mem.shared.conflict_4way",
+        "rate": 5903680836200.0,
+        "ratio": 0.287059793225,
+        "ratio_per_clock": 0.251940775968,
+        "ways": 4
+      }
+    ]
+  },
+  "devices": [
+    {
+      "cache": {
+        "l1_per_sm_bytes": 131072,
+        "l2_bytes": 50331648,
+        "shared_per_sm_bytes": 102400
+      },
+      "clocks": {
+        "mem_max_mhz": 14001,
+        "sm_max_mhz": 3090
+      },
+      "compute_capability": "12.0",
+      "index": 0,
+      "link": {
+        "gen": 4,
+        "kind": "pcie",
+        "numa_affinity": 1,
+        "pci_bus_id": "0000:81:00.0",
+        "width": 16
+      },
+      "memory": {
+        "bus_width_bits": 192,
+        "ecc_enabled": true,
+        "technology": "GDDR7",
+        "total_bytes": 25153044480
+      },
+      "name": "NVIDIA RTX PRO 4000 Blackwell",
+      "results": [
+        {
+          "class": "compute",
+          "compile": {
+            "arch": "sm_120",
+            "options": [
+              "-arch=sm_120",
+              "--dopt=on",
+              "-Xptxas=-O3",
+              "--fmad=true",
+              "-lineinfo",
+              "--std=c++17"
+            ],
+            "source": "kernels/cuda_core.cu",
+            "source_sha256": "47d34d82dd86d47ea2d660f645c14737b2f2591d3e01f0cf832dd5cf8f106a9b"
+          },
+          "conditions": {
+            "mem_clock_mhz_mean": 13365.0,
+            "power_source": "instant",
+            "power_w_mean": 144.985702479,
+            "sm_clock_mhz_max": 2167,
+            "sm_clock_mhz_mean": 2158.90082645,
+            "sm_clock_mhz_min": 2152,
+            "sm_clock_mhz_stddev": 5.7466003844,
+            "temp_c_mean": 47.1074380165,
+            "throttle_reasons": [
+              "sw_power_cap"
+            ]
+          },
+          "config": {
+            "blocks": 560,
+            "bytes_working_set": 0,
+            "chains": 8,
+            "flops_per_instruction": 2.0,
+            "iterations": 226518,
+            "threads": 256,
+            "unroll": 8
+          },
+          "efficiency": 0.676935985447,
+          "id": "compute.cuda_core.fp32.fma",
+          "measured": {
+            "best": 37483840935000.0,
+            "median": 37229929629200.0,
+            "samples": 11,
+            "stddev": 152564138863.0
+          },
+          "method": "ffma_chain",
+          "per_clock": {
+            "unit": "FLOP/clk",
+            "value": 17297.5731126
+          },
+          "status": "ok",
+          "theoretical": {
+            "source": "table:sm_120:rtx-pro",
+            "value": 55372800000000.0
+          },
+          "unit": "FLOP/s"
+        },
+        {
+          "class": "compute",
+          "compile": {
+            "arch": "sm_120",
+            "options": [
+              "-arch=sm_120",
+              "--dopt=on",
+              "-Xptxas=-O3",
+              "--fmad=true",
+              "-lineinfo",
+              "--std=c++17"
+            ],
+            "source": "kernels/cuda_core.cu",
+            "source_sha256": "47d34d82dd86d47ea2d660f645c14737b2f2591d3e01f0cf832dd5cf8f106a9b"
+          },
+          "conditions": {
+            "mem_clock_mhz_mean": 13365.0,
+            "power_source": "instant",
+            "power_w_mean": 145.05540367,
+            "sm_clock_mhz_max": 2445,
+            "sm_clock_mhz_mean": 2433.89908257,
+            "sm_clock_mhz_min": 2430,
+            "sm_clock_mhz_stddev": 4.21405266831,
+            "temp_c_mean": 50.9908256881,
+            "throttle_reasons": []
+          },
+          "config": {
+            "blocks": 560,
+            "bytes_working_set": 0,
+            "chains": 8,
+            "flops_per_instruction": 1.0,
+            "iterations": 233142,
+            "threads": 256,
+            "unroll": 8
+          },
+          "efficiency": 0.770129814576,
+          "id": "compute.cuda_core.fp32.add",
+          "measured": {
+            "best": 21322122098300.0,
+            "median": 21288116381200.0,
+            "samples": 11,
+            "stddev": 17583691133.1
+          },
+          "method": "fadd_chain",
+          "per_clock": {
+            "unit": "FLOP/clk",
+            "value": 8774.53584291
+          },
+          "status": "ok",
+          "theoretical": {
+            "source": "table:sm_120:rtx-pro",
+            "value": 27686400000000.0
+          },
+          "unit": "FLOP/s"
+        },
+        {
+          "class": "compute",
+          "compile": {
+            "arch": "sm_120",
+            "options": [
+              "-arch=sm_120",
+              "--dopt=on",
+              "-Xptxas=-O3",
+              "--fmad=true",
+              "-lineinfo",
+              "--std=c++17"
+            ],
+            "source": "kernels/cuda_core.cu",
+            "source_sha256": "47d34d82dd86d47ea2d660f645c14737b2f2591d3e01f0cf832dd5cf8f106a9b"
+          },
+          "conditions": {
+            "mem_clock_mhz_mean": 13365.0,
+            "power_source": "instant",
+            "power_w_mean": 74.9784299065,
+            "sm_clock_mhz_max": 2482,
+            "sm_clock_mhz_mean": 2482.0,
+            "sm_clock_mhz_min": 2482,
+            "sm_clock_mhz_stddev": 0.0,
+            "temp_c_mean": 45.0,
+            "throttle_reasons": []
+          },
+          "config": {
+            "blocks": 560,
+            "bytes_working_set": 0,
+            "chains": 8,
+            "flops_per_instruction": 2.0,
+            "iterations": 3741,
+            "threads": 256,
+            "unroll": 8
+          },
+          "efficiency": 0.803394350249,
+          "id": "compute.cuda_core.fp64.fma",
+          "measured": {
+            "best": 695096791835.0,
+            "median": 694984420902.0,
+            "samples": 11,
+            "stddev": 59263881.8938
+          },
+          "method": "dfma_chain",
+          "per_clock": {
+            "unit": "FLOP/clk",
+            "value": 280.055113552
+          },
+          "status": "ok",
+          "theoretical": {
+            "source": "table:sm_120:rtx-pro",
+            "value": 865200000000.0
+          },
+          "unit": "FLOP/s"
+        },
+        {
+          "class": "compute",
+          "compile": {
+            "arch": "sm_120",
+            "options": [
+              "-arch=sm_120",
+              "--dopt=on",
+              "-Xptxas=-O3",
+              "--fmad=true",
+              "-lineinfo",
+              "--std=c++17"
+            ],
+            "source": "kernels/cuda_core.cu",
+            "source_sha256": "47d34d82dd86d47ea2d660f645c14737b2f2591d3e01f0cf832dd5cf8f106a9b"
+          },
+          "conditions": {
+            "mem_clock_mhz_mean": 13365.0,
+            "power_source": "instant",
+            "power_w_mean": 145.026628319,
+            "sm_clock_mhz_max": 2400,
+            "sm_clock_mhz_mean": 2384.94690265,
+            "sm_clock_mhz_min": 2377,
+            "sm_clock_mhz_stddev": 8.25794066767,
+            "temp_c_mean": 54.1769911504,
+            "throttle_reasons": [
+              "sw_power_cap"
+            ]
+          },
+          "config": {
+            "blocks": 560,
+            "bytes_working_set": 0,
+            "chains": 8,
+            "flops_per_instruction": 4.0,
+            "iterations": 120746,
+            "threads": 256,
+            "unroll": 8
+          },
+          "efficiency": 0.771922131274,
+          "id": "compute.cuda_core.fp16.fma",
+          "measured": {
+            "best": 42743489790600.0,
+            "median": 42690861299100.0,
+            "samples": 11,
+            "stddev": 23887220608.9
+          },
+          "method": "hfma2_chain",
+          "per_clock": {
+            "unit": "FLOP/clk",
+            "value": 17809.7874127
+          },
+          "status": "ok",
+          "theoretical": {
+            "source": "table:sm_120:rtx-pro",
+            "value": 55372800000000.0
+          },
+          "unit": "FLOP/s"
+        },
+        {
+          "class": "compute",
+          "compile": {
+            "arch": "sm_120",
+            "options": [
+              "-arch=sm_120",
+              "--dopt=on",
+              "-Xptxas=-O3",
+              "--fmad=true",
+              "-lineinfo",
+              "--std=c++17"
+            ],
+            "source": "kernels/cuda_core.cu",
+            "source_sha256": "47d34d82dd86d47ea2d660f645c14737b2f2591d3e01f0cf832dd5cf8f106a9b"
+          },
+          "conditions": {
+            "mem_clock_mhz_mean": 13365.0,
+            "power_source": "instant",
+            "power_w_mean": 145.01366055,
+            "sm_clock_mhz_max": 2400,
+            "sm_clock_mhz_mean": 2396.11009174,
+            "sm_clock_mhz_min": 2392,
+            "sm_clock_mhz_stddev": 4.01695353872,
+            "temp_c_mean": 56.5229357798,
+            "throttle_reasons": [
+              "sw_power_cap"
+            ]
+          },
+          "config": {
+            "blocks": 560,
+            "bytes_working_set": 0,
+            "chains": 8,
+            "flops_per_instruction": 4.0,
+            "iterations": 117307,
+            "threads": 256,
+            "unroll": 8
+          },
+          "efficiency": 0.777449238174,
+          "id": "compute.cuda_core.bf16.fma",
+          "measured": {
+            "best": 43049541175600.0,
+            "median": 42938100470300.0,
+            "samples": 11,
+            "stddev": 42477910566.7
+          },
+          "method": "hfma2_bf16_chain",
+          "per_clock": {
+            "unit": "FLOP/clk",
+            "value": 17937.3088232
+          },
+          "status": "ok",
+          "theoretical": {
+            "source": "table:sm_120:rtx-pro",
+            "value": 55372800000000.0
+          },
+          "unit": "FLOP/s"
+        },
+        {
+          "class": "compute",
+          "compile": {
+            "arch": "sm_120",
+            "options": [
+              "-arch=sm_120",
+              "--dopt=on",
+              "-Xptxas=-O3",
+              "--fmad=true",
+              "-lineinfo",
+              "--std=c++17"
+            ],
+            "source": "kernels/cuda_core.cu",
+            "source_sha256": "47d34d82dd86d47ea2d660f645c14737b2f2591d3e01f0cf832dd5cf8f106a9b"
+          },
+          "conditions": {
+            "mem_clock_mhz_mean": 13365.0,
+            "power_source": "instant",
+            "power_w_mean": 145.0406,
+            "sm_clock_mhz_max": 2070,
+            "sm_clock_mhz_mean": 2065.2,
+            "sm_clock_mhz_min": 2062,
+            "sm_clock_mhz_stddev": 3.93712044916,
+            "temp_c_mean": 58.6,
+            "throttle_reasons": [
+              "sw_power_cap"
+            ]
+          },
+          "config": {
+            "blocks": 560,
+            "bytes_working_set": 0,
+            "chains": 8,
+            "flops_per_instruction": 2.0,
+            "int32_ops_per_iteration": 64,
+            "iterations": 59401,
+            "threads": 256,
+            "unroll": 8
+          },
+          "efficiency": 0.194857381979,
+          "id": "compute.cuda_core.fp32.fma_int32_mix",
+          "measured": {
+            "best": 10789798840900.0,
+            "median": 10783643613200.0,
+            "samples": 11,
+            "stddev": 7770011753.37
+          },
+          "method": "ffma_imad_chain",
+          "per_clock": {
+            "unit": "FLOP/clk",
+            "value": 5232.68614979
+          },
+          "status": "ok",
+          "theoretical": {
+            "source": "table:sm_120:rtx-pro",
+            "value": 55372800000000.0
+          },
+          "unit": "FLOP/s"
+        },
+        {
+          "class": "compute",
+          "compile": {
+            "arch": "sm_120",
+            "options": [
+              "-arch=sm_120",
+              "--dopt=on",
+              "-Xptxas=-O3",
+              "--fmad=true",
+              "-lineinfo",
+              "--std=c++17"
+            ],
+            "source": "kernels/int_sfu.cu",
+            "source_sha256": "36ddacc138f4e03298527ca243d77977a15760f759bb2224347cabecd95e50a9"
+          },
+          "conditions": {
+            "mem_clock_mhz_mean": 13365.0,
+            "power_source": "instant",
+            "power_w_mean": 136.540701031,
+            "sm_clock_mhz_max": 2467,
+            "sm_clock_mhz_mean": 2467.0,
+            "sm_clock_mhz_min": 2467,
+            "sm_clock_mhz_stddev": 0.0,
+            "temp_c_mean": 59.7422680412,
+            "throttle_reasons": []
+          },
+          "config": {
+            "blocks": 560,
+            "bytes_working_set": 0,
+            "chains": 8,
+            "iterations": 214149,
+            "ops_per_instruction": 1.0,
+            "threads": 256,
+            "unroll": 8
+          },
+          "efficiency": 0.798177778669,
+          "id": "compute.int.int32.add",
+          "measured": {
+            "best": 22098669251300.0,
+            "median": 22097541033200.0,
+            "samples": 11,
+            "stddev": 3679017852.38
+          },
+          "method": "iadd_chain",
+          "per_clock": {
+            "unit": "OP/clk",
+            "value": 8957.70946548
+          },
+          "status": "ok",
+          "theoretical": {
+            "source": "table:sm_120:rtx-pro",
+            "value": 27686400000000.0
+          },
+          "unit": "OP/s"
+        },
+        {
+          "class": "compute",
+          "compile": {
+            "arch": "sm_120",
+            "options": [
+              "-arch=sm_120",
+              "--dopt=on",
+              "-Xptxas=-O3",
+              "--fmad=true",
+              "-lineinfo",
+              "--std=c++17"
+            ],
+            "source": "kernels/int_sfu.cu",
+            "source_sha256": "36ddacc138f4e03298527ca243d77977a15760f759bb2224347cabecd95e50a9"
+          },
+          "conditions": {
+            "mem_clock_mhz_mean": 13365.0,
+            "power_source": "instant",
+            "power_w_mean": 144.998689655,
+            "sm_clock_mhz_max": 2310,
+            "sm_clock_mhz_mean": 2303.31034483,
+            "sm_clock_mhz_min": 2302,
+            "sm_clock_mhz_stddev": 2.97354653747,
+            "temp_c_mean": 61.8362068966,
+            "throttle_reasons": [
+              "sw_power_cap"
+            ]
+          },
+          "config": {
+            "blocks": 560,
+            "bytes_working_set": 0,
+            "chains": 8,
+            "iterations": 120316,
+            "ops_per_instruction": 2.0,
+            "threads": 256,
+            "unroll": 8
+          },
+          "efficiency": 0.753108302486,
+          "id": "compute.int.int32.mad",
+          "measured": {
+            "best": 20850857705900.0,
+            "median": 20681612657000.0,
+            "samples": 11,
+            "stddev": 82685613695.3
+          },
+          "method": "imad_chain",
+          "per_clock": {
+            "unit": "OP/clk",
+            "value": 9057.71403386
+          },
+          "status": "ok",
+          "theoretical": {
+            "source": "table:sm_120:rtx-pro",
+            "value": 27686400000000.0
+          },
+          "unit": "OP/s"
+        },
+        {
+          "class": "compute",
+          "compile": {
+            "arch": "sm_120",
+            "options": [
+              "-arch=sm_120",
+              "--dopt=on",
+              "-Xptxas=-O3",
+              "--fmad=true",
+              "-lineinfo",
+              "--std=c++17"
+            ],
+            "source": "kernels/int_sfu.cu",
+            "source_sha256": "36ddacc138f4e03298527ca243d77977a15760f759bb2224347cabecd95e50a9"
+          },
+          "conditions": {
+            "mem_clock_mhz_mean": 13365.0,
+            "power_source": "instant",
+            "power_w_mean": 145.0109,
+            "sm_clock_mhz_max": 2445,
+            "sm_clock_mhz_mean": 2437.44545455,
+            "sm_clock_mhz_min": 2430,
+            "sm_clock_mhz_stddev": 7.11322113596,
+            "temp_c_mean": 63.0,
+            "throttle_reasons": [
+              "sw_power_cap"
+            ]
+          },
+          "config": {
+            "blocks": 560,
+            "bytes_working_set": 0,
+            "chains": 8,
+            "iterations": 120366,
+            "ops_per_instruction": 8.0,
+            "threads": 256,
+            "unroll": 8
+          },
+          "id": "compute.int.int8.dp4a",
+          "measured": {
+            "best": 87852472881500.0,
+            "median": 87751588356900.0,
+            "samples": 11,
+            "stddev": 367972397843.0
+          },
+          "method": "dp4a_chain",
+          "per_clock": {
+            "unit": "OP/clk",
+            "value": 36153.2810212
+          },
+          "status": "ok",
+          "theoretical": {
+            "reason": "no_published_per_clock_rate",
+            "value": null
+          },
+          "unit": "OP/s"
+        },
+        {
+          "class": "compute",
+          "compile": {
+            "arch": "sm_120",
+            "options": [
+              "-arch=sm_120",
+              "--dopt=on",
+              "-Xptxas=-O3",
+              "--fmad=true",
+              "-lineinfo",
+              "--std=c++17"
+            ],
+            "source": "kernels/int_sfu.cu",
+            "source_sha256": "36ddacc138f4e03298527ca243d77977a15760f759bb2224347cabecd95e50a9"
+          },
+          "conditions": {
+            "mem_clock_mhz_mean": 13365.0,
+            "power_source": "instant",
+            "power_w_mean": 75.7932407407,
+            "sm_clock_mhz_max": 2467,
+            "sm_clock_mhz_mean": 2467.0,
+            "sm_clock_mhz_min": 2467,
+            "sm_clock_mhz_stddev": 0.0,
+            "temp_c_mean": 55.7222222222,
+            "throttle_reasons": []
+          },
+          "config": {
+            "blocks": 560,
+            "bytes_working_set": 0,
+            "chains": 8,
+            "iterations": 29884,
+            "ops_per_instruction": 1.0,
+            "threads": 256,
+            "unroll": 8
+          },
+          "efficiency": 0.79947952133,
+          "id": "compute.sfu.rsqrt",
+          "measured": {
+            "best": 2766838727420.0,
+            "median": 2766601022620.0,
+            "samples": 11,
+            "stddev": 375039468.371
+          },
+          "method": "mufu_rsqrt_chain",
+          "per_clock": {
+            "unit": "OP/clk",
+            "value": 1121.53981655
+          },
+          "status": "ok",
+          "theoretical": {
+            "source": "table:sm_120:rtx-pro",
+            "value": 3460800000000.0
+          },
+          "unit": "OP/s"
+        },
+        {
+          "class": "compute",
+          "compile": {
+            "arch": "sm_120",
+            "options": [
+              "-arch=sm_120",
+              "--dopt=on",
+              "-Xptxas=-O3",
+              "--fmad=true",
+              "-lineinfo",
+              "--std=c++17"
+            ],
+            "source": "kernels/int_sfu.cu",
+            "source_sha256": "36ddacc138f4e03298527ca243d77977a15760f759bb2224347cabecd95e50a9"
+          },
+          "conditions": {
+            "mem_clock_mhz_mean": 13365.0,
+            "power_source": "instant",
+            "power_w_mean": 75.6,
+            "sm_clock_mhz_max": 2467,
+            "sm_clock_mhz_mean": 2467.0,
+            "sm_clock_mhz_min": 2467,
+            "sm_clock_mhz_stddev": 0.0,
+            "temp_c_mean": 55.0,
+            "throttle_reasons": []
+          },
+          "config": {
+            "blocks": 560,
+            "bytes_working_set": 0,
+            "chains": 8,
+            "iterations": 30058,
+            "ops_per_instruction": 1.0,
+            "threads": 256,
+            "unroll": 8
+          },
+          "efficiency": 0.799415646495,
+          "id": "compute.sfu.exp2",
+          "measured": {
+            "best": 2766617669390.0,
+            "median": 2766199317650.0,
+            "samples": 11,
+            "stddev": 177700619.935
+          },
+          "method": "mufu_ex2_chain",
+          "per_clock": {
+            "unit": "OP/clk",
+            "value": 1121.45021053
+          },
+          "status": "ok",
+          "theoretical": {
+            "source": "table:sm_120:rtx-pro",
+            "value": 3460800000000.0
+          },
+          "unit": "OP/s"
+        },
+        {
+          "class": "compute",
+          "compile": {
+            "arch": "sm_120",
+            "options": [
+              "-arch=sm_120",
+              "--dopt=on",
+              "-Xptxas=-O3",
+              "--fmad=true",
+              "-lineinfo",
+              "--std=c++17"
+            ],
+            "source": "kernels/int_sfu.cu",
+            "source_sha256": "36ddacc138f4e03298527ca243d77977a15760f759bb2224347cabecd95e50a9"
+          },
+          "conditions": {
+            "mem_clock_mhz_mean": 13365.0,
+            "power_source": "instant",
+            "power_w_mean": 95.9180740741,
+            "sm_clock_mhz_max": 2467,
+            "sm_clock_mhz_mean": 2467.0,
+            "sm_clock_mhz_min": 2467,
+            "sm_clock_mhz_stddev": 0.0,
+            "temp_c_mean": 57.0,
+            "throttle_reasons": []
+          },
+          "config": {
+            "blocks": 560,
+            "bytes_working_set": 0,
+            "chains": 8,
+            "iterations": 30044,
+            "ops_per_instruction": 1.0,
+            "threads": 256,
+            "unroll": 8
+          },
+          "efficiency": 0.798895823851,
+          "id": "compute.sfu.sin",
+          "measured": {
+            "best": 2764818667180.0,
+            "median": 2764627842640.0,
+            "samples": 11,
+            "stddev": 414687078.617
+          },
+          "method": "mufu_sin_chain",
+          "per_clock": {
+            "unit": "OP/clk",
+            "value": 1120.72098386
+          },
+          "status": "ok",
+          "theoretical": {
+            "source": "table:sm_120:rtx-pro",
+            "value": 3460800000000.0
+          },
+          "unit": "OP/s"
+        },
+        {
+          "class": "compute",
+          "conditions": {
+            "mem_clock_mhz_mean": 13365.0,
+            "power_source": "instant",
+            "power_w_mean": 144.994306452,
+            "sm_clock_mhz_max": 1822,
+            "sm_clock_mhz_mean": 1822.0,
+            "sm_clock_mhz_min": 1822,
+            "sm_clock_mhz_stddev": 0.0,
+            "temp_c_mean": 61.6290322581,
+            "throttle_reasons": [
+              "sw_power_cap"
+            ]
+          },
+          "config": {
+            "ab_type": "CUDA_R_16F",
+            "algo_workspace_bytes": 0,
+            "bytes_working_set": 402653184,
+            "cd_type": "CUDA_R_16F",
+            "compute_type": "CUBLAS_COMPUTE_16F",
+            "fast_accum": false,
+            "flops_per_gemm": 1099511627780.0,
+            "iterations": 13,
+            "k": 8192,
+            "m": 8192,
+            "n": 8192,
+            "scale_type": "CUDA_R_16F",
+            "size_selection": {
+              "fastest_swept": 8192,
+              "rule": "largest within tie_fraction of the fastest swept",
+              "tie_fraction": 0.02
+            },
+            "sweep_selection_rate": {
+              "16384": 129897427519000.0,
+              "2048": 128474898085000.0,
+              "4096": 119902826610000.0,
+              "8192": 134816506056000.0
+            },
+            "transa": "T",
+            "transb": "N",
+            "verification": {
+              "relative_error": 0.0,
+              "size": 512,
+              "tolerance": 0.004
+            },
+            "workspace_bytes": 67108864
+          },
+          "efficiency": 0.565559003162,
+          "id": "compute.tensor.fp16.acc_fp16",
+          "library": "cublaslt",
+          "measured": {
+            "best": 125266342281000.0,
+            "median": 125106914972000.0,
+            "samples": 11,
+            "stddev": 137972845544.0
+          },
+          "method": "gemm_cublaslt",
+          "per_clock": {
+            "unit": "FLOP/clk",
+            "value": 68752.1088261
+          },
+          "status": "ok",
+          "theoretical": {
+            "source": "table:sm_120:rtx-pro",
+            "value": 221491200000000.0
+          },
+          "unit": "FLOP/s"
+        },
+        {
+          "class": "compute",
+          "conditions": {
+            "mem_clock_mhz_mean": 13365.0,
+            "power_source": "instant",
+            "power_w_mean": 144.89856,
+            "sm_clock_mhz_max": 1792,
+            "sm_clock_mhz_mean": 1792.0,
+            "sm_clock_mhz_min": 1792,
+            "sm_clock_mhz_stddev": 0.0,
+            "temp_c_mean": 63.0,
+            "throttle_reasons": [
+              "sw_power_cap"
+            ]
+          },
+          "config": {
+            "ab_type": "CUDA_R_16F",
+            "algo_workspace_bytes": 0,
+            "bytes_working_set": 1610612736,
+            "cd_type": "CUDA_R_16F",
+            "compute_type": "CUBLAS_COMPUTE_32F",
+            "fast_accum": false,
+            "flops_per_gemm": 8796093022210.0,
+            "iterations": 1,
+            "k": 16384,
+            "m": 16384,
+            "n": 16384,
+            "scale_type": "CUDA_R_32F",
+            "size_selection": {
+              "fastest_swept": 8192,
+              "rule": "largest within tie_fraction of the fastest swept",
+              "tie_fraction": 0.02
+            },
+            "sweep_selection_rate": {
+              "16384": 126571993365000.0,
+              "2048": 112892356987000.0,
+              "4096": 109428706492000.0,
+              "8192": 128203199850000.0
+            },
+            "transa": "T",
+            "transb": "N",
+            "verification": {
+              "relative_error": 0.0,
+              "size": 512,
+              "tolerance": 0.004
+            },
+            "workspace_bytes": 67108864
+          },
+          "efficiency": 0.571184248446,
+          "id": "compute.tensor.fp16.acc_fp32",
+          "library": "cublaslt",
+          "measured": {
+            "best": 126512284609000.0,
+            "median": 126438487009000.0,
+            "samples": 11,
+            "stddev": 79930025716.5
+          },
+          "method": "gemm_cublaslt",
+          "per_clock": {
+            "unit": "FLOP/clk",
+            "value": 70598.3731079
+          },
+          "status": "ok",
+          "theoretical": {
+            "source": "table:sm_120:rtx-pro",
+            "value": 221491200000000.0
+          },
+          "unit": "FLOP/s"
+        },
+        {
+          "class": "compute",
+          "conditions": {
+            "mem_clock_mhz_mean": 13365.0,
+            "power_source": "instant",
+            "power_w_mean": 145.051387755,
+            "sm_clock_mhz_max": 1785,
+            "sm_clock_mhz_mean": 1781.73469388,
+            "sm_clock_mhz_min": 1777,
+            "sm_clock_mhz_stddev": 3.95216506085,
+            "temp_c_mean": 64.0,
+            "throttle_reasons": [
+              "sw_power_cap"
+            ]
+          },
+          "config": {
+            "ab_type": "CUDA_R_16BF",
+            "algo_workspace_bytes": 0,
+            "bytes_working_set": 402653184,
+            "cd_type": "CUDA_R_16BF",
+            "compute_type": "CUBLAS_COMPUTE_32F",
+            "fast_accum": false,
+            "flops_per_gemm": 1099511627780.0,
+            "iterations": 10,
+            "k": 8192,
+            "m": 8192,
+            "n": 8192,
+            "scale_type": "CUDA_R_32F",
+            "size_selection": {
+              "fastest_swept": 8192,
+              "rule": "largest within tie_fraction of the fastest swept",
+              "tie_fraction": 0.02
+            },
+            "sweep_selection_rate": {
+              "16384": 121221404532000.0,
+              "2048": 104820750369000.0,
+              "4096": 109115117473000.0,
+              "8192": 126766718910000.0
+            },
+            "transa": "T",
+            "transb": "N",
+            "verification": {
+              "relative_error": 0.0,
+              "size": 512,
+              "tolerance": 0.02
+            },
+            "workspace_bytes": 67108864
+          },
+          "efficiency": 0.552111677522,
+          "id": "compute.tensor.bf16.acc_fp32",
+          "library": "cublaslt",
+          "measured": {
+            "best": 122287877988000.0,
+            "median": 122191855314000.0,
+            "samples": 11,
+            "stddev": 71329793526.7
+          },
+          "method": "gemm_cublaslt",
+          "per_clock": {
+            "unit": "FLOP/clk",
+            "value": 68508.6151195
+          },
+          "status": "ok",
+          "theoretical": {
+            "source": "table:sm_120:rtx-pro",
+            "value": 221491200000000.0
+          },
+          "unit": "FLOP/s"
+        },
+        {
+          "class": "compute",
+          "conditions": {
+            "mem_clock_mhz_mean": 13365.0,
+            "power_source": "instant",
+            "power_w_mean": 145.087633803,
+            "sm_clock_mhz_max": 1912,
+            "sm_clock_mhz_mean": 1912.0,
+            "sm_clock_mhz_min": 1912,
+            "sm_clock_mhz_stddev": 0.0,
+            "temp_c_mean": 65.0,
+            "throttle_reasons": [
+              "sw_power_cap"
+            ]
+          },
+          "config": {
+            "ab_type": "CUDA_R_32F",
+            "algo_workspace_bytes": 0,
+            "bytes_working_set": 3221225472,
+            "cd_type": "CUDA_R_32F",
+            "compute_type": "CUBLAS_COMPUTE_32F_FAST_TF32",
+            "fast_accum": false,
+            "flops_per_gemm": 8796093022210.0,
+            "iterations": 1,
+            "k": 16384,
+            "m": 16384,
+            "n": 16384,
+            "scale_type": "CUDA_R_32F",
+            "size_selection": {
+              "fastest_swept": 16384,
+              "rule": "largest within tie_fraction of the fastest swept",
+              "tie_fraction": 0.02
+            },
+            "sweep_selection_rate": {
+              "16384": 67792146101300.0,
+              "2048": 56986616980800.0,
+              "4096": 51243174931400.0,
+              "8192": 66704082776500.0
+            },
+            "transa": "T",
+            "transb": "N",
+            "verification": {
+              "relative_error": 0.0,
+              "size": 512,
+              "tolerance": 1e-05
+            },
+            "workspace_bytes": 67108864
+          },
+          "efficiency": 0.61136559857,
+          "id": "compute.tensor.tf32.acc_fp32",
+          "library": "cublaslt",
+          "measured": {
+            "best": 67706050033000.0,
+            "median": 67626494767900.0,
+            "samples": 11,
+            "stddev": 68025648092.3
+          },
+          "method": "gemm_cublaslt",
+          "per_clock": {
+            "unit": "FLOP/clk",
+            "value": 35411.114034
+          },
+          "status": "ok",
+          "theoretical": {
+            "source": "table:sm_120:rtx-pro",
+            "value": 110745600000000.0
+          },
+          "unit": "FLOP/s"
+        },
+        {
+          "class": "compute",
+          "conditions": {
+            "mem_clock_mhz_mean": 13365.0,
+            "power_source": "instant",
+            "power_w_mean": 145.012291139,
+            "sm_clock_mhz_max": 1732,
+            "sm_clock_mhz_mean": 1732.0,
+            "sm_clock_mhz_min": 1732,
+            "sm_clock_mhz_stddev": 0.0,
+            "temp_c_mean": 66.0,
+            "throttle_reasons": [
+              "sw_power_cap"
+            ]
+          },
+          "config": {
+            "ab_type": "CUDA_R_8I",
+            "algo_workspace_bytes": 0,
+            "bytes_working_set": 1610612736,
+            "cd_type": "CUDA_R_32I",
+            "compute_type": "CUBLAS_COMPUTE_32I",
+            "fast_accum": false,
+            "flops_per_gemm": 8796093022210.0,
+            "iterations": 2,
+            "k": 16384,
+            "m": 16384,
+            "n": 16384,
+            "scale_type": "CUDA_R_32I",
+            "size_selection": {
+              "fastest_swept": 8192,
+              "rule": "largest within tie_fraction of the fastest swept",
+              "tie_fraction": 0.02
+            },
+            "sweep_selection_rate": {
+              "16384": 242520148287000.0,
+              "2048": 225898727586000.0,
+              "4096": 214780574430000.0,
+              "8192": 243936945857000.0
+            },
+            "transa": "T",
+            "transb": "N",
+            "verification": {
+              "relative_error": 0.0,
+              "size": 512,
+              "tolerance": 0.0
+            },
+            "workspace_bytes": 67108864
+          },
+          "efficiency": 0.546966027765,
+          "id": "compute.tensor.int8.acc_int32",
+          "library": "cublaslt",
+          "measured": {
+            "best": 242296323698000.0,
+            "median": 242042114754000.0,
+            "samples": 11,
+            "stddev": 189575494884.0
+          },
+          "method": "gemm_cublaslt",
+          "per_clock": {
+            "unit": "OP/clk",
+            "value": 139893.951327
+          },
+          "status": "ok",
+          "theoretical": {
+            "source": "table:sm_120:rtx-pro",
+            "value": 442982400000000.0
+          },
+          "unit": "OP/s"
+        },
+        {
+          "class": "compute",
+          "conditions": {
+            "mem_clock_mhz_mean": 13365.0,
+            "power_source": "instant",
+            "power_w_mean": 144.995788991,
+            "sm_clock_mhz_max": 1710,
+            "sm_clock_mhz_mean": 1710.0,
+            "sm_clock_mhz_min": 1710,
+            "sm_clock_mhz_stddev": 0.0,
+            "temp_c_mean": 68.0,
+            "throttle_reasons": [
+              "sw_power_cap"
+            ]
+          },
+          "config": {
+            "ab_type": "CUDA_R_8F_E4M3",
+            "algo_workspace_bytes": 0,
+            "bytes_working_set": 268435456,
+            "cd_type": "CUDA_R_16BF",
+            "compute_type": "CUBLAS_COMPUTE_32F",
+            "fast_accum": true,
+            "flops_per_gemm": 1099511627780.0,
+            "iterations": 21,
+            "k": 8192,
+            "m": 8192,
+            "n": 8192,
+            "scale_type": "CUDA_R_32F",
+            "size_selection": {
+              "fastest_swept": 8192,
+              "rule": "largest within tie_fraction of the fastest swept",
+              "tie_fraction": 0.02
+            },
+            "sweep_selection_rate": {
+              "16384": 236369128051000.0,
+              "2048": 215749438565000.0,
+              "4096": 225914180393000.0,
+              "8192": 248593615691000.0
+            },
+            "transa": "T",
+            "transb": "N",
+            "verification": {
+              "relative_error": 0.0,
+              "size": 512,
+              "tolerance": 0.02
+            },
+            "workspace_bytes": 67108864
+          },
+          "efficiency": 0.520957819934,
+          "id": "compute.tensor.fp8.acc_fp32",
+          "library": "cublaslt",
+          "measured": {
+            "best": 230775145373000.0,
+            "median": 230489418306000.0,
+            "samples": 11,
+            "stddev": 128009017199.0
+          },
+          "method": "gemm_cublaslt",
+          "per_clock": {
+            "unit": "FLOP/clk",
+            "value": 134956.225364
+          },
+          "status": "ok",
+          "theoretical": {
+            "source": "table:sm_120:rtx-pro",
+            "value": 442982400000000.0
+          },
+          "unit": "FLOP/s"
+        },
+        {
+          "class": "compute",
+          "conditions": {
+            "mem_clock_mhz_mean": 13365.0,
+            "power_source": "instant",
+            "power_w_mean": 145.045911765,
+            "sm_clock_mhz_max": 1725,
+            "sm_clock_mhz_mean": 1725.0,
+            "sm_clock_mhz_min": 1725,
+            "sm_clock_mhz_stddev": 0.0,
+            "temp_c_mean": 67.0,
+            "throttle_reasons": [
+              "sw_power_cap"
+            ]
+          },
+          "config": {
+            "ab_type": "CUDA_R_4F_E2M1",
+            "algo_workspace_bytes": 0,
+            "block_scale_elements": 16,
+            "block_scale_mode": "VEC16_UE4M3",
+            "bytes_working_set": 838860800,
+            "cd_type": "CUDA_R_16BF",
+            "compute_type": "CUBLAS_COMPUTE_32F",
+            "fast_accum": false,
+            "flops_per_gemm": 8796093022210.0,
+            "iterations": 5,
+            "k": 16384,
+            "m": 16384,
+            "n": 16384,
+            "scale_type": "CUDA_R_32F",
+            "size_selection": {
+              "fastest_swept": 16384,
+              "rule": "largest within tie_fraction of the fastest swept",
+              "tie_fraction": 0.02
+            },
+            "sweep_selection_rate": {
+              "16384": 472586238097000.0,
+              "2048": 417733355872000.0,
+              "4096": 420481592013000.0,
+              "8192": 453551976507000.0
+            },
+            "transa": "T",
+            "transb": "N",
+            "verification": {
+              "relative_error": 0.0,
+              "size": 512,
+              "tolerance": 0.02
+            },
+            "workspace_bytes": 67108864
+          },
+          "efficiency": 0.531146837555,
+          "id": "compute.tensor.fp4.acc_fp32",
+          "library": "cublaslt",
+          "measured": {
+            "best": 470577401705000.0,
+            "median": 470286747032000.0,
+            "samples": 11,
+            "stddev": 232787217325.0
+          },
+          "method": "gemm_cublaslt",
+          "per_clock": {
+            "unit": "FLOP/clk",
+            "value": 272798.493742
+          },
+          "status": "ok",
+          "theoretical": {
+            "source": "table:sm_120:rtx-pro",
+            "value": 885964800000000.0
+          },
+          "unit": "FLOP/s"
+        },
+        {
+          "class": "memory",
+          "compile": {
+            "arch": "sm_120",
+            "options": [
+              "-arch=sm_120",
+              "--dopt=on",
+              "-Xptxas=-O3",
+              "--fmad=true",
+              "-lineinfo",
+              "--std=c++17"
+            ],
+            "source": "kernels/mem_stream.cu",
+            "source_sha256": "34f6c4ac864b31e1609a367f8f935144784b6809358b70e887fc3f00e97365e8"
+          },
+          "conditions": {
+            "mem_clock_mhz_mean": 13365.0,
+            "power_source": "instant",
+            "power_w_mean": 128.346038095,
+            "sm_clock_mhz_max": 2482,
+            "sm_clock_mhz_mean": 2470.71428571,
+            "sm_clock_mhz_min": 2467,
+            "sm_clock_mhz_stddev": 6.50549218518,
+            "temp_c_mean": 62.7142857143,
+            "throttle_reasons": []
+          },
+          "config": {
+            "blocks": 2240,
+            "buffers": 1,
+            "bytes_per_element_moved": 16,
+            "bytes_working_set": 8589934592,
+            "iterations": 7,
+            "rotate_bytes_over_l2": 105.5,
+            "rotate_elements": 331804448,
+            "threads": 256,
+            "working_set_over_l2": 170.7
+          },
+          "efficiency": 0.932591315597,
+          "id": "mem.dram.read",
+          "measured": {
+            "best": 626746128465.0,
+            "median": 623882755019.0,
+            "samples": 11,
+            "stddev": 1656087832.45
+          },
+          "method": "stream_read",
+          "per_clock": {
+            "unit": "B/clk",
+            "value": 254.051936954
+          },
+          "status": "ok",
+          "theoretical": {
+            "source": "table:sm_120:rtx-pro",
+            "value": 672048000000.0
+          },
+          "unit": "B/s"
+        },
+        {
+          "class": "memory",
+          "compile": {
+            "arch": "sm_120",
+            "options": [
+              "-arch=sm_120",
+              "--dopt=on",
+              "-Xptxas=-O3",
+              "--fmad=true",
+              "-lineinfo",
+              "--std=c++17"
+            ],
+            "source": "kernels/mem_stream.cu",
+            "source_sha256": "34f6c4ac864b31e1609a367f8f935144784b6809358b70e887fc3f00e97365e8"
+          },
+          "conditions": {
+            "mem_clock_mhz_mean": 13365.0,
+            "power_source": "instant",
+            "power_w_mean": 133.728324675,
+            "sm_clock_mhz_max": 2460,
+            "sm_clock_mhz_mean": 2460.0,
+            "sm_clock_mhz_min": 2460,
+            "sm_clock_mhz_stddev": 0.0,
+            "temp_c_mean": 62.0,
+            "throttle_reasons": []
+          },
+          "config": {
+            "blocks": 2240,
+            "buffers": 1,
+            "bytes_per_element_moved": 16,
+            "bytes_working_set": 8589934592,
+            "iterations": 5,
+            "rotate_bytes_over_l2": 105.5,
+            "rotate_elements": 331804448,
+            "threads": 256,
+            "working_set_over_l2": 170.7
+          },
+          "efficiency": 0.899740454679,
+          "id": "mem.dram.write",
+          "measured": {
+            "best": 604668773086.0,
+            "median": 604427003713.0,
+            "samples": 11,
+            "stddev": 320853236.262
+          },
+          "method": "stream_write",
+          "per_clock": {
+            "unit": "B/clk",
+            "value": 245.800314263
+          },
+          "status": "ok",
+          "theoretical": {
+            "source": "table:sm_120:rtx-pro",
+            "value": 672048000000.0
+          },
+          "unit": "B/s"
+        },
+        {
+          "class": "memory",
+          "compile": {
+            "arch": "sm_120",
+            "options": [
+              "-arch=sm_120",
+              "--dopt=on",
+              "-Xptxas=-O3",
+              "--fmad=true",
+              "-lineinfo",
+              "--std=c++17"
+            ],
+            "source": "kernels/mem_stream.cu",
+            "source_sha256": "34f6c4ac864b31e1609a367f8f935144784b6809358b70e887fc3f00e97365e8"
+          },
+          "conditions": {
+            "mem_clock_mhz_mean": 13365.0,
+            "power_source": "instant",
+            "power_w_mean": 123.502,
+            "sm_clock_mhz_max": 2467,
+            "sm_clock_mhz_mean": 2467.0,
+            "sm_clock_mhz_min": 2467,
+            "sm_clock_mhz_stddev": 0.0,
+            "temp_c_mean": 62.0,
+            "throttle_reasons": []
+          },
+          "config": {
+            "blocks": 2240,
+            "buffers": 2,
+            "bytes_per_element_moved": 32,
+            "bytes_working_set": 4294967296,
+            "iterations": 4,
+            "rotate_bytes_over_l2": 52.7,
+            "rotate_elements": 165902208,
+            "threads": 256,
+            "working_set_over_l2": 85.3
+          },
+          "efficiency": 0.811424530409,
+          "id": "mem.dram.copy",
+          "measured": {
+            "best": 545316232812.0,
+            "median": 544162406244.0,
+            "samples": 11,
+            "stddev": 582200135.283
+          },
+          "method": "stream_copy",
+          "per_clock": {
+            "unit": "B/clk",
+            "value": 221.044277589
+          },
+          "status": "ok",
+          "theoretical": {
+            "source": "table:sm_120:rtx-pro",
+            "value": 672048000000.0
+          },
+          "unit": "B/s"
+        },
+        {
+          "class": "memory",
+          "compile": {
+            "arch": "sm_120",
+            "options": [
+              "-arch=sm_120",
+              "--dopt=on",
+              "-Xptxas=-O3",
+              "--fmad=true",
+              "-lineinfo",
+              "--std=c++17"
+            ],
+            "source": "kernels/mem_stream.cu",
+            "source_sha256": "34f6c4ac864b31e1609a367f8f935144784b6809358b70e887fc3f00e97365e8"
+          },
+          "conditions": {
+            "mem_clock_mhz_mean": 13365.0,
+            "power_source": "instant",
+            "power_w_mean": 123.27382,
+            "sm_clock_mhz_max": 2467,
+            "sm_clock_mhz_mean": 2467.0,
+            "sm_clock_mhz_min": 2467,
+            "sm_clock_mhz_stddev": 0.0,
+            "temp_c_mean": 61.0,
+            "throttle_reasons": []
+          },
+          "config": {
+            "blocks": 2240,
+            "buffers": 3,
+            "bytes_per_element_moved": 48,
+            "bytes_working_set": 4294967296,
+            "iterations": 4,
+            "rotate_bytes_over_l2": 52.7,
+            "rotate_elements": 165902208,
+            "threads": 256,
+            "working_set_over_l2": 85.3
+          },
+          "efficiency": 0.837879414944,
+          "id": "mem.dram.triad",
+          "measured": {
+            "best": 563095185054.0,
+            "median": 562331997417.0,
+            "samples": 11,
+            "stddev": 453101564.039
+          },
+          "method": "stream_triad",
+          "per_clock": {
+            "unit": "B/clk",
+            "value": 228.250987051
+          },
+          "status": "ok",
+          "theoretical": {
+            "source": "table:sm_120:rtx-pro",
+            "value": 672048000000.0
+          },
+          "unit": "B/s"
+        },
+        {
+          "class": "memory",
+          "compile": {
+            "arch": "sm_120",
+            "options": [
+              "-arch=sm_120",
+              "--dopt=on",
+              "-Xptxas=-O3",
+              "--fmad=true",
+              "-lineinfo",
+              "--std=c++17"
+            ],
+            "source": "kernels/mem_stream.cu",
+            "source_sha256": "34f6c4ac864b31e1609a367f8f935144784b6809358b70e887fc3f00e97365e8"
+          },
+          "conditions": {
+            "mem_clock_mhz_mean": 13365.0,
+            "power_source": "instant",
+            "power_w_mean": 120.266111111,
+            "sm_clock_mhz_max": 2467,
+            "sm_clock_mhz_mean": 2467.0,
+            "sm_clock_mhz_min": 2467,
+            "sm_clock_mhz_stddev": 0.0,
+            "temp_c_mean": 61.0,
+            "throttle_reasons": []
+          },
+          "config": {
+            "blocks": 2240,
+            "buffers": 1,
+            "bytes_per_element_moved": 16,
+            "bytes_working_set": 8589934592,
+            "iterations": 1,
+            "rotate_bytes_over_l2": 105.5,
+            "rotate_elements": 331804448,
+            "scatter": "splitmix64",
+            "threads": 256,
+            "working_set_over_l2": 170.7
+          },
+          "id": "mem.dram.random",
+          "measured": {
+            "best": 115406131095.0,
+            "median": 115168957636.0,
+            "samples": 11,
+            "stddev": 373069043.091
+          },
+          "method": "random_gather",
+          "per_clock": {
+            "unit": "B/clk",
+            "value": 46.7799477484
+          },
+          "status": "ok",
+          "theoretical": {
+            "reason": "floor_not_a_roof",
+            "value": null
+          },
+          "unit": "B/s"
+        },
+        {
+          "class": "memory",
+          "compile": {
+            "arch": "sm_120",
+            "options": [
+              "-arch=sm_120",
+              "--dopt=on",
+              "-Xptxas=-O3",
+              "--fmad=true",
+              "-lineinfo",
+              "--std=c++17"
+            ],
+            "source": "kernels/mem_cache.cu",
+            "source_sha256": "d060b9bbeea5b47b508c0ba504735eb7b28b76a3bcd6fcd800d44371e0a5b632"
+          },
+          "conditions": {
+            "mem_clock_mhz_mean": 13365.0,
+            "power_source": "instant",
+            "power_w_mean": 145.025018868,
+            "sm_clock_mhz_max": 2512,
+            "sm_clock_mhz_mean": 2512.0,
+            "sm_clock_mhz_min": 2512,
+            "sm_clock_mhz_stddev": 0.0,
+            "temp_c_mean": 67.0,
+            "throttle_reasons": [
+              "sw_power_cap"
+            ]
+          },
+          "config": {
+            "blocks": 2240,
+            "buffers": 1,
+            "bytes_per_element_moved": 16,
+            "bytes_working_set": 16777216,
+            "bytes_working_set_total": 16777216,
+            "iterations": 19816,
+            "l1_bypassed": true,
+            "partition_aware": false,
+            "rotate_elements": 648032,
+            "threads": 256,
+            "working_set_over_aggregate_l1": 1.83,
+            "working_set_over_l2": 0.333
+          },
+          "id": "mem.l2.read",
+          "measured": {
+            "best": 3413152277920.0,
+            "median": 3408316258090.0,
+            "samples": 11,
+            "stddev": 3727323000.09
+          },
+          "method": "l2_read_cg",
+          "per_clock": {
+            "unit": "B/clk",
+            "value": 1358.73896414
+          },
+          "status": "ok",
+          "theoretical": {
+            "reason": "no_published_per_clock_rate",
+            "value": null
+          },
+          "unit": "B/s"
+        },
+        {
+          "class": "memory",
+          "compile": {
+            "arch": "sm_120",
+            "options": [
+              "-arch=sm_120",
+              "--dopt=on",
+              "-Xptxas=-O3",
+              "--fmad=true",
+              "-lineinfo",
+              "--std=c++17"
+            ],
+            "source": "kernels/mem_cache.cu",
+            "source_sha256": "d060b9bbeea5b47b508c0ba504735eb7b28b76a3bcd6fcd800d44371e0a5b632"
+          },
+          "conditions": {
+            "mem_clock_mhz_mean": 13365.0,
+            "power_source": "instant",
+            "power_w_mean": 127.873201835,
+            "sm_clock_mhz_max": 2632,
+            "sm_clock_mhz_mean": 2632.0,
+            "sm_clock_mhz_min": 2632,
+            "sm_clock_mhz_stddev": 0.0,
+            "temp_c_mean": 67.0,
+            "throttle_reasons": []
+          },
+          "config": {
+            "blocks": 2240,
+            "buffers": 1,
+            "bytes_per_element_moved": 16,
+            "bytes_working_set": 16777216,
+            "bytes_working_set_total": 16777216,
+            "iterations": 10835,
+            "l1_bypassed": true,
+            "partition_aware": false,
+            "rotate_elements": 648032,
+            "threads": 256,
+            "working_set_over_aggregate_l1": 1.83,
+            "working_set_over_l2": 0.333
+          },
+          "id": "mem.l2.write",
+          "measured": {
+            "best": 1811011769310.0,
+            "median": 1810172753820.0,
+            "samples": 11,
+            "stddev": 919739377.675
+          },
+          "method": "l2_write_cg",
+          "per_clock": {
+            "unit": "B/clk",
+            "value": 688.074380437
+          },
+          "status": "ok",
+          "theoretical": {
+            "reason": "no_published_per_clock_rate",
+            "value": null
+          },
+          "unit": "B/s"
+        },
+        {
+          "class": "memory",
+          "compile": {
+            "arch": "sm_120",
+            "options": [
+              "-arch=sm_120",
+              "--dopt=on",
+              "-Xptxas=-O3",
+              "--fmad=true",
+              "-lineinfo",
+              "--std=c++17"
+            ],
+            "source": "kernels/mem_cache.cu",
+            "source_sha256": "d060b9bbeea5b47b508c0ba504735eb7b28b76a3bcd6fcd800d44371e0a5b632"
+          },
+          "conditions": {
+            "mem_clock_mhz_mean": 13365.0,
+            "power_source": "instant",
+            "power_w_mean": 145.445839286,
+            "sm_clock_mhz_max": 2625,
+            "sm_clock_mhz_mean": 2600.35714286,
+            "sm_clock_mhz_min": 2595,
+            "sm_clock_mhz_stddev": 11.5414311593,
+            "temp_c_mean": 68.0,
+            "throttle_reasons": [
+              "sw_power_cap"
+            ]
+          },
+          "config": {
+            "blocks": 2048,
+            "buffers": 2,
+            "bytes_per_element_moved": 32,
+            "bytes_working_set": 8388608,
+            "bytes_working_set_total": 16777216,
+            "iterations": 18395,
+            "l1_bypassed": true,
+            "partition_aware": false,
+            "rotate_elements": 324000,
+            "threads": 256,
+            "working_set_over_aggregate_l1": 1.83,
+            "working_set_over_l2": 0.333
+          },
+          "id": "mem.l2.copy",
+          "measured": {
+            "best": 3013589996680.0,
+            "median": 3009943631470.0,
+            "samples": 11,
+            "stddev": 2040132729.21
+          },
+          "method": "l2_copy_cg",
+          "per_clock": {
+            "unit": "B/clk",
+            "value": 1161.3063571
+          },
+          "status": "ok",
+          "theoretical": {
+            "reason": "no_published_per_clock_rate",
+            "value": null
+          },
+          "unit": "B/s"
+        },
+        {
+          "class": "memory",
+          "compile": {
+            "arch": "sm_120",
+            "options": [
+              "-arch=sm_120",
+              "--dopt=on",
+              "-Xptxas=-O3",
+              "--fmad=true",
+              "-lineinfo",
+              "--std=c++17"
+            ],
+            "source": "kernels/mem_cache.cu",
+            "source_sha256": "d060b9bbeea5b47b508c0ba504735eb7b28b76a3bcd6fcd800d44371e0a5b632"
+          },
+          "conditions": {
+            "mem_clock_mhz_mean": 13365.0,
+            "power_source": "instant",
+            "power_w_mean": 145.005119266,
+            "sm_clock_mhz_max": 2317,
+            "sm_clock_mhz_mean": 2317.0,
+            "sm_clock_mhz_min": 2317,
+            "sm_clock_mhz_stddev": 0.0,
+            "temp_c_mean": 71.0550458716,
+            "throttle_reasons": [
+              "sw_power_cap"
+            ]
+          },
+          "config": {
+            "blocks": 420,
+            "blocks_per_sm": 6,
+            "bytes_per_sm": 32768,
+            "bytes_working_set": 32768,
+            "carveout": "driver default",
+            "iterations": 146468,
+            "l1_per_sm_bytes": 131072,
+            "rotate_elements": 1248,
+            "shared_bytes_per_block": 0,
+            "threads": 256,
+            "working_set_over_l1": 0.25
+          },
+          "id": "mem.l1.read",
+          "measured": {
+            "best": 20118385123800.0,
+            "median": 20102476533200.0,
+            "samples": 11,
+            "stddev": 20851926291.4
+          },
+          "method": "l1_read_ca",
+          "per_clock": {
+            "unit": "B/clk",
+            "value": 8682.94567275
+          },
+          "status": "ok",
+          "theoretical": {
+            "reason": "no_published_per_clock_rate",
+            "value": null
+          },
+          "unit": "B/s"
+        },
+        {
+          "class": "memory",
+          "compile": {
+            "arch": "sm_120",
+            "options": [
+              "-arch=sm_120",
+              "--dopt=on",
+              "-Xptxas=-O3",
+              "--fmad=true",
+              "-lineinfo",
+              "--std=c++17"
+            ],
+            "source": "kernels/mem_cache.cu",
+            "source_sha256": "d060b9bbeea5b47b508c0ba504735eb7b28b76a3bcd6fcd800d44371e0a5b632"
+          },
+          "conditions": {
+            "mem_clock_mhz_mean": 13365.0,
+            "power_source": "instant",
+            "power_w_mean": 144.963825688,
+            "sm_clock_mhz_max": 2310,
+            "sm_clock_mhz_mean": 2310.0,
+            "sm_clock_mhz_min": 2310,
+            "sm_clock_mhz_stddev": 0.0,
+            "temp_c_mean": 72.0,
+            "throttle_reasons": [
+              "sw_power_cap"
+            ]
+          },
+          "config": {
+            "access_bits": 128,
+            "accesses_per_thread": 4,
+            "bank_stride": 1,
+            "blocks": 280,
+            "blocks_per_sm": 4,
+            "bytes_working_set": 16384,
+            "carveout": "driver default",
+            "conflict_ways": 1,
+            "iterations": 449010,
+            "rotate_elements": 159,
+            "shared_bytes_per_block": 16384,
+            "shared_bytes_per_sm": 65536,
+            "shared_per_sm_bytes_max": 102400,
+            "threads": 256
+          },
+          "efficiency": 0.742820727898,
+          "id": "mem.shared.read",
+          "measured": {
+            "best": 20566031800900.0,
+            "median": 20550883015200.0,
+            "samples": 11,
+            "stddev": 14437558529.8
+          },
+          "method": "lds_conflict_free",
+          "per_clock": {
+            "unit": "B/clk",
+            "value": 8903.04406964
+          },
+          "status": "ok",
+          "theoretical": {
+            "source": "table:sm_120:rtx-pro",
+            "value": 27686400000000.0
+          },
+          "unit": "B/s"
+        },
+        {
+          "class": "memory",
+          "compile": {
+            "arch": "sm_120",
+            "options": [
+              "-arch=sm_120",
+              "--dopt=on",
+              "-Xptxas=-O3",
+              "--fmad=true",
+              "-lineinfo",
+              "--std=c++17"
+            ],
+            "source": "kernels/mem_cache.cu",
+            "source_sha256": "d060b9bbeea5b47b508c0ba504735eb7b28b76a3bcd6fcd800d44371e0a5b632"
+          },
+          "conditions": {
+            "mem_clock_mhz_mean": 13365.0,
+            "power_source": "instant",
+            "power_w_mean": 145.012081818,
+            "sm_clock_mhz_max": 2355,
+            "sm_clock_mhz_mean": 2355.0,
+            "sm_clock_mhz_min": 2355,
+            "sm_clock_mhz_stddev": 0.0,
+            "temp_c_mean": 72.0,
+            "throttle_reasons": [
+              "sw_power_cap"
+            ]
+          },
+          "config": {
+            "access_bits": 128,
+            "accesses_per_thread": 4,
+            "bank_stride": 1,
+            "blocks": 280,
+            "blocks_per_sm": 4,
+            "bytes_working_set": 16384,
+            "carveout": "driver default",
+            "conflict_ways": 1,
+            "iterations": 463878,
+            "rotate_elements": 159,
+            "shared_bytes_per_block": 16384,
+            "shared_bytes_per_sm": 65536,
+            "shared_per_sm_bytes_max": 102400,
+            "threads": 256
+          },
+          "efficiency": 0.763402227103,
+          "id": "mem.shared.write",
+          "measured": {
+            "best": 21135859420500.0,
+            "median": 21121514217900.0,
+            "samples": 11,
+            "stddev": 7336832065.73
+          },
+          "method": "sts_conflict_free",
+          "per_clock": {
+            "unit": "B/clk",
+            "value": 8974.88722738
+          },
+          "status": "ok",
+          "theoretical": {
+            "source": "table:sm_120:rtx-pro",
+            "value": 27686400000000.0
+          },
+          "unit": "B/s"
+        },
+        {
+          "class": "memory",
+          "compile": {
+            "arch": "sm_120",
+            "options": [
+              "-arch=sm_120",
+              "--dopt=on",
+              "-Xptxas=-O3",
+              "--fmad=true",
+              "-lineinfo",
+              "--std=c++17"
+            ],
+            "source": "kernels/mem_cache.cu",
+            "source_sha256": "d060b9bbeea5b47b508c0ba504735eb7b28b76a3bcd6fcd800d44371e0a5b632"
+          },
+          "conditions": {
+            "mem_clock_mhz_mean": 13365.0,
+            "power_source": "instant",
+            "power_w_mean": 140.23846789,
+            "sm_clock_mhz_max": 2632,
+            "sm_clock_mhz_mean": 2632.0,
+            "sm_clock_mhz_min": 2632,
+            "sm_clock_mhz_stddev": 0.0,
+            "temp_c_mean": 72.0,
+            "throttle_reasons": []
+          },
+          "config": {
+            "access_bits": 128,
+            "accesses_per_thread": 4,
+            "bank_stride": 2,
+            "blocks": 280,
+            "blocks_per_sm": 4,
+            "bytes_working_set": 16384,
+            "carveout": "driver default",
+            "conflict_ways": 2,
+            "iterations": 256888,
+            "rotate_elements": 159,
+            "shared_bytes_per_block": 16384,
+            "shared_bytes_per_sm": 65536,
+            "shared_per_sm_bytes_max": 102400,
+            "threads": 256
+          },
+          "efficiency": 0.426108716912,
+          "id": "mem.shared.conflict_2way",
+          "measured": {
+            "best": 11797416379900.0,
+            "median": 11796278481300.0,
+            "samples": 11,
+            "stddev": 962642228.089
+          },
+          "method": "lds_conflict_2way",
+          "per_clock": {
+            "unit": "B/clk",
+            "value": 4482.30105619
+          },
+          "status": "ok",
+          "theoretical": {
+            "source": "table:sm_120:rtx-pro",
+            "value": 27686400000000.0
+          },
+          "unit": "B/s"
+        },
+        {
+          "class": "memory",
+          "compile": {
+            "arch": "sm_120",
+            "options": [
+              "-arch=sm_120",
+              "--dopt=on",
+              "-Xptxas=-O3",
+              "--fmad=true",
+              "-lineinfo",
+              "--std=c++17"
+            ],
+            "source": "kernels/mem_cache.cu",
+            "source_sha256": "d060b9bbeea5b47b508c0ba504735eb7b28b76a3bcd6fcd800d44371e0a5b632"
+          },
+          "conditions": {
+            "mem_clock_mhz_mean": 13365.0,
+            "power_source": "instant",
+            "power_w_mean": 108.381678899,
+            "sm_clock_mhz_max": 2632,
+            "sm_clock_mhz_mean": 2632.0,
+            "sm_clock_mhz_min": 2632,
+            "sm_clock_mhz_stddev": 0.0,
+            "temp_c_mean": 68.0,
+            "throttle_reasons": []
+          },
+          "config": {
+            "access_bits": 128,
+            "accesses_per_thread": 4,
+            "bank_stride": 4,
+            "blocks": 280,
+            "blocks_per_sm": 4,
+            "bytes_working_set": 16384,
+            "carveout": "driver default",
+            "conflict_ways": 4,
+            "iterations": 128576,
+            "rotate_elements": 159,
+            "shared_bytes_per_block": 16384,
+            "shared_bytes_per_sm": 65536,
+            "shared_per_sm_bytes_max": 102400,
+            "threads": 256
+          },
+          "efficiency": 0.213233964553,
+          "id": "mem.shared.conflict_4way",
+          "measured": {
+            "best": 5903680836200.0,
+            "median": 5902404856030.0,
+            "samples": 11,
+            "stddev": 616399449.583
+          },
+          "method": "lds_conflict_4way",
+          "per_clock": {
+            "unit": "B/clk",
+            "value": 2243.03983138
+          },
+          "status": "ok",
+          "theoretical": {
+            "source": "table:sm_120:rtx-pro",
+            "value": 27686400000000.0
+          },
+          "unit": "B/s"
+        },
+        {
+          "class": "memory",
+          "compile": {
+            "arch": "sm_120",
+            "options": [
+              "-arch=sm_120",
+              "--dopt=on",
+              "-Xptxas=-O3",
+              "--fmad=true",
+              "-lineinfo",
+              "--std=c++17"
+            ],
+            "source": "kernels/mem_stream.cu",
+            "source_sha256": "34f6c4ac864b31e1609a367f8f935144784b6809358b70e887fc3f00e97365e8"
+          },
+          "conditions": {
+            "mem_clock_mhz_mean": 13365.0,
+            "power_source": "instant",
+            "power_w_mean": 59.1034725275,
+            "sm_clock_mhz_max": 2467,
+            "sm_clock_mhz_mean": 2467.0,
+            "sm_clock_mhz_min": 2467,
+            "sm_clock_mhz_stddev": 0.0,
+            "temp_c_mean": 61.0,
+            "throttle_reasons": []
+          },
+          "config": {
+            "blocks": 2240,
+            "buffers": 1,
+            "bytes_per_element_moved": 16,
+            "bytes_working_set": 1073741824,
+            "host_memory": "pinned_mapped",
+            "host_numa_node": 0,
+            "iterations": 2,
+            "rotate_elements": 41475552,
+            "threads": 256,
+            "working_set_over_l2": 21.3
+          },
+          "efficiency": 0.813552707406,
+          "id": "mem.host_mapped.read",
+          "measured": {
+            "best": 25633168381.1,
+            "median": 25569334048.2,
+            "samples": 11,
+            "stddev": 25907596.7896
+          },
+          "method": "kernel_read_mapped_host",
+          "per_clock": {
+            "unit": "B/clk",
+            "value": 10.3904209084
+          },
+          "status": "ok",
+          "theoretical": {
+            "source": "table:pcie-gen4-x16",
+            "value": 31507692307.7
+          },
+          "unit": "B/s"
+        },
+        {
+          "class": "memory",
+          "conditions": {
+            "mem_clock_mhz_mean": 13365.0,
+            "power_source": "instant",
+            "power_w_mean": 57.2973431373,
+            "sm_clock_mhz_max": 2467,
+            "sm_clock_mhz_mean": 2467.0,
+            "sm_clock_mhz_min": 2467,
+            "sm_clock_mhz_stddev": 0.0,
+            "temp_c_mean": 58.3431372549,
+            "throttle_reasons": []
+          },
+          "config": {
+            "bytes": 67108864,
+            "direction": "h2d",
+            "host_memory": "pinned",
+            "iterations": 39,
+            "link": {
+              "gen": 4,
+              "kind": "pcie",
+              "width": 16
+            },
+            "numa": {
+              "gpu_affinity": 1,
+              "host_buffer_nodes": [
+                0
+              ],
+              "local": false,
+              "nodes": 4
+            },
+            "sweep": [
+              {
+                "bandwidth_bps": 2785881203.15,
+                "bytes": 4096,
+                "copies_per_replay": 1024,
+                "replays": 3
+              },
+              {
+                "bandwidth_bps": 5441193607.8,
+                "bytes": 8192,
+                "copies_per_replay": 1024,
+                "replays": 3
+              },
+              {
+                "bandwidth_bps": 10818612862.8,
+                "bytes": 16384,
+                "copies_per_replay": 512,
+                "replays": 6
+              },
+              {
+                "bandwidth_bps": 16564250960.7,
+                "bytes": 32768,
+                "copies_per_replay": 256,
+                "replays": 9
+              },
+              {
+                "bandwidth_bps": 20943315483.2,
+                "bytes": 65536,
+                "copies_per_replay": 128,
+                "replays": 12
+              },
+              {
+                "bandwidth_bps": 23981703163.3,
+                "bytes": 131072,
+                "copies_per_replay": 64,
+                "replays": 14
+              },
+              {
+                "bandwidth_bps": 25833443859.5,
+                "bytes": 262144,
+                "copies_per_replay": 32,
+                "replays": 15
+              },
+              {
+                "bandwidth_bps": 26875537944.7,
+                "bytes": 524288,
+                "copies_per_replay": 16,
+                "replays": 15
+              },
+              {
+                "bandwidth_bps": 27395128811.4,
+                "bytes": 1048576,
+                "copies_per_replay": 8,
+                "replays": 16
+              },
+              {
+                "bandwidth_bps": 27694316189.2,
+                "bytes": 2097152,
+                "copies_per_replay": 4,
+                "replays": 16
+              },
+              {
+                "bandwidth_bps": 27856913845.7,
+                "bytes": 4194304,
+                "copies_per_replay": 2,
+                "replays": 16
+              },
+              {
+                "bandwidth_bps": 27940791694.1,
+                "bytes": 8388608,
+                "copies_per_replay": 1,
+                "replays": 16
+              },
+              {
+                "bandwidth_bps": 27982921713.6,
+                "bytes": 16777216,
+                "copies_per_replay": 1,
+                "replays": 8
+              },
+              {
+                "bandwidth_bps": 28002536938.1,
+                "bytes": 33554432,
+                "copies_per_replay": 1,
+                "replays": 4
+              },
+              {
+                "bandwidth_bps": 28018810078.3,
+                "bytes": 67108864,
+                "copies_per_replay": 1,
+                "replays": 2
+              }
+            ],
+            "sweep_loop": "cuda_graph"
+          },
+          "efficiency": 0.889091031944,
+          "id": "xfer.host.h2d.pinned",
+          "measured": {
+            "best": 28013206668.0,
+            "median": 27941326788.2,
+            "samples": 11,
+            "stddev": 47096093.7523
+          },
+          "method": "memcpy_async_pinned",
+          "per_clock": {
+            "unit": "B/clk",
+            "value": 11.3551709234
+          },
+          "status": "ok",
+          "theoretical": {
+            "source": "table:pcie-gen4-x16",
+            "value": 31507692307.7
+          },
+          "unit": "B/s"
+        },
+        {
+          "class": "memory",
+          "conditions": {
+            "mem_clock_mhz_mean": 13365.0,
+            "power_source": "instant",
+            "power_w_mean": 56.153754717,
+            "sm_clock_mhz_max": 2467,
+            "sm_clock_mhz_mean": 2467.0,
+            "sm_clock_mhz_min": 2467,
+            "sm_clock_mhz_stddev": 0.0,
+            "temp_c_mean": 56.4150943396,
+            "throttle_reasons": []
+          },
+          "config": {
+            "bytes": 67108864,
+            "direction": "d2h",
+            "host_memory": "pinned",
+            "iterations": 41,
+            "link": {
+              "gen": 4,
+              "kind": "pcie",
+              "width": 16
+            },
+            "numa": {
+              "gpu_affinity": 1,
+              "host_buffer_nodes": [
+                0
+              ],
+              "local": false,
+              "nodes": 4
+            },
+            "sweep": [
+              {
+                "bandwidth_bps": 2863897610.41,
+                "bytes": 4096,
+                "copies_per_replay": 1024,
+                "replays": 3
+              },
+              {
+                "bandwidth_bps": 5763940447.91,
+                "bytes": 8192,
+                "copies_per_replay": 1024,
+                "replays": 3
+              },
+              {
+                "bandwidth_bps": 11511511910.0,
+                "bytes": 16384,
+                "copies_per_replay": 512,
+                "replays": 6
+              },
+              {
+                "bandwidth_bps": 22105068385.8,
+                "bytes": 32768,
+                "copies_per_replay": 256,
+                "replays": 13
+              },
+              {
+                "bandwidth_bps": 28082595983.5,
+                "bytes": 65536,
+                "copies_per_replay": 128,
+                "replays": 16
+              },
+              {
+                "bandwidth_bps": 28178248593.8,
+                "bytes": 131072,
+                "copies_per_replay": 64,
+                "replays": 16
+              },
+              {
+                "bandwidth_bps": 28225085608.9,
+                "bytes": 262144,
+                "copies_per_replay": 32,
+                "replays": 16
+              },
+              {
+                "bandwidth_bps": 28258743868.1,
+                "bytes": 524288,
+                "copies_per_replay": 16,
+                "replays": 16
+              },
+              {
+                "bandwidth_bps": 28179004616.1,
+                "bytes": 1048576,
+                "copies_per_replay": 8,
+                "replays": 16
+              },
+              {
+                "bandwidth_bps": 28231732691.9,
+                "bytes": 2097152,
+                "copies_per_replay": 4,
+                "replays": 16
+              },
+              {
+                "bandwidth_bps": 28258553787.5,
+                "bytes": 4194304,
+                "copies_per_replay": 2,
+                "replays": 16
+              },
+              {
+                "bandwidth_bps": 28272075745.6,
+                "bytes": 8388608,
+                "copies_per_replay": 1,
+                "replays": 16
+              },
+              {
+                "bandwidth_bps": 28279131371.8,
+                "bytes": 16777216,
+                "copies_per_replay": 1,
+                "replays": 8
+              },
+              {
+                "bandwidth_bps": 28281989845.6,
+                "bytes": 33554432,
+                "copies_per_replay": 1,
+                "replays": 4
+              },
+              {
+                "bandwidth_bps": 28283325513.5,
+                "bytes": 67108864,
+                "copies_per_replay": 1,
+                "replays": 2
+              }
+            ],
+            "sweep_loop": "cuda_graph"
+          },
+          "efficiency": 0.897905411564,
+          "id": "xfer.host.d2h.pinned",
+          "measured": {
+            "best": 28290927429.0,
+            "median": 28231070453.2,
+            "samples": 11,
+            "stddev": 18121145.5814
+          },
+          "method": "memcpy_async_pinned",
+          "per_clock": {
+            "unit": "B/clk",
+            "value": 11.4677452083
+          },
+          "status": "ok",
+          "theoretical": {
+            "source": "table:pcie-gen4-x16",
+            "value": 31507692307.7
+          },
+          "unit": "B/s"
+        },
+        {
+          "class": "memory",
+          "conditions": {
+            "mem_clock_mhz_mean": 13365.0,
+            "power_source": "instant",
+            "power_w_mean": 50.6421182796,
+            "sm_clock_mhz_max": 2467,
+            "sm_clock_mhz_mean": 2467.0,
+            "sm_clock_mhz_min": 2467,
+            "sm_clock_mhz_stddev": 0.0,
+            "temp_c_mean": 55.0,
+            "throttle_reasons": []
+          },
+          "config": {
+            "bytes": 67108864,
+            "direction": "h2d",
+            "host_memory": "pageable",
+            "iterations": 20,
+            "link": {
+              "gen": 4,
+              "kind": "pcie",
+              "width": 16
+            },
+            "numa": {
+              "gpu_affinity": 1,
+              "host_buffer_nodes": [
+                0
+              ],
+              "local": false,
+              "nodes": 4
+            },
+            "sweep": [
+              {
+                "bandwidth_bps": 2328120136.24,
+                "bytes": 4096,
+                "copies_per_replay": 1024,
+                "replays": 2
+              },
+              {
+                "bandwidth_bps": 4731584795.03,
+                "bytes": 8192,
+                "copies_per_replay": 1024,
+                "replays": 2
+              },
+              {
+                "bandwidth_bps": 8097424931.22,
+                "bytes": 16384,
+                "copies_per_replay": 512,
+                "replays": 4
+              },
+              {
+                "bandwidth_bps": 11898407234.9,
+                "bytes": 32768,
+                "copies_per_replay": 256,
+                "replays": 7
+              },
+              {
+                "bandwidth_bps": 15520458354.9,
+                "bytes": 65536,
+                "copies_per_replay": 128,
+                "replays": 9
+              },
+              {
+                "bandwidth_bps": 16343482257.9,
+                "bytes": 131072,
+                "copies_per_replay": 64,
+                "replays": 9
+              },
+              {
+                "bandwidth_bps": 19461584463.1,
+                "bytes": 262144,
+                "copies_per_replay": 32,
+                "replays": 11
+              },
+              {
+                "bandwidth_bps": 21391797033.5,
+                "bytes": 524288,
+                "copies_per_replay": 16,
+                "replays": 12
+              },
+              {
+                "bandwidth_bps": 22064422053.1,
+                "bytes": 1048576,
+                "copies_per_replay": 8,
+                "replays": 13
+              },
+              {
+                "bandwidth_bps": 22040328385.2,
+                "bytes": 2097152,
+                "copies_per_replay": 4,
+                "replays": 12
+              },
+              {
+                "bandwidth_bps": 22010244369.7,
+                "bytes": 4194304,
+                "copies_per_replay": 2,
+                "replays": 11
+              },
+              {
+                "bandwidth_bps": 22039711708.3,
+                "bytes": 8388608,
+                "copies_per_replay": 1,
+                "replays": 12
+              },
+              {
+                "bandwidth_bps": 22012568433.6,
+                "bytes": 16777216,
+                "copies_per_replay": 1,
+                "replays": 6
+              },
+              {
+                "bandwidth_bps": 17373617252.6,
+                "bytes": 33554432,
+                "copies_per_replay": 1,
+                "replays": 2
+              },
+              {
+                "bandwidth_bps": 15493029647.6,
+                "bytes": 67108864,
+                "copies_per_replay": 1,
+                "replays": 1
+              }
+            ],
+            "sweep_loop": "cuda_graph"
+          },
+          "efficiency": 0.494060651554,
+          "id": "xfer.host.h2d.pageable",
+          "measured": {
+            "best": 15566710990.5,
+            "median": 15499906381.6,
+            "samples": 11,
+            "stddev": 39597623.9483
+          },
+          "method": "memcpy_async_pageable",
+          "per_clock": {
+            "unit": "B/clk",
+            "value": 6.30997608047
+          },
+          "status": "ok",
+          "theoretical": {
+            "source": "table:pcie-gen4-x16",
+            "value": 31507692307.7
+          },
+          "unit": "B/s"
+        },
+        {
+          "class": "memory",
+          "conditions": {
+            "mem_clock_mhz_mean": 13365.0,
+            "power_source": "instant",
+            "power_w_mean": 49.8872673267,
+            "sm_clock_mhz_max": 2482,
+            "sm_clock_mhz_mean": 2478.88118812,
+            "sm_clock_mhz_min": 2467,
+            "sm_clock_mhz_stddev": 6.11765825903,
+            "temp_c_mean": 53.6930693069,
+            "throttle_reasons": []
+          },
+          "config": {
+            "bytes": 67108864,
+            "direction": "d2h",
+            "host_memory": "pageable",
+            "iterations": 18,
+            "link": {
+              "gen": 4,
+              "kind": "pcie",
+              "width": 16
+            },
+            "numa": {
+              "gpu_affinity": 1,
+              "host_buffer_nodes": [
+                0
+              ],
+              "local": false,
+              "nodes": 4
+            },
+            "sweep": [
+              {
+                "bandwidth_bps": 647672143.391,
+                "bytes": 4096,
+                "copies_per_replay": 1024,
+                "replays": 1
+              },
+              {
+                "bandwidth_bps": 1195699689.28,
+                "bytes": 8192,
+                "copies_per_replay": 1024,
+                "replays": 1
+              },
+              {
+                "bandwidth_bps": 2216618915.04,
+                "bytes": 16384,
+                "copies_per_replay": 512,
+                "replays": 1
+              },
+              {
+                "bandwidth_bps": 3900197944.13,
+                "bytes": 32768,
+                "copies_per_replay": 256,
+                "replays": 2
+              },
+              {
+                "bandwidth_bps": 5797721904.01,
+                "bytes": 65536,
+                "copies_per_replay": 128,
+                "replays": 3
+              },
+              {
+                "bandwidth_bps": 7839703137.4,
+                "bytes": 131072,
+                "copies_per_replay": 64,
+                "replays": 4
+              },
+              {
+                "bandwidth_bps": 9497144702.42,
+                "bytes": 262144,
+                "copies_per_replay": 32,
+                "replays": 5
+              },
+              {
+                "bandwidth_bps": 10707038934.0,
+                "bytes": 524288,
+                "copies_per_replay": 16,
+                "replays": 6
+              },
+              {
+                "bandwidth_bps": 11471129932.9,
+                "bytes": 1048576,
+                "copies_per_replay": 8,
+                "replays": 6
+              },
+              {
+                "bandwidth_bps": 12578369069.3,
+                "bytes": 2097152,
+                "copies_per_replay": 4,
+                "replays": 7
+              },
+              {
+                "bandwidth_bps": 12938172122.3,
+                "bytes": 4194304,
+                "copies_per_replay": 2,
+                "replays": 7
+              },
+              {
+                "bandwidth_bps": 12516510411.2,
+                "bytes": 8388608,
+                "copies_per_replay": 1,
+                "replays": 7
+              },
+              {
+                "bandwidth_bps": 12397544603.0,
+                "bytes": 16777216,
+                "copies_per_replay": 1,
+                "replays": 3
+              },
+              {
+                "bandwidth_bps": 12846574653.2,
+                "bytes": 33554432,
+                "copies_per_replay": 1,
+                "replays": 1
+              },
+              {
+                "bandwidth_bps": 13092307565.1,
+                "bytes": 67108864,
+                "copies_per_replay": 1,
+                "replays": 1
+              }
+            ],
+            "sweep_loop": "cuda_graph"
+          },
+          "efficiency": 0.413667955113,
+          "id": "xfer.host.d2h.pageable",
+          "measured": {
+            "best": 13033722647.3,
+            "median": 13005737338.4,
+            "samples": 11,
+            "stddev": 18699980.315
+          },
+          "method": "memcpy_async_pageable",
+          "per_clock": {
+            "unit": "B/clk",
+            "value": 5.25129840744
+          },
+          "status": "ok",
+          "theoretical": {
+            "source": "table:pcie-gen4-x16",
+            "value": 31507692307.7
+          },
+          "unit": "B/s"
+        },
+        {
+          "class": "memory",
+          "conditions": {
+            "mem_clock_mhz_mean": 13365.0,
+            "power_source": "instant",
+            "power_w_mean": 58.4431481481,
+            "sm_clock_mhz_max": 2482,
+            "sm_clock_mhz_mean": 2482.0,
+            "sm_clock_mhz_min": 2482,
+            "sm_clock_mhz_stddev": 0.0,
+            "temp_c_mean": 53.0,
+            "throttle_reasons": []
+          },
+          "config": {
+            "bytes": 67108864,
+            "bytes_per_iteration": 134217728,
+            "direction": "bidirectional",
+            "host_memory": "pinned",
+            "iterations": 30,
+            "link": {
+              "gen": 4,
+              "kind": "pcie",
+              "width": 16
+            },
+            "numa": {
+              "gpu_affinity": 1,
+              "host_buffer_nodes": [
+                0,
+                0
+              ],
+              "local": false,
+              "nodes": 4
+            },
+            "streams": 2
+          },
+          "efficiency": 0.644955190064,
+          "id": "xfer.host.bidirectional",
+          "measured": {
+            "best": 40642099361.6,
+            "median": 40586871631.1,
+            "samples": 11,
+            "stddev": 44958499.2541
+          },
+          "method": "memcpy_async_duplex",
+          "per_clock": {
+            "unit": "B/clk",
+            "value": 16.3747378572
+          },
+          "status": "ok",
+          "theoretical": {
+            "source": "table:pcie-gen4-x16",
+            "value": 63015384615.4
+          },
+          "unit": "B/s"
+        },
+        {
+          "class": "memory",
+          "conditions": {
+            "mem_clock_mhz_mean": 13365.0,
+            "power_source": "instant",
+            "power_w_mean": 52.1719646018,
+            "sm_clock_mhz_max": 2482,
+            "sm_clock_mhz_mean": 2482.0,
+            "sm_clock_mhz_min": 2482,
+            "sm_clock_mhz_stddev": 0.0,
+            "temp_c_mean": 53.0,
+            "throttle_reasons": []
+          },
+          "config": {
+            "bytes": 4,
+            "direction": "round_trip",
+            "host_memory": "pinned",
+            "host_overhead_sensitive": true,
+            "iterations": 199,
+            "link": {
+              "gen": 4,
+              "kind": "pcie",
+              "width": 16
+            },
+            "loop": "cuda_graph",
+            "numa": {
+              "gpu_affinity": 1,
+              "host_buffer_nodes": [
+                0
+              ],
+              "local": false,
+              "nodes": 4
+            },
+            "round_trips_per_iteration": 128
+          },
+          "id": "xfer.host.latency",
+          "measured": {
+            "best": 3.88538178487,
+            "median": 4.08514210926,
+            "samples": 11,
+            "stddev": 0.0652395004717
+          },
+          "method": "round_trip_graph",
+          "per_clock": null,
+          "status": "ok",
+          "theoretical": {
+            "reason": "latency_no_published_figure",
+            "value": null
+          },
+          "unit": "\u00b5s"
+        }
+      ],
+      "sm_count": 70,
+      "uuid": "GPU-a45efbf1-c9d4-cd58-4d6e-45daba5ee2d4"
+    }
+  ],
+  "host": {
+    "cores": 48,
+    "cpu_model": "AMD EPYC 7443P 24-Core Processor",
+    "hostname": "cuda",
+    "kernel": "7.0.0-30-generic",
+    "numa_nodes": 4,
+    "os": "Ubuntu 24.04.4 LTS",
+    "ram_bytes": 270293065728
+  },
+  "interconnect": {
+    "complete": true,
+    "devices": [
+      0,
+      1
+    ],
+    "modes": [
+      "xfer.p2p.unidirectional",
+      "xfer.p2p.bidirectional"
+    ],
+    "p2p_access": [
+      [
+        null,
+        true
+      ],
+      [
+        true,
+        null
+      ]
+    ],
+    "p2p_bidirectional_bps": [
+      [
+        null,
+        49755726284.4
+      ],
+      [
+        49971089552.1,
+        null
+      ]
+    ],
+    "p2p_link_class": [
+      [
+        null,
+        "peer"
+      ],
+      [
+        "peer",
+        null
+      ]
+    ],
+    "p2p_nvlink": [
+      [
+        null,
+        {
+          "links": 0,
+          "speed_mbps": null
+        }
+      ],
+      [
+        {
+          "links": 0,
+          "speed_mbps": null
+        },
+        null
+      ]
+    ],
+    "p2p_unidirectional_bps": [
+      [
+        null,
+        27793908333.9
+      ],
+      [
+        27742017999.8,
+        null
+      ]
+    ],
+    "reason": "",
+    "results": [
+      {
+        "class": "interconnect",
+        "conditions": {
+          "mem_clock_mhz_mean": 13365.0,
+          "power_source": "instant",
+          "power_w_mean": 52.5775543478,
+          "sm_clock_mhz_max": 2482,
+          "sm_clock_mhz_mean": 2482.0,
+          "sm_clock_mhz_min": 2482,
+          "sm_clock_mhz_stddev": 0.0,
+          "temp_c_mean": 52.0,
+          "throttle_reasons": []
+        },
+        "config": {
+          "bytes": 67108864,
+          "destination": 1,
+          "iterations": 35,
+          "source": 0
+        },
+        "id": "xfer.p2p.unidirectional.0_1",
+        "measured": {
+          "best": 27793908333.9,
+          "median": 27728388934.9,
+          "samples": 11,
+          "stddev": 56048058.6933
+        },
+        "method": "memcpy_peer_async",
+        "per_clock": {
+          "unit": "B/clk",
+          "value": 11.1981903038
+        },
+        "status": "ok",
+        "theoretical": {
+          "reason": "p2p_path_not_derivable",
+          "value": null
+        },
+        "unit": "B/s"
+      },
+      {
+        "class": "interconnect",
+        "conditions": {
+          "mem_clock_mhz_mean": 13365.0,
+          "power_source": "instant",
+          "power_w_mean": 46.87248,
+          "sm_clock_mhz_max": 2482,
+          "sm_clock_mhz_mean": 2482.0,
+          "sm_clock_mhz_min": 2482,
+          "sm_clock_mhz_stddev": 0.0,
+          "temp_c_mean": 37.38,
+          "throttle_reasons": []
+        },
+        "config": {
+          "bytes": 67108864,
+          "destination": 0,
+          "iterations": 38,
+          "source": 1
+        },
+        "id": "xfer.p2p.unidirectional.1_0",
+        "measured": {
+          "best": 27742017999.8,
+          "median": 27683712150.0,
+          "samples": 11,
+          "stddev": 40077163.65
+        },
+        "method": "memcpy_peer_async",
+        "per_clock": {
+          "unit": "B/clk",
+          "value": 11.1772836421
+        },
+        "status": "ok",
+        "theoretical": {
+          "reason": "p2p_path_not_derivable",
+          "value": null
+        },
+        "unit": "B/s"
+      },
+      {
+        "class": "interconnect",
+        "conditions": {
+          "mem_clock_mhz_mean": 13365.0,
+          "power_source": "instant",
+          "power_w_mean": 59.2411603774,
+          "sm_clock_mhz_max": 2482,
+          "sm_clock_mhz_mean": 2482.0,
+          "sm_clock_mhz_min": 2482,
+          "sm_clock_mhz_stddev": 0.0,
+          "temp_c_mean": 51.0,
+          "throttle_reasons": []
+        },
+        "config": {
+          "bytes": 67108864,
+          "bytes_per_iteration": 134217728,
+          "destination": 1,
+          "iterations": 36,
+          "source": 0,
+          "streams": 2
+        },
+        "id": "xfer.p2p.bidirectional.0_1",
+        "measured": {
+          "best": 49755726284.4,
+          "median": 49556128354.1,
+          "samples": 11,
+          "stddev": 145081328.42
+        },
+        "method": "memcpy_peer_async_duplex",
+        "per_clock": {
+          "unit": "B/clk",
+          "value": 20.0466262226
+        },
+        "status": "ok",
+        "theoretical": {
+          "reason": "p2p_path_not_derivable",
+          "value": null
+        },
+        "unit": "B/s"
+      },
+      {
+        "class": "interconnect",
+        "conditions": {
+          "mem_clock_mhz_mean": 13365.0,
+          "power_source": "instant",
+          "power_w_mean": 50.7215238095,
+          "sm_clock_mhz_max": 2482,
+          "sm_clock_mhz_mean": 2482.0,
+          "sm_clock_mhz_min": 2482,
+          "sm_clock_mhz_stddev": 0.0,
+          "temp_c_mean": 39.0,
+          "throttle_reasons": []
+        },
+        "config": {
+          "bytes": 67108864,
+          "bytes_per_iteration": 134217728,
+          "destination": 0,
+          "iterations": 36,
+          "source": 1,
+          "streams": 2
+        },
+        "id": "xfer.p2p.bidirectional.1_0",
+        "measured": {
+          "best": 49971089552.1,
+          "median": 49638837571.5,
+          "samples": 11,
+          "stddev": 132626830.674
+        },
+        "method": "memcpy_peer_async_duplex",
+        "per_clock": {
+          "unit": "B/clk",
+          "value": 20.133396274
+        },
+        "status": "ok",
+        "theoretical": {
+          "reason": "p2p_path_not_derivable",
+          "value": null
+        },
+        "unit": "B/s"
+      }
+    ],
+    "sample_strategy": null,
+    "sampled": false,
+    "status": "ok"
+  },
+  "notes": [
+    "not run, optional in a default run: compute.tensor.fp32.emulated_bf16x9, compute.tensor.fp64.acc_fp64; --optional includes them",
+    "device 0: 18 result(s) taken while throttling (sw_power_cap); SM clock held 1710-2600 of 3090 MHz (55-84%), so measured rates and efficiency reflect that clock, not the boost the theoretical assumes",
+    "interconnect: measured over every visible device (0, 1); this run's per-device ceilings are device 0 only"
+  ],
+  "run": {
+    "args": [
+      "run",
+      "--save"
+    ],
+    "duration_s": 101.539743357,
+    "mode": "peak",
+    "started_utc": "2026-09-08T16:32:34Z"
+  },
+  "schema_version": "1.0.0",
+  "tool": {
+    "commit": "f9dcd67437f7f99fd1ed2258b3520c2f7d56efec",
+    "name": "roofline",
+    "version": "0.1.0"
+  },
+  "toolchain": {
+    "cuda_driver": "13.2",
+    "cuda_runtime": "13.2",
+    "cupy": "14.1.1",
+    "driver_version": "595.71.05",
+    "libraries": {
+      "cublaslt": {
+        "path": "/usr/local/cuda/lib64/libcublasLt.so.13.6.0.2",
+        "version": "13.6.0"
+      },
+      "nvrtc": {
+        "path": "/usr/local/cuda/lib64/libnvrtc.so.13.3.33",
+        "version": "13.3"
+      }
+    },
+    "nvrtc": "13.3",
+    "python": "3.12.3"
+  }
+}
