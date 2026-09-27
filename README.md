@@ -32,11 +32,16 @@ from python to c++.
 This is probably because libtorch, the c++ library, is what pytorch uses. The main exception is `torch.compile`, which
 includes inductor fusion.
 
-# goal
+# goal with 2x RTX Pro 4000 blackwell GPUs (sm120)
 
-nanochat (python) trains ~5.84B tokens in 99 minutes using 8x H100. An RTX Pro 4000 is roughly 6x slower than an H100.
-8x H100 is roughly 24x faster than 2x RTX Pro 4000. If we plug that ratio in we get the following target:
+nanochat (python) trains ~5.84B tokens in 99 minutes using 8x H100. An H100 is roughly 6x faster than a RTX Pro 4000.
+Thus, 8x H100 are roughly 24x faster than 2x RTX Pro 4000. Using that ratio we get the following target:
 
-```~5.84B tokens in 2376 minutes (39.6 hours)```
+```~5.84B tokens in 2376 minutes (39.6 hours) = ~41k toks/sec```
 
-The same CORE threshold will be used: 0.256525
+The same GPT-2 CORE threshold will be used: 0.256525
+
+A secondary goal would be to train within 24 hours (1440 minutes). This is an arbitrary goal and will be tough to
+achieve.
+
+```~5.84B tokens in 1440 minutes = ~68k toks/sec```

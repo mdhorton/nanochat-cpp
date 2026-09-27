@@ -53,10 +53,11 @@ add_library(nanochat_train
         src/nanochat/model/fp8.cpp
         src/nanochat/model/fp8_kernel.cu
         src/nanochat/model/gpt.cpp
-        src/nanochat/model/lambda_blend.cpp
-        src/nanochat/model/lambda_blend_kernel.cu
+        src/nanochat/model/qkv_kernel.cu
         src/nanochat/model/relu_square.cpp
         src/nanochat/model/relu_square_kernel.cu
+        src/nanochat/model/residual_norm.cpp
+        src/nanochat/model/residual_norm_kernel.cu
         src/nanochat/model/rotary_norm.cpp
         src/nanochat/model/rotary_norm_kernel.cu
         src/nanochat/model/softcap_ce.cpp
@@ -105,10 +106,11 @@ add_executable(train_tests
         tests/test_dist.cpp
         tests/test_fp8.cpp
         tests/test_gpt.cpp
-        tests/test_lambda_blend.cpp
         tests/test_loss_eval.cpp
         tests/test_optim.cpp
+        tests/test_qkv.cpp
         tests/test_relu_square.cpp
+        tests/test_residual_norm.cpp
         tests/test_rotary_norm.cpp
         tests/test_safetensors.cpp
         tests/test_softcap_ce.cpp

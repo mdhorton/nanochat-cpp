@@ -1,8 +1,8 @@
 #include "nanochat/model/gpt.h"
 
 #include "nanochat/model/fp8.h"
-#include "nanochat/model/lambda_blend.h"
 #include "nanochat/model/relu_square.h"
+#include "nanochat/model/residual_norm.h"
 #include "nanochat/model/rotary_norm.h"
 #include "nanochat/model/softcap_ce.h"
 
@@ -150,14 +150,37 @@ torch::Tensor CausalSelfAttentionImpl::forward(
       const torch::Tensor& x, const torch::Tensor& ve, const torch::Tensor& cos, const torch::Tensor& sin,
       int64_t window) {
   const int64_t B = x.size(0), T = x.size(1);
-  // (B, T, H, D)
-  auto q = c_q(x).view({B, T, n_head, head_dim});
-  auto k = c_k(x).view({B, T, n_kv_head, head_dim});
-  auto v = c_v(x).view({B, T, n_kv_head, head_dim});
+  torch::Tensor q, k, v, gate_in;
+  if (!fused) {
+    q = c_q(x);
+    k = c_k(x);
+    v = c_v(x);
+  }
+  else if (c_q->fp8 && c_k->fp8 && c_v->fp8) {
+    const auto out = fp8_qkv(
+          x.to(kComputeDtype).reshape({B * T, -1}), c_q->weight, c_k->weight, c_v->weight,
+          ve.defined() ? kVeGateChannels : 0);
+    q = out[0], k = out[1], v = out[2];
+    if (ve.defined())
+      gate_in = out[3].view({B, T, -1});
+  }
+  else { // one GEMM each way; split's backward is one cat
+    const auto input = x.to(kComputeDtype);
+    const auto w = torch::cat({c_q->weight, c_k->weight, c_v->weight}).to(input.scalar_type());
+    const auto qkv = F::linear(input, w).split_with_sizes(
+          {c_q->weight.size(0), c_k->weight.size(0), c_v->weight.size(0)}, -1);
+    q = qkv[0], k = qkv[1], v = qkv[2];
+  }
+  // (B, T, H, D); fused: views of one qkv buffer
+  q = q.view({B, T, n_head, head_dim});
+  k = k.view({B, T, n_kv_head, head_dim});
+  v = v.view({B, T, n_kv_head, head_dim});
 
   // value residual: mix in the value embedding with an input-dependent gate per head, range (0, 3)
   if (ve.defined()) {
-    auto gate = 3 * torch::sigmoid(ve_gate(x.index({"...", Slice(None, kVeGateChannels)})));
+    if (!gate_in.defined())
+      gate_in = x.index({"...", Slice(None, kVeGateChannels)});
+    auto gate = 3 * torch::sigmoid(ve_gate(gate_in));
     v = v + gate.unsqueeze(-1) * ve.view({B, T, n_kv_head, head_dim});
   }
 
@@ -205,6 +228,13 @@ torch::Tensor BlockImpl::forward(
       int64_t window) {
   auto y = x + attn(rms_norm(x), ve, cos, sin, window);
   return y + mlp(rms_norm(y));
+}
+
+std::pair<torch::Tensor, torch::Tensor> BlockImpl::forward_split(
+      const torch::Tensor& x, const torch::Tensor& x_norm, const torch::Tensor& ve, const torch::Tensor& cos,
+      const torch::Tensor& sin, int64_t window) {
+  auto [y, y_norm] = residual_norm(x, attn(x_norm, ve, cos, sin, window));
+  return {y, mlp(y_norm)};
 }
 
 TransformerImpl::TransformerImpl(const GPTConfig& config, int64_t padded_vocab, const torch::TensorOptions& options) {
@@ -319,17 +349,30 @@ torch::Tensor GPTImpl::forward(
   const auto x0 = x; // initial normalized embedding, blended back in at every layer
   const int64_t backout_layer = config_.n_layer / 2;
   torch::Tensor x_backout;
+  torch::Tensor pending; // fused: the previous block's MLP output, added to x by the next residual_norm
   for (int64_t i = 0; i < config_.n_layer; ++i) {
-    if (fused_)
-      x = lambda_blend(x, x0, resid_lambdas, x0_lambdas, i);
-    else {
-      auto scaled = resid_lambdas[i] * x;
-      x = scaled + x0_lambdas[i] * x0;
-    }
     torch::Tensor ve;
     if (const auto key = std::to_string(i); value_embeds->contains(key))
       ve = value_embeds[key]->as<EmbeddingImpl>()->forward(idx).to(x.scalar_type());
-    x = transformer->h[i]->as<BlockImpl>()->forward(x, ve, cos, sin, windows_[i]);
+    const auto& block = transformer->h[i]->as<BlockImpl>();
+    if (fused_) {
+      auto [res, res_norm] = residual_norm(x, pending, x0, resid_lambdas, x0_lambdas, i);
+      auto [y, m] = block->forward_split(res, res_norm, ve, cos, sin, windows_[i]);
+      // the backout and the final layer need the block output itself
+      if (i == backout_layer || i == config_.n_layer - 1) {
+        x = y + m;
+        pending = torch::Tensor();
+      }
+      else {
+        x = y;
+        pending = m;
+      }
+    }
+    else {
+      auto scaled = resid_lambdas[i] * x;
+      x = scaled + x0_lambdas[i] * x0;
+      x = block->forward(x, ve, cos, sin, windows_[i]);
+    }
     if (i == backout_layer)
       x_backout = x;
   }

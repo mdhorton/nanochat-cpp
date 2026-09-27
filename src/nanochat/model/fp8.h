@@ -15,6 +15,14 @@ torch::Tensor fp8_matmul(const torch::Tensor& input_2d, const torch::Tensor& wei
 // == 0), w_fc (hidden, in), w_proj (out, hidden) -> (N, out).
 torch::Tensor fp8_relu_square_mlp(const torch::Tensor& x_2d, const torch::Tensor& w_fc, const torch::Tensor& w_proj);
 
+// Attention's c_q, c_k, c_v as fp8_matmuls of the same x_2d (N, in) bf16, merged: x quantized once, one GEMM for the
+// forward and one for the weight gradients (both bit-identical); the input gradient is summed in fp32. Returns {q, k,
+// v} (views of one (N, q + k + v) buffer), plus x_2d[:, :gate_cols] when gate_cols > 0 (the value-embedding gate's
+// input, its gradient added in the same pass).
+torch::autograd::variable_list fp8_qkv(
+      const torch::Tensor& x_2d, const torch::Tensor& wq, const torch::Tensor& wk, const torch::Tensor& wv,
+      int64_t gate_cols = 0);
+
 // Tensorwise quantization of a 2D tensor: data, its transpose (contiguous), inverse scale. The fused kernels
 // (fused = true) and the torch ops of fp8.py's _to_fp8 give identical bits.
 struct Fp8Tensor {

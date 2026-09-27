@@ -71,10 +71,18 @@ steps:
 12. fused elementwise kernels (`--fused`, default on; off = python's op-by-op path, used by the parity tests).
     done: rotary + QK norm (`model/rotary_norm_kernel.cu`), fp32 inside, closer to fp64 than the bf16 ops. d12 FP8 1 GPU:
     74.5k vs 66.6k tok/s.
-    done: resid/x0 lambda blend (`model/lambda_blend_kernel.cu`), lambda grads summed in fp32, deterministic. d12 FP8
-    1 GPU: 77.3k tok/s (+16% total). forward and dx are bit-identical to python's ops, which round the fp32 lambdas to
-    bf16 (type promotion) and each product: full-precision math trained worse (d12 300 steps: val bpb 1.052 vs 1.028).
+    done: resid/x0 lambda blend, lambda grads summed in fp32, deterministic. d12 FP8 1 GPU: 77.3k tok/s (+16% total).
+    the blend is bit-identical to python's ops, which round the fp32 lambdas to bf16 (type promotion) and each
+    product: full-precision math trained worse (d12 300 steps: val bpb 1.052 vs 1.028).
     done: relu² (`model/relu_square_kernel.cu`), bit-identical. with FP8 it's folded into the quantize kernels
     (c_proj's input quantized straight from h; dh's amax in the backward kernel). quick-d12 2 GPUs: 181.9k vs 159.8k
     tok/s (unfused 139.3k).
-    todo: residual add + rms_norm, value-embedding gate, shared q/k/v input quantization.
+    done: residual add + lambda blend + rms_norm in one row kernel (`model/residual_norm_kernel.cu`, replaces the
+    blend kernel); backward folds in autograd's sum of the residual's two gradients. add/blend bit-identical, norm fp32
+    inside. quick-d12 2 GPUs: 183.8k tok/s (+1%).
+    done: merged q/k/v (fused path): one GEMM each for forward and weight grads. with FP8, x is quantized once and
+    row-wise `_scaled_mm` scales (the fp32 product of each part's two scales, the other operand's scales 1) keep python's
+    per-tensor scales: forward bit-identical, weight grads up to rare 1-ulp flips; the input grad stays 3 GEMMs, summed
+    in one kernel with the value-embedding gate's input grad. quick-d12 2 GPUs: 189.8k tok/s (+3%), peak mem 7.86 GB.
+    todo: amax in the producer kernels (residual_norm, rotary_norm bwd), embedding grads straight into .grad, lm_head
+    FP8 (python quantizes it), MXFP8 (block scales: producers quantize directly, no global amax).

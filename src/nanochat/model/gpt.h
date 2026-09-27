@@ -82,7 +82,7 @@ public:
   static constexpr int64_t kVeGateChannels = 12;
   int64_t n_head, n_kv_head, head_dim;
   Attention attention = Attention::FA2;
-  bool fused = false; // rotary + QK norm in one kernel (rotary_norm.h)
+  bool fused = false; // merged q/k/v (fp8.h's fp8_qkv), rotary + QK norm in one kernel (rotary_norm.h)
   Linear c_q{nullptr}, c_k{nullptr}, c_v{nullptr}, c_proj{nullptr}, ve_gate{nullptr};
 };
 
@@ -104,6 +104,11 @@ public:
   torch::Tensor forward(
         const torch::Tensor& x, const torch::Tensor& ve, const torch::Tensor& cos, const torch::Tensor& sin,
         int64_t window);
+  // Fused path (residual_norm.h): from x and x_norm = rms_norm(x), returns {y, m}, the block output y + m unsummed
+  // so the next residual_norm adds it.
+  std::pair<torch::Tensor, torch::Tensor> forward_split(
+        const torch::Tensor& x, const torch::Tensor& x_norm, const torch::Tensor& ve, const torch::Tensor& cos,
+        const torch::Tensor& sin, int64_t window);
   CausalSelfAttention attn{nullptr};
   MLP mlp{nullptr};
 };

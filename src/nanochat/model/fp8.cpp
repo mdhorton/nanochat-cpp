@@ -3,6 +3,7 @@
 #include <ATen/cuda/CUDAContext.h>
 
 #include "nanochat/model/fp8_kernel.h"
+#include "nanochat/model/qkv_kernel.h"
 #include "nanochat/model/relu_square_kernel.h"
 
 namespace nanochat {
@@ -55,6 +56,27 @@ Fp8Tensor quantize(const torch::Tensor& x, torch::ScalarType dtype, const torch:
         at::cuda::getCurrentCUDAStream().stream(), amax_ready);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   return q;
+}
+
+// quantize into given buffers (slices of the merged q/k/v ones); scalars: amax, inverse scale
+void quantize_into(const torch::Tensor& x, torch::ScalarType dtype, void* out, void* out_t, float* scalars) {
+  TORCH_CHECK(fusable(x) && x.is_contiguous(), "expected an aligned, contiguous 2D tensor");
+  kernels::quantize_fp8(
+        x.data_ptr(), x.scalar_type() == torch::kBFloat16, x.size(0), x.size(1), format(dtype), out, out_t, scalars,
+        scalars + 1, at::cuda::getCurrentCUDAStream().stream());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
+void* offset(const torch::Tensor& t, int64_t bytes) {
+  return static_cast<char*>(t.data_ptr()) + bytes;
+}
+
+// Row-wise _scaled_mm scales for merged q/k/v: each part's product of inverse scales (inv[i] * other) over its
+// sizes[i] rows. The fp32 product is tensorwise's one scale factor; the other operand's scales are 1, so the GEMM
+// rounds as tensorwise (scaling by both vectors rounds twice).
+torch::Tensor merged_scales(const torch::Tensor& inv, const torch::Tensor& other, const std::array<int64_t, 3>& sizes) {
+  const auto prod = inv * other;
+  return torch::cat({prod[0].expand({sizes[0]}), prod[1].expand({sizes[1]}), prod[2].expand({sizes[2]})});
 }
 
 // to_fp8_reference in two fused kernels (fp8_kernel.cu), also writing the transpose that backward needs.
@@ -146,6 +168,79 @@ public:
   }
 };
 
+// q, k, v = x @ w_i^T as three Float8Matmuls, with x quantized once and one GEMM each for the forward and the weight
+// gradients: row-wise scales keep each tensor's own scale, so q, k, v and the weight gradients are bit-identical. The
+// input gradient stays three GEMMs (the scales differ along K), summed in one kernel with the gate input's gradient.
+class Fp8Qkv : public torch::autograd::Function<Fp8Qkv> {
+public:
+  static variable_list forward(
+        AutogradContext* ctx, const torch::Tensor& x, const torch::Tensor& wq, const torch::Tensor& wk,
+        const torch::Tensor& wv, int64_t gate_cols) {
+    const auto e4m3 = torch::kFloat8_e4m3fn;
+    const int64_t N = x.size(0), C = x.size(1);
+    const std::array<torch::Tensor, 3> w{wq.contiguous(), wk.contiguous(), wv.contiguous()};
+    const std::array<int64_t, 3> sizes{w[0].size(0), w[1].size(0), w[2].size(0)};
+    const int64_t n = sizes[0] + sizes[1] + sizes[2];
+    const auto xq = to_fp8(x, e4m3);
+    auto w_cat = torch::empty({n, C}, x.options().dtype(e4m3));
+    auto w_scalars = torch::empty({3, 2}, x.options().dtype(torch::kFloat32));
+    std::array<torch::Tensor, 3> w_t;
+    for (int64_t i = 0, row = 0; i < 3; row += sizes[i++]) {
+      TORCH_CHECK(w[i].size(1) == C, "q/k/v weights must share the input dim");
+      w_t[i] = torch::empty({C, sizes[i]}, x.options().dtype(e4m3));
+      quantize_into(w[i], e4m3, offset(w_cat, row * C), w_t[i].data_ptr(), w_scalars[i].data_ptr<float>());
+    }
+    const auto w_inv = w_scalars.select(1, 1);
+    const auto qkv = at::_scaled_mm(
+          xq.data, w_cat.t(), torch::ones({N, 1}, w_inv.options()),
+          merged_scales(w_inv, xq.inv_scale, sizes).view({1, n}), {}, {}, x.scalar_type(), true);
+    ctx->save_for_backward({xq.data_t, xq.inv_scale, w_t[0], w_t[1], w_t[2], w_inv});
+    ctx->saved_data["gate_cols"] = gate_cols;
+    variable_list out{
+          qkv.narrow(1, 0, sizes[0]), qkv.narrow(1, sizes[0], sizes[1]), qkv.narrow(1, sizes[0] + sizes[1], sizes[2])};
+    if (gate_cols > 0)
+      out.push_back(x.narrow(1, 0, gate_cols).contiguous());
+    return out;
+  }
+
+  static variable_list backward(AutogradContext* ctx, variable_list grads) {
+    const auto e5m2 = torch::kFloat8_e5m2;
+    const auto s = ctx->get_saved_variables();
+    const auto &x_t = s[0], &x_inv = s[1], &w_inv = s[5];
+    const auto gate_cols = ctx->saved_data["gate_cols"].toInt();
+    const int64_t C = x_t.size(0), N = x_t.size(1);
+    const auto dtype = grads[0].scalar_type();
+    std::array<torch::Tensor, 3> g;
+    std::array<int64_t, 3> sizes{};
+    for (int i = 0; i < 3; ++i) {
+      g[i] = grads[i].contiguous();
+      sizes[i] = g[i].size(1);
+    }
+    const int64_t n = sizes[0] + sizes[1] + sizes[2];
+    auto g_t = torch::empty({n, N}, g[0].options().dtype(e5m2));
+    auto g_scalars = torch::empty({3, 2}, g[0].options().dtype(torch::kFloat32));
+    std::array<torch::Tensor, 3> dx;
+    for (int64_t i = 0, row = 0; i < 3; row += sizes[i++]) {
+      auto gi = torch::empty({N, sizes[i]}, g[i].options().dtype(e5m2));
+      quantize_into(g[i], e5m2, gi.data_ptr(), offset(g_t, row * N), g_scalars[i].data_ptr<float>());
+      dx[i] = at::_scaled_mm(gi, s[2 + i].t(), g_scalars[i][1], w_inv[i], {}, {}, dtype, false);
+    }
+    const auto gate = gate_cols > 0 ? grads[3].contiguous() : torch::Tensor();
+    auto dx_sum = torch::empty({N, C}, dx[0].options());
+    kernels::qkv_grad_sum(
+          dx[0].data_ptr(), dx[1].data_ptr(), dx[2].data_ptr(), gate.defined() ? gate.data_ptr() : nullptr,
+          static_cast<int>(gate_cols), dx_sum.data_ptr(), N, static_cast<int>(C),
+          at::cuda::getCurrentCUDAStream().stream());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+    const auto dw = at::_scaled_mm(
+          g_t, x_t.t(), merged_scales(g_scalars.select(1, 1), x_inv, sizes).view({n, 1}),
+          torch::ones({1, C}, x_inv.options()), {}, {}, dtype, false);
+    return {
+          dx_sum, dw.narrow(0, 0, sizes[0]), dw.narrow(0, sizes[0], sizes[1]),
+          dw.narrow(0, sizes[0] + sizes[1], sizes[2]), torch::Tensor()};
+  }
+};
+
 } // namespace
 
 Fp8Tensor quantize_fp8(const torch::Tensor& x, torch::ScalarType dtype, bool fused) {
@@ -158,6 +253,12 @@ torch::Tensor fp8_matmul(const torch::Tensor& input_2d, const torch::Tensor& wei
 
 torch::Tensor fp8_relu_square_mlp(const torch::Tensor& x_2d, const torch::Tensor& w_fc, const torch::Tensor& w_proj) {
   return Fp8ReluSquareMlp::apply(x_2d, w_fc, w_proj);
+}
+
+torch::autograd::variable_list fp8_qkv(
+      const torch::Tensor& x_2d, const torch::Tensor& wq, const torch::Tensor& wk, const torch::Tensor& wv,
+      int64_t gate_cols) {
+  return Fp8Qkv::apply(x_2d, wq, wk, wv, gate_cols);
 }
 
 } // namespace nanochat

@@ -47,16 +47,21 @@ __device__ float rotate(const __nv_bfloat16* x, const __nv_bfloat16* c, const __
   return ss;
 }
 
+// x's row: token row / heads at x_stride, head row % heads within it
+__device__ const __nv_bfloat16* x_row(const __nv_bfloat16* x, int64_t row, int heads, int head_dim, int64_t x_stride) {
+  return x + row / heads * x_stride + row % heads * head_dim;
+}
+
 __device__ __forceinline__ void rotary_norm_fwd_body(
       const __nv_bfloat16* x, const __nv_bfloat16* cos, const __nv_bfloat16* sin, __nv_bfloat16* out, float* rstd,
-      int64_t rows, int heads, int64_t seq_len, int head_dim, float scale, float eps) {
+      int64_t rows, int heads, int64_t seq_len, int head_dim, int64_t x_stride, float scale, float eps) {
   const int64_t row = static_cast<int64_t>(blockIdx.x) * kWarps + threadIdx.x / 32;
   if (row >= rows)
     return;
   const int lane = static_cast<int>(threadIdx.x % 32), half = head_dim / 2;
   const int64_t t = row / heads % seq_len;
   Rotated y;
-  const float ss = warp_sum(rotate(x + row * head_dim, cos + t * half, sin + t * half, half, y));
+  const float ss = warp_sum(rotate(x_row(x, row, heads, head_dim, x_stride), cos + t * half, sin + t * half, half, y));
   const float r = rsqrtf(ss / static_cast<float>(head_dim) + eps);
   if (lane == 0)
     rstd[row] = r;
@@ -75,7 +80,8 @@ __device__ __forceinline__ void rotary_norm_fwd_body(
 // n = y * r, dn = scale * dout: dy = r * (dn - n * mean(dn * n)); then the transposed rotation.
 __device__ __forceinline__ void rotary_norm_bwd_body(
       const __nv_bfloat16* dout, const __nv_bfloat16* x, const __nv_bfloat16* cos, const __nv_bfloat16* sin,
-      const float* rstd, __nv_bfloat16* dx, int64_t rows, int heads, int64_t seq_len, int head_dim, float scale) {
+      const float* rstd, __nv_bfloat16* dx, int64_t rows, int heads, int64_t seq_len, int head_dim, int64_t x_stride,
+      float scale) {
   const int64_t row = static_cast<int64_t>(blockIdx.x) * kWarps + threadIdx.x / 32;
   if (row >= rows)
     return;
@@ -83,7 +89,7 @@ __device__ __forceinline__ void rotary_norm_bwd_body(
   const int64_t t = row / heads % seq_len;
   const auto *c = cos + t * half, *s = sin + t * half, *g = dout + row * head_dim;
   Rotated y;
-  rotate(x + row * head_dim, c, s, half, y);
+  rotate(x_row(x, row, heads, head_dim, x_stride), c, s, half, y);
   const float r = rstd[row];
   float dn1[kMaxIters][2], dn2[kMaxIters][2], dot = 0.f;
 #pragma unroll
@@ -120,14 +126,15 @@ __device__ __forceinline__ void rotary_norm_bwd_body(
 // Kernels: global, non-template nanochat_* names read the same in nsys and ncu (see softcap_ce_kernel.cu).
 __global__ void __launch_bounds__(nanochat::kWarps * 32) nanochat_rotary_norm_fwd(
       const __nv_bfloat16* x, const __nv_bfloat16* cos, const __nv_bfloat16* sin, __nv_bfloat16* out, float* rstd,
-      int64_t rows, int heads, int64_t seq_len, int head_dim, float scale, float eps) {
-  nanochat::rotary_norm_fwd_body(x, cos, sin, out, rstd, rows, heads, seq_len, head_dim, scale, eps);
+      int64_t rows, int heads, int64_t seq_len, int head_dim, int64_t x_stride, float scale, float eps) {
+  nanochat::rotary_norm_fwd_body(x, cos, sin, out, rstd, rows, heads, seq_len, head_dim, x_stride, scale, eps);
 }
 
 __global__ void __launch_bounds__(nanochat::kWarps * 32) nanochat_rotary_norm_bwd(
       const __nv_bfloat16* dout, const __nv_bfloat16* x, const __nv_bfloat16* cos, const __nv_bfloat16* sin,
-      const float* rstd, __nv_bfloat16* dx, int64_t rows, int heads, int64_t seq_len, int head_dim, float scale) {
-  nanochat::rotary_norm_bwd_body(dout, x, cos, sin, rstd, dx, rows, heads, seq_len, head_dim, scale);
+      const float* rstd, __nv_bfloat16* dx, int64_t rows, int heads, int64_t seq_len, int head_dim, int64_t x_stride,
+      float scale) {
+  nanochat::rotary_norm_bwd_body(dout, x, cos, sin, rstd, dx, rows, heads, seq_len, head_dim, x_stride, scale);
 }
 
 namespace nanochat::kernels {
@@ -144,18 +151,18 @@ unsigned blocks(int64_t rows) {
 
 void rotary_norm_fwd(
       const void* x, const void* cos, const void* sin, void* out, float* rstd, int64_t rows, int heads, int64_t seq_len,
-      int head_dim, float scale, float eps, cudaStream_t stream) {
+      int head_dim, int64_t x_stride, float scale, float eps, cudaStream_t stream) {
   nanochat_rotary_norm_fwd<<<blocks(rows), kWarps * 32, 0, stream>>>(
         static_cast<const bf16*>(x), static_cast<const bf16*>(cos), static_cast<const bf16*>(sin),
-        static_cast<bf16*>(out), rstd, rows, heads, seq_len, head_dim, scale, eps);
+        static_cast<bf16*>(out), rstd, rows, heads, seq_len, head_dim, x_stride, scale, eps);
 }
 
 void rotary_norm_bwd(
       const void* dout, const void* x, const void* cos, const void* sin, const float* rstd, void* dx, int64_t rows,
-      int heads, int64_t seq_len, int head_dim, float scale, cudaStream_t stream) {
+      int heads, int64_t seq_len, int head_dim, int64_t x_stride, float scale, cudaStream_t stream) {
   nanochat_rotary_norm_bwd<<<blocks(rows), kWarps * 32, 0, stream>>>(
         static_cast<const bf16*>(dout), static_cast<const bf16*>(x), static_cast<const bf16*>(cos),
-        static_cast<const bf16*>(sin), rstd, static_cast<bf16*>(dx), rows, heads, seq_len, head_dim, scale);
+        static_cast<const bf16*>(sin), rstd, static_cast<bf16*>(dx), rows, heads, seq_len, head_dim, x_stride, scale);
 }
 
 } // namespace nanochat::kernels

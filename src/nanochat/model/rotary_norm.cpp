@@ -24,18 +24,21 @@ public:
         AutogradContext* ctx, const torch::Tensor& x_in, const torch::Tensor& cos, const torch::Tensor& sin,
         double scale) {
     TORCH_CHECK(x_in.scalar_type() == torch::kBFloat16 && x_in.dim() == 4, "x must be (B, T, H, D) bf16");
-    const auto x = x_in.contiguous();
-    const int64_t T = x.size(1), H = x.size(2), D = x.size(3);
+    const int64_t T = x_in.size(1), H = x_in.size(2), D = x_in.size(3);
+    // tokens may be strided (q/k views of a merged qkv); heads within a token must be contiguous
+    const bool strided = x_in.stride(3) == 1 && x_in.stride(2) == D && x_in.stride(0) == T * x_in.stride(1);
+    const auto x = strided ? x_in : x_in.contiguous();
+    const int64_t x_stride = x.stride(1);
     TORCH_CHECK(D % 4 == 0 && D <= 512, "head_dim must be a multiple of 4, at most 512");
     check_rotary(cos, T, D / 2);
     check_rotary(sin, T, D / 2);
-    auto out = torch::empty_like(x);
+    auto out = torch::empty({x.size(0), T, H, D}, x.options());
     auto rstd = torch::empty({x.numel() / D}, x.options().dtype(torch::kFloat32));
     // F.rms_norm's default eps (opmath float epsilon)
     kernels::rotary_norm_fwd(
           x.data_ptr(), cos.data_ptr(), sin.data_ptr(), out.data_ptr(), rstd.data_ptr<float>(), rstd.numel(),
-          static_cast<int>(H), T, static_cast<int>(D), static_cast<float>(scale), std::numeric_limits<float>::epsilon(),
-          at::cuda::getCurrentCUDAStream().stream());
+          static_cast<int>(H), T, static_cast<int>(D), x_stride, static_cast<float>(scale),
+          std::numeric_limits<float>::epsilon(), at::cuda::getCurrentCUDAStream().stream());
     C10_CUDA_KERNEL_LAUNCH_CHECK();
     ctx->save_for_backward({x, cos, sin, rstd});
     ctx->saved_data["scale"] = scale;
@@ -46,10 +49,10 @@ public:
     const auto saved = ctx->get_saved_variables();
     const auto &x = saved[0], &cos = saved[1], &sin = saved[2], &rstd = saved[3];
     const auto dout = grads[0].contiguous();
-    auto dx = torch::empty_like(x);
+    auto dx = torch::empty({x.size(0), x.size(1), x.size(2), x.size(3)}, x.options());
     kernels::rotary_norm_bwd(
           dout.data_ptr(), x.data_ptr(), cos.data_ptr(), sin.data_ptr(), rstd.data_ptr<float>(), dx.data_ptr(),
-          rstd.numel(), static_cast<int>(x.size(2)), x.size(1), static_cast<int>(x.size(3)),
+          rstd.numel(), static_cast<int>(x.size(2)), x.size(1), static_cast<int>(x.size(3)), x.stride(1),
           static_cast<float>(ctx->saved_data["scale"].toDouble()), at::cuda::getCurrentCUDAStream().stream());
     C10_CUDA_KERNEL_LAUNCH_CHECK();
     return {dx, torch::Tensor(), torch::Tensor(), torch::Tensor()};
