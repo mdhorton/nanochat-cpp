@@ -299,6 +299,8 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
   print(std::format("Distributed world size: {}", o.world_size));
   torch::manual_seed(42);                                // every rank initializes the same weights
   at::globalContext().setFloat32MatmulPrecision("high"); // TF32
+  if (o.cublaslt_workspace_mb > 0)
+    at::cuda::setCUDABlasLtWorkspaceSize(static_cast<size_t>(o.cublaslt_workspace_mb) << 20);
   const auto device_name = std::string(at::cuda::getDeviceProperties(device.index())->name);
   const double gpu_peak_flops = peak_flops(device_name);
   print(std::format("GPU: {} | Peak FLOPS (BF16): {:.2e}", device_name, gpu_peak_flops));

@@ -32,6 +32,7 @@ static int run(int argc, char** argv) {
   o.attention = "sdpa"; // as Python on this GPU
   o.loss_chunk_rows = 0;
   o.fused = false;
+  o.cublaslt_workspace_mb = 0; // torch's default: the same GEMM algorithms as Python
   o.verbose = false;
   o.rank = rank;
   o.world_size = nproc;

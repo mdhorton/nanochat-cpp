@@ -21,6 +21,7 @@ pixi run full-d12 | full-d24              # full runs (MXFP8, 2 GPUs)
 pixi run profile-d12 | profile-d24        # nsys (steps 2-4) + ncu (1 GPU, step 2) -> cache/profiles/d12_N.{nsys,ncu}-rep
 pixi run profile-d12 ncu --metrics M --kernel-name regex:K -c 5   # one tool only (nsys|ncu); flags after it go to ncu and override its defaults
 nsys stats --report nvtx_sum,cuda_gpu_kern_sum cache/profiles/d12_1.nsys-rep   # summary tables in the terminal
+cmake-build-pixi/bench_gemm [--tokens T --embd C] # cuBLASLt algorithms vs _scaled_mm for a micro-step's MX GEMM shapes
 pixi run nanochat nanochat.dataset -n 8   # Python nanochat module, shares ./cache
 pixi run export-golden                    # golden data for tokenizer parity tests
 pixi run export-train-golden              # golden data for training parity tests (cache/golden/train)

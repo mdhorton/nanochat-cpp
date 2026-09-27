@@ -88,6 +88,10 @@ target_link_libraries(tok_eval PRIVATE nanochat)
 add_executable(base_train apps/base_train.cpp)
 target_link_libraries(base_train PRIVATE nanochat_train)
 
+# cuBLASLt algorithm search for the MX GEMM shapes
+add_executable(bench_gemm apps/bench_gemm.cpp)
+target_link_libraries(bench_gemm PRIVATE nanochat_train "${TORCH_DIR}/../nvidia/cu13/lib/libcublasLt.so.13")
+
 enable_testing()
 find_package(GTest REQUIRED)
 include(GoogleTest)

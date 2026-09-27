@@ -38,7 +38,7 @@ Runs based on the sm120 customizations and tuning.
 |  17 |  230,934 | 4.802351 | 1.435362 |   8.4g | 3.77m | --fp8-recipe=mxfp8 (qkv + rotary + val embed) |
 |  18 |  234,497 | 4.806611 | 1.436663 |   8.7g | 3.71m | --fp8-recipe=mxfp8 (lm_head grad_w fold)      |
 |  19 |  237,122 | 4.802950 | 1.435503 |   8.7g | 3.68m | x0 gradient fold                              |
-|  20 |          |          |          |        |       |                                               |
+|  20 |  242,702 | 4.805256 | 1.436230 |   8.7g | 3.60m |                                               |
 
 Run 4: sm120 can't use fa3. however, fa2 works pretty good. --attention=fa2 enabled by default going forward.
 

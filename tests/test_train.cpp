@@ -31,6 +31,7 @@ protected:
     options_.attention = "sdpa"; // as Python on this GPU
     options_.loss_chunk_rows = 0;
     options_.fused = false;
+    options_.cublaslt_workspace_mb = 0; // torch's default: the same GEMM algorithms as Python
     options_.verbose = std::getenv("NANOCHAT_TEST_VERBOSE") != nullptr;
   }
 
@@ -100,6 +101,7 @@ void check_train_golden(const std::string& prefix) {
   options.attention = "sdpa"; // as Python on this GPU
   options.loss_chunk_rows = 0;
   options.fused = false;
+  options.cublaslt_workspace_mb = 0; // torch's default: the same GEMM algorithms as Python
   options.verbose = std::getenv("NANOCHAT_TEST_VERBOSE") != nullptr;
 
   std::vector<double> losses;

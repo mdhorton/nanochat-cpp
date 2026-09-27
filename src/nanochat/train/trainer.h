@@ -18,11 +18,12 @@ struct TrainOptions {
   // model
   int64_t depth = 20, aspect_ratio = 64, head_dim = 128, max_seq_len = 2048;
   std::string window_pattern = "SSSL";
-  std::string attention = "fa2";    // fa2 or sdpa (bit-identical to Python nanochat)
-  int64_t loss_chunk_rows = 4096;   // > 0: fused chunked lm_head + loss (never all logits at once); 0: as Python
-  bool fp8 = true;                  // FP8 matmuls for training (eval stays bf16)
-  std::string fp8_recipe = "mxfp8"; // mxfp8 or tensorwise (as Python)
-  bool fused = true;                // fused elementwise kernels; false: Python's op-by-op path
+  std::string attention = "fa2";      // fa2 or sdpa (bit-identical to Python nanochat)
+  int64_t loss_chunk_rows = 4096;     // > 0: fused chunked lm_head + loss (never all logits at once); 0: as Python
+  bool fp8 = true;                    // FP8 matmuls for training (eval stays bf16)
+  std::string fp8_recipe = "mxfp8";   // mxfp8 or tensorwise (as Python)
+  bool fused = true;                  // fused elementwise kernels; false: Python's op-by-op path
+  int64_t cublaslt_workspace_mb = 32; // cuBLASLt workspace per stream; its split-K GEMMs need a few MB (torch: 1)
   // training horizon: the first one set wins
   int64_t num_iterations = -1;
   double target_flops = -1, target_param_data_ratio = 8; // Python: 12; speedrun.sh uses 8
