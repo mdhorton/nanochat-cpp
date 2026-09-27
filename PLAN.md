@@ -84,5 +84,8 @@ steps:
     row-wise `_scaled_mm` scales (the fp32 product of each part's two scales, the other operand's scales 1) keep python's
     per-tensor scales: forward bit-identical, weight grads up to rare 1-ulp flips; the input grad stays 3 GEMMs, summed
     in one kernel with the value-embedding gate's input grad. quick-d12 2 GPUs: 189.8k tok/s (+3%), peak mem 7.86 GB.
-    todo: amax in the producer kernels (residual_norm, rotary_norm bwd), embedding grads straight into .grad, lm_head
+    done: embedding grads straight into .grad (`model/embedding_kernel.cu`): wte and the value embeddings in one lookup,
+    one sort, one kernel summing each touched row in fp32 into .grad (no per-call zero fill and full-size add; ZeRO-2
+    reduces in the optimizer step, after the micro-steps). quick-d12 2 GPUs: 193.7k tok/s (+2%).
+    todo: amax in the producer kernels (residual_norm, rotary_norm bwd), lm_head
     FP8 (python quantizes it), MXFP8 (block scales: producers quantize directly, no global amax).

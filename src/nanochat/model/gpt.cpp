@@ -1,5 +1,6 @@
 #include "nanochat/model/gpt.h"
 
+#include "nanochat/model/embedding.h"
 #include "nanochat/model/fp8.h"
 #include "nanochat/model/relu_square.h"
 #include "nanochat/model/residual_norm.h"
@@ -335,7 +336,24 @@ torch::Tensor GPTImpl::forward(
     throw std::invalid_argument("training forward needs T > 1");
   auto cos = cos_.index({Slice(), Slice(None, T)}), sin = sin_.index({Slice(), Slice(None, T)});
 
-  auto x = rms_norm(transformer->wte(idx).to(kComputeDtype));
+  // fused: all tables looked up at once, their gradients accumulated straight into .grad (embedding.h)
+  torch::Tensor emb;
+  std::vector<torch::Tensor> ves(config_.n_layer);
+  if (fused_) {
+    std::vector<torch::Tensor> weights{transformer->wte->weight};
+    std::vector<int64_t> layers;
+    for (const auto& item : value_embeds->items()) {
+      layers.push_back(std::stoll(item.first));
+      weights.push_back(item.second->as<EmbeddingImpl>()->weight);
+    }
+    const auto out = embeddings(idx, weights);
+    emb = out[0];
+    for (size_t k = 0; k < layers.size(); ++k)
+      ves[layers[k]] = out[k + 1];
+  }
+  else
+    emb = transformer->wte(idx);
+  auto x = rms_norm(emb.to(kComputeDtype));
 
   // smear: mix the previous token's embedding into the current position (cheap bigram info)
   // (statement order = Python's evaluation order, see apply_rotary_emb)
@@ -351,8 +369,8 @@ torch::Tensor GPTImpl::forward(
   torch::Tensor x_backout;
   torch::Tensor pending; // fused: the previous block's MLP output, added to x by the next residual_norm
   for (int64_t i = 0; i < config_.n_layer; ++i) {
-    torch::Tensor ve;
-    if (const auto key = std::to_string(i); value_embeds->contains(key))
+    torch::Tensor ve = ves[i];
+    if (const auto key = std::to_string(i); !fused_ && value_embeds->contains(key))
       ve = value_embeds[key]->as<EmbeddingImpl>()->forward(idx).to(x.scalar_type());
     const auto& block = transformer->h[i]->as<BlockImpl>();
     if (fused_) {

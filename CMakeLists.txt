@@ -50,6 +50,8 @@ target_link_libraries(nanochat PUBLIC
 
 # pre-training (libtorch)
 add_library(nanochat_train
+        src/nanochat/model/embedding.cpp
+        src/nanochat/model/embedding_kernel.cu
         src/nanochat/model/fp8.cpp
         src/nanochat/model/fp8_kernel.cu
         src/nanochat/model/gpt.cpp
@@ -104,6 +106,7 @@ add_executable(train_tests
         tests/test_checkpoint.cpp
         tests/test_dataloader.cpp
         tests/test_dist.cpp
+        tests/test_embedding.cpp
         tests/test_fp8.cpp
         tests/test_gpt.cpp
         tests/test_loss_eval.cpp
