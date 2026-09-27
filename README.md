@@ -40,7 +40,11 @@ I love python and have used it for 10+ years. This isn't a knock on python. This
 
 # goals
 
-5.84B total tokens
+nanochat (python) trains ~5.84B tokens in 99 minutes using 8x H100. An RTX Pro 4000 is roughly 6x slower than an H100.
+So 8x H100 is roughly 24x faster than 2x RTX Pro 4000.
+
+```~5.84B tokens in 2376 minutes (39.6 hours)```
+
 99 minutes
 
 After thinking about it, I decided on the following goals (or questions really):
