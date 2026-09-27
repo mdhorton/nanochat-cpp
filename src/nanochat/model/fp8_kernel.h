@@ -23,4 +23,19 @@ void quantize_fp8_relu_square(
       const void* h, int64_t rows, int64_t cols, void* out, void* out_t, float* amax, float* inv_scale,
       cudaStream_t stream);
 
+// MXFP8 (OCP MX) E4M3: one power-of-two (e8m0) scale per 32 consecutive values of a row, the smallest with
+// max|block| * 2^-e <= 448, stored in cuBLAS's swizzled layout (128 rows x 4 blocks per 512-byte tile).
+struct MxOut {
+  void* data;          // e4m3, null: not written
+  int64_t ld;          // row stride of data
+  void* scale;         // e8m0, at this tensor's first tile
+  int64_t scale_tiles; // tiles per 128 rows in the whole scale buffer (its blocks per row / 4)
+};
+
+// x: (rows, cols) contiguous bf16 (x_bf16) or fp32, rows % 32 == 0, cols % 64 == 0. out: x, scaled along rows;
+// out_t: x's transpose (cols, rows), scaled along its rows. relu_square: quantizes bf16(relu(x)^2), bf16 x only.
+void quantize_mx(
+      const void* x, bool x_bf16, int64_t rows, int64_t cols, MxOut out, MxOut out_t, bool relu_square,
+      cudaStream_t stream);
+
 } // namespace nanochat::kernels

@@ -59,6 +59,7 @@ public:
   torch::Tensor forward(const torch::Tensor& x);
   torch::Tensor weight;
   bool fp8 = false;
+  Fp8Recipe fp8_recipe = Fp8Recipe::Tensorwise;
   Fp8WeightCache fp8_cache; // enabled by GPT's set_fused
 };
 
@@ -176,6 +177,7 @@ public:
   // FP8 matmuls for the Linears that qualify (fp8_eligible), as convert_to_float8_training; false = bf16 (eval).
   // Returns the number of Linears switched.
   int set_fp8(bool enabled);
+  void set_fp8_recipe(Fp8Recipe recipe);
   int num_linears();
 
   Transformer transformer{nullptr};

@@ -176,6 +176,7 @@ nlohmann::json options_to_json(const TrainOptions& o) {
         {"attention", o.attention},
         {"loss_chunk_rows", o.loss_chunk_rows},
         {"fp8", o.fp8},
+        {"fp8_recipe", o.fp8_recipe},
         {"fused", o.fused},
         {"num_iterations", o.num_iterations},
         {"target_flops", o.target_flops},
@@ -320,12 +321,13 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
   model->set_loss_chunk_rows(o.loss_chunk_rows);
   model->set_fused(o.fused);
   if (o.fp8) {
+    if (o.fp8_recipe != "tensorwise" && o.fp8_recipe != "mxfp8")
+      throw std::invalid_argument("unknown fp8 recipe: " + o.fp8_recipe + " (use tensorwise or mxfp8)");
+    model->set_fp8_recipe(o.fp8_recipe == "mxfp8" ? Fp8Recipe::Mx : Fp8Recipe::Tensorwise);
     const int num_linear = model->num_linears(), num_fp8 = model->set_fp8(true);
     print(std::format(
-          "FP8 training enabled (tensorwise scaling) - converted {}/{} linear layers, skipped {} "
-          "(too small){}",
-          num_fp8, num_linear, num_linear - num_fp8,
-          o.loss_chunk_rows > 0 ? "; lm_head stays bf16 in the chunked loss" : ""));
+          "FP8 training enabled ({} scaling) - converted {}/{} linear layers, skipped {} (too small)", o.fp8_recipe,
+          num_fp8, num_linear, num_linear - num_fp8));
   }
 
   const auto checkpoint_dir = o.base_dir / "base_checkpoints" /

@@ -38,10 +38,11 @@ TEST(ReluSquare, MlpMatchesOpByOp) {
     for (auto& p : mlp->parameters())
       p.normal_(0, 0.05);
   }
-  const auto x_in = torch::randn({3, 208, config.n_embd}, opts).to(torch::kBFloat16); // 624 rows: FP8 needs % 16
-  const auto upstream = torch::randn({3, 208, config.n_embd}, opts).to(torch::kBFloat16);
-  for (const bool fp8 : {false, true}) {
-    mlp->c_fc->fp8 = mlp->c_proj->fp8 = fp8;
+  const auto x_in = torch::randn({5, 128, config.n_embd}, opts).to(torch::kBFloat16); // FP8: rows % 16, MX: % 128
+  const auto upstream = torch::randn({5, 128, config.n_embd}, opts).to(torch::kBFloat16);
+  for (const int fp8 : {0, 1, 2}) { // bf16, tensorwise, MX
+    mlp->c_fc->fp8 = mlp->c_proj->fp8 = fp8 > 0;
+    mlp->c_fc->fp8_recipe = mlp->c_proj->fp8_recipe = fp8 == 2 ? Fp8Recipe::Mx : Fp8Recipe::Tensorwise;
     auto run = [&](bool fused) {
       mlp->fused = fused;
       mlp->zero_grad(true);

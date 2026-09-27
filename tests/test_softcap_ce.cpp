@@ -81,8 +81,8 @@ TEST(SoftcapCE, ModelLossMatchesUnchunked) {
   EXPECT_LT(rel_diff(grad_chunked, grad_plain), 2e-2);
 }
 
-// FP8 lm_head: chunked vs the unchunked Float8Matmul path (gpt.py with fp8). One chunk shares python's gradient scale;
-// several chunks scale each chunk's gradient on its own.
+// FP8 lm_head: chunked vs the unchunked Float8Matmul path (gpt.py with fp8). Tensorwise: one chunk shares python's
+// gradient scale, several chunks scale each chunk's gradient on its own. MX: block scales, chunking changes none.
 TEST(SoftcapCE, Fp8MatchesUnchunked) {
   torch::manual_seed(0);
   const int64_t N = 1024, C = 128, vocab = 1000, padded = 1024;
@@ -91,19 +91,23 @@ TEST(SoftcapCE, Fp8MatchesUnchunked) {
   const auto w0 = torch::randn({padded, C}, opts) * 0.5;
   auto targets = torch::randint(0, vocab, {N}, opts.dtype(torch::kInt64));
   targets.slice(0, 0, 48).fill_(-1);
-  auto x2 = x0.clone().requires_grad_(), w2 = w0.clone().requires_grad_();
-  auto logits = fp8_matmul(x2, w2).slice(1, 0, vocab).to(torch::kFloat32);
-  logits = 15 * torch::tanh(logits / 15);
-  const auto want = F::cross_entropy(logits, targets, F::CrossEntropyFuncOptions().ignore_index(-1));
-  want.backward();
-  for (const int64_t chunk : {N, N / 4}) {
-    auto x1 = x0.clone().requires_grad_(), w1 = w0.clone().requires_grad_();
-    const auto got = softcap_cross_entropy(x1, w1, targets, vocab, 15, chunk, LossReduction::Mean, true);
-    got.backward();
-    EXPECT_LT(rel_diff(got, want), 1e-5) << chunk;
-    EXPECT_LT(rel_norm_diff(x1.grad(), x2.grad()), 1e-3) << chunk;
-    // Float8Matmul rounds grad_w to bf16; the chunks accumulate it in fp32
-    EXPECT_LT(rel_norm_diff(w1.grad(), w2.grad()), 5e-3) << chunk;
-    EXPECT_EQ(w1.grad().slice(0, vocab).abs().max().item<float>(), 0.0f) << chunk;
+  for (const auto recipe : {Fp8Recipe::Tensorwise, Fp8Recipe::Mx}) {
+    auto x2 = x0.clone().requires_grad_(), w2 = w0.clone().requires_grad_();
+    auto logits = fp8_matmul(x2, w2, nullptr, recipe).slice(1, 0, vocab).to(torch::kFloat32);
+    logits = 15 * torch::tanh(logits / 15);
+    const auto want = F::cross_entropy(logits, targets, F::CrossEntropyFuncOptions().ignore_index(-1));
+    want.backward();
+    for (const int64_t chunk : {N, N / 4}) {
+      auto x1 = x0.clone().requires_grad_(), w1 = w0.clone().requires_grad_();
+      const auto got = softcap_cross_entropy(
+            x1, w1, targets, vocab, 15, chunk, LossReduction::Mean, true, nullptr, recipe);
+      got.backward();
+      const auto what = std::to_string(chunk) + (recipe == Fp8Recipe::Mx ? " mx" : "");
+      EXPECT_LT(rel_diff(got, want), 1e-5) << what;
+      EXPECT_LT(rel_norm_diff(x1.grad(), x2.grad()), 1e-3) << what;
+      // Float8Matmul rounds grad_w to bf16; the chunks accumulate it in fp32
+      EXPECT_LT(rel_norm_diff(w1.grad(), w2.grad()), 5e-3) << what;
+      EXPECT_EQ(w1.grad().slice(0, vocab).abs().max().item<float>(), 0.0f) << what;
+    }
   }
 }

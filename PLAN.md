@@ -93,5 +93,10 @@ steps:
     quick-d12 2 GPUs: 208.3k tok/s (+7.5%; --fused=false 145.2k), bpb 1.7791 vs 1.7784 with bf16 lm_head (30 steps).
     done: FP8 weights cached between optimizer steps (`Fp8WeightCache`, fused path): reused while the weight keeps its
     storage and version counter, bit-identical. quick-d12 2 GPUs: 210.8k tok/s (+1.2%), peak mem 8.32 GB.
-    todo: amax in the producer kernels (residual_norm, rotary_norm bwd), MXFP8 (block scales: producers quantize
-    directly, no global amax).
+    done: MXFP8 (`--fp8-recipe=mxfp8`, not in Python; default tensorwise): every operand e4m3 with an e8m0 scale per
+    32 values along K (2^ceil(log2(amax/448))), written in cuBLAS's swizzled layout by one kernel that also writes
+    the transpose (`model/fp8_kernel.cu`). No amax pass; merged q/k/v dgrad becomes one GEMM. Needs dims % 128, else
+    tensorwise. GEMMs as fast as tensorwise (bench: 67.9 vs 68.3 ms per micro-step). quick-d12 2 GPUs: 217.3k tok/s
+    (+3.1%), bpb 1.7783 vs 1.7792 tensorwise (30 steps).
+    todo: MX quantization in the producer kernels (relu^2 bwd, softcap CE grad, residual_norm, rotary_norm bwd): no
+    bf16 write + re-read. The transposed copy needs 32-row tiles.

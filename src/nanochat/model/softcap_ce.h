@@ -16,10 +16,10 @@ enum class LossReduction { Mean, Sum, None };
 // targets: (N) int64, -1 = ignored. Logits are cropped to vocab_size, softcapped as softcap * tanh(z / softcap)
 // in fp32. Mean divides by the number of non-ignored targets, like F.cross_entropy. fp8: the three matmuls as
 // fp8_matmul (fp8.h), but each chunk's logits gradient gets its own scale (row counts and dims % 16, else bf16);
-// cache (optional): the weight's FP8 copy.
+// cache (optional): the weight's FP8 copy. recipe Mx: MXFP8 when rows, chunk_rows and dims % 128.
 torch::Tensor softcap_cross_entropy(
       const torch::Tensor& x, const torch::Tensor& weight, const torch::Tensor& targets, int64_t vocab_size,
       double softcap, int64_t chunk_rows, LossReduction reduction = LossReduction::Mean, bool fp8 = false,
-      Fp8WeightCache* cache = nullptr);
+      Fp8WeightCache* cache = nullptr, Fp8Recipe recipe = Fp8Recipe::Tensorwise);
 
 } // namespace nanochat

@@ -28,49 +28,55 @@ double mismatch(const torch::Tensor& a, const torch::Tensor& b) {
 TEST(Qkv, Fp8MatchesSeparateMatmuls) {
   torch::manual_seed(0);
   const auto opts = torch::TensorOptions().device(torch::kCUDA);
-  const int64_t N = 624, C = 256, gate_cols = 12;
-  for (const auto& [nq, nkv] : {std::pair<int64_t, int64_t>{256, 256}, {256, 128}}) { // MHA, GQA
-    const auto x_in = torch::randn({N, C}, opts).to(torch::kBFloat16);
-    std::vector<torch::Tensor> w_in, up;
-    for (const auto n : {nq, nkv, nkv}) {
-      w_in.push_back(torch::randn({n, C}, opts) * 0.05 * (1 + static_cast<double>(w_in.size()))); // distinct scales
-      up.push_back(torch::randn({N, n}, opts).to(torch::kBFloat16) * (1 + static_cast<double>(up.size())));
-    }
-    const auto up_gate = torch::randn({N, gate_cols}, opts).to(torch::kBFloat16);
+  const int64_t N = 640, C = 256, gate_cols = 12; // MX: dims % 128
+  for (const auto recipe : {Fp8Recipe::Tensorwise, Fp8Recipe::Mx})
+    for (const auto& [nq, nkv] : {std::pair<int64_t, int64_t>{256, 256}, {256, 128}}) { // MHA, GQA
+      const bool mx = recipe == Fp8Recipe::Mx;
+      const auto x_in = torch::randn({N, C}, opts).to(torch::kBFloat16);
+      std::vector<torch::Tensor> w_in, up;
+      for (const auto n : {nq, nkv, nkv}) {
+        w_in.push_back(torch::randn({n, C}, opts) * 0.05 * (1 + static_cast<double>(w_in.size()))); // distinct scales
+        up.push_back(torch::randn({N, n}, opts).to(torch::kBFloat16) * (1 + static_cast<double>(up.size())));
+      }
+      const auto up_gate = torch::randn({N, gate_cols}, opts).to(torch::kBFloat16);
 
-    // fused
-    auto x = x_in.clone().requires_grad_();
-    std::vector<torch::Tensor> w;
-    for (const auto& t : w_in)
-      w.push_back(t.clone().requires_grad_());
-    const auto out = fp8_qkv(x, w[0], w[1], w[2], gate_cols);
-    ASSERT_EQ(out.size(), 4u);
-    EXPECT_TRUE(torch::equal(out[3], x_in.narrow(1, 0, gate_cols)));
-    auto loss = (out[3].to(torch::kFloat32) * up_gate).sum();
-    for (int i = 0; i < 3; ++i)
-      loss = loss + (out[i].to(torch::kFloat32) * up[i]).sum();
-    loss.backward();
+      // fused
+      auto x = x_in.clone().requires_grad_();
+      std::vector<torch::Tensor> w;
+      for (const auto& t : w_in)
+        w.push_back(t.clone().requires_grad_());
+      const auto out = fp8_qkv(x, w[0], w[1], w[2], gate_cols, nullptr, recipe);
+      ASSERT_EQ(out.size(), 4u);
+      EXPECT_TRUE(torch::equal(out[3], x_in.narrow(1, 0, gate_cols)));
+      auto loss = (out[3].to(torch::kFloat32) * up_gate).sum();
+      for (int i = 0; i < 3; ++i)
+        loss = loss + (out[i].to(torch::kFloat32) * up[i]).sum();
+      loss.backward();
 
-    // three fp8_matmuls, each with its own input leaf (per-branch dx)
-    torch::Tensor dx_ref = torch::zeros({N, C}, opts.dtype(torch::kFloat64));
-    dx_ref.narrow(1, 0, gate_cols).add_(up_gate.to(torch::kFloat64));
-    for (int i = 0; i < 3; ++i) {
-      auto xi = x_in.clone().requires_grad_();
-      auto wi = w_in[i].clone().requires_grad_();
-      const auto o = fp8_matmul(xi, wi);
-      (o.to(torch::kFloat32) * up[i]).sum().backward();
-      const auto n = std::to_string(nkv) + " part " + std::to_string(i);
-      EXPECT_TRUE(torch::equal(out[i], o)) << n;
-      // the merged GEMM accumulates in another order: rare 1-ulp differences
-      EXPECT_LT(mismatch(w[i].grad(), wi.grad()), 1e-4) << n;
-      EXPECT_LT(rel_diff(w[i].grad(), wi.grad()), 4e-3) << n;
-      dx_ref += xi.grad().to(torch::kFloat64);
+      // three fp8_matmuls, each with its own input leaf (per-branch dx)
+      torch::Tensor dx_ref = torch::zeros({N, C}, opts.dtype(torch::kFloat64));
+      dx_ref.narrow(1, 0, gate_cols).add_(up_gate.to(torch::kFloat64));
+      for (int i = 0; i < 3; ++i) {
+        auto xi = x_in.clone().requires_grad_();
+        auto wi = w_in[i].clone().requires_grad_();
+        const auto o = fp8_matmul(xi, wi, nullptr, recipe);
+        (o.to(torch::kFloat32) * up[i]).sum().backward();
+        const auto n = std::to_string(nkv) + " part " + std::to_string(i) + (mx ? " mx" : "");
+        EXPECT_TRUE(torch::equal(out[i], o)) << n;
+        // the merged GEMM accumulates in another order: rare 1-ulp differences
+        EXPECT_LT(mismatch(w[i].grad(), wi.grad()), 1e-4) << n;
+        EXPECT_LT(rel_diff(w[i].grad(), wi.grad()), 4e-3) << n;
+        dx_ref += xi.grad().to(torch::kFloat64);
+      }
+      // tensorwise: the fused dx sums the same three bf16 products in fp32, rounded once. MX: one GEMM over all three
+      const auto dx_ref_bf16 = dx_ref.to(torch::kBFloat16);
+      if (!mx) {
+        EXPECT_LT(mismatch(x.grad(), dx_ref_bf16), 1e-4) << nkv;
+        EXPECT_LT(rel_diff(x.grad(), dx_ref), 4e-3) << nkv;
+      }
+      else // one fp32 GEMM, rounded once; dx_ref carries three bf16 roundings
+        EXPECT_LT(rel_norm_diff(x.grad(), dx_ref), 4e-3) << nkv << " mx";
     }
-    // the fused dx sums the same three bf16 products in fp32, rounded once
-    const auto dx_ref_bf16 = dx_ref.to(torch::kBFloat16);
-    EXPECT_LT(mismatch(x.grad(), dx_ref_bf16), 1e-4) << nkv;
-    EXPECT_LT(rel_diff(x.grad(), dx_ref), 4e-3) << nkv;
-  }
 }
 
 TEST(Qkv, RotaryNormOnStridedViews) {
