@@ -45,14 +45,12 @@ Run 4: sm120 can't use fa3. however, fa2 works pretty good. --attention=fa2 enab
 Run 5: python nanochat keeps several GB of logits alive at once. this triggers OOM at --depth=24 on my setup. chunk and
 fuse CE loss to reduce vram usage. --loss-chunk-rows=4096 enabled by default going forward.
 
-Runs 6-10: sm120 have lower memory bandwidth than datacenter GPUs. for example, my RTX Pro 4000 has ~6x slower dram
+Runs 6-9: sm120 have lower memory bandwidth than datacenter GPUs. for example, my RTX Pro 4000 has ~6x slower dram
 bandwidth vs H100. fusing memory bound kernels is usually worth it. this is also the parts normally covered by pytorch
 inductor.
 
 Runs 14-18: mxfp8 support. this reduced memory traffic around quantization. this worked because several kernels were
-memory bound.
-
-Run 19: --fp8-recipe=mxfp8 and --fp8=true enabled by default going forward.
+memory bound. --fp8-recipe=mxfp8 and --fp8=true enabled by default going forward.
 
 # medium runs @ d24
 
