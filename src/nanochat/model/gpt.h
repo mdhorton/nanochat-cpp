@@ -19,8 +19,9 @@ inline constexpr auto kComputeDtype = torch::kBFloat16;
 
 // FA2: PyTorch's built-in FlashAttention-2, with native sliding windows (fast).
 // SDPA: nanochat's fallback (explicit mask for sliding windows); bit-identical to Python nanochat on sm_120.
-enum class Attention { FA2, SDPA };
-Attention attention_from_string(const std::string& name); // "fa2" or "sdpa"
+// FA2: FlashAttention-2 built for this GPU (flash_attention.h) where it fits, else PyTorch's copy (FA2Torch)
+enum class Attention { FA2, FA2Torch, SDPA };
+Attention attention_from_string(const std::string& name); // "fa2", "fa2-torch" or "sdpa"
 
 struct GPTConfig {
   int64_t sequence_len = 2048;

@@ -1,6 +1,7 @@
 #include "nanochat/model/gpt.h"
 
 #include "nanochat/model/embedding.h"
+#include "nanochat/model/flash_attention.h"
 #include "nanochat/model/fp8.h"
 #include "nanochat/model/mx_attention.h"
 #include "nanochat/model/relu_square.h"
@@ -105,9 +106,11 @@ static torch::Tensor fa2_attention(
 Attention attention_from_string(const std::string& name) {
   if (name == "fa2")
     return Attention::FA2;
+  if (name == "fa2-torch")
+    return Attention::FA2Torch;
   if (name == "sdpa")
     return Attention::SDPA;
-  throw std::invalid_argument("unknown attention: " + name + " (use fa2 or sdpa)");
+  throw std::invalid_argument("unknown attention: " + name + " (use fa2, fa2-torch or sdpa)");
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -215,9 +218,11 @@ torch::Tensor CausalSelfAttentionImpl::forward(
 
 torch::Tensor CausalSelfAttentionImpl::attend(
       const torch::Tensor& q, const torch::Tensor& k, const torch::Tensor& v, int64_t window) const {
-  return attention == Attention::FA2
-               ? fa2_attention(q, k, v, window)
-               : sdpa_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), window).transpose(1, 2);
+  if (attention == Attention::SDPA)
+    return sdpa_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), window).transpose(1, 2);
+  if (attention == Attention::FA2 && flash_attention_fits(q, k, v))
+    return flash_attention(q, k, v, window);
+  return fa2_attention(q, k, v, window);
 }
 
 MLPImpl::MLPImpl(const GPTConfig& config, const torch::TensorOptions& options) {

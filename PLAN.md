@@ -117,6 +117,17 @@ steps:
     done: x0's gradient summed in one buffer by the residual_norm backwards (`X0Grad`, fused path), in autograd's
     order: bit-identical, no autograd adds (12 per micro-step at d12, layer 0's x gradient folded in). quick-d12 2
     GPUs: MX 238.7k tok/s (+0.8%).
+    done: FlashAttention-2 built from external/flash-attention (`model/flash_attention.h`, hdim 128 bf16, SETUP.md),
+    `--attention=fa2` where it fits (PyTorch's copy: `fa2-torch`). Not bit-identical to PyTorch's copy (version, build
+    flags), as close to fp32. Forward tiles for sm_120's 99 KB of shared memory: 64x64 for windows (-24% vs PyTorch's),
+    128x64 causal; backward as upstream (the other configs that fit weren't faster). Tensor pipe (ncu, % of peak per
+    clock): fwd 73 causal / 72 window (PyTorch's: 51), bwd 75 causal / 67 window. Measured peaks
+    (roofline/*-peak.json, cuBLASLt): bf16 122, fp8 231 TFLOP/s, ~95% per clock, at ~1.75 GHz (145 W power cap;
+    boost 3.09 GHz). quick-d12 2 GPUs: 240.9k tok/s (+0.9%).
+    todo (attention, later): convert_dq folded into rotary_norm_bwd_mx (fp32 dq read directly), ~1%; a faster
+    dot_do_o (~320 of ~550 GB/s), ~0.5%; kernels to ~80% of peak (mostly the window backward), ~1.4%;
+    MX GEMMs (~159 of 231 TFLOP/s, d12's narrow shapes), the largest pool left; FP8 attention
+    (e4m3 QK^T / PV at ~2x the bf16 rate), up to ~6%, numerics risk.
     todo (later; d12, % of a 150 ms micro-step): MX in the remaining producers (24 quantizes of 16384x768 each per
     micro-step, 76 us each), and the fp32 .grad adds:
     - residual_norm fwd (attn/MLP inputs), ~0.5%: bf16 n is still needed (autograd output, gate input). 32-row

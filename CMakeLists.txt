@@ -48,12 +48,31 @@ target_compile_definitions(nanochat PUBLIC NANOCHAT_CACHE_DIR="${PROJECT_SOURCE_
 target_link_libraries(nanochat PUBLIC
         PkgConfig::PCRE2 Arrow::arrow_shared Parquet::parquet_shared nlohmann_json::nlohmann_json Threads::Threads)
 
+# FlashAttention-2's hdim 128 bf16 kernels, built for this GPU from external/flash-attention (SETUP.md)
+set(FLASH_ATTN_DIR "${PROJECT_SOURCE_DIR}/external/flash-attention/csrc")
+if (NOT EXISTS "${FLASH_ATTN_DIR}/cutlass/include/cute")
+    message(FATAL_ERROR "missing ${FLASH_ATTN_DIR}/cutlass: clone flash-attention and its cutlass submodule (SETUP.md)")
+endif ()
+add_library(flash_attn STATIC src/nanochat/model/flash_attention_fwd.cu src/nanochat/model/flash_attention_bwd.cu)
+target_include_directories(flash_attn PRIVATE src)
+target_include_directories(flash_attn SYSTEM PUBLIC ${FLASH_ATTN_DIR}/flash_attn/src ${FLASH_ATTN_DIR}/cutlass/include)
+# own namespace (libtorch has its own copy); features nanochat doesn't use are compiled out
+target_compile_definitions(flash_attn PUBLIC
+        FLASH_NAMESPACE=nanochat_flash FLASHATTENTION_DISABLE_DROPOUT FLASHATTENTION_DISABLE_ALIBI
+        FLASHATTENTION_DISABLE_SOFTCAP FLASHATTENTION_DISABLE_UNEVEN_K)
+target_compile_options(flash_attn PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
+        -O3 --use_fast_math --expt-relaxed-constexpr --expt-extended-lambda -U__CUDA_NO_HALF_OPERATORS__
+        -U__CUDA_NO_HALF_CONVERSIONS__ -U__CUDA_NO_HALF2_OPERATORS__ -U__CUDA_NO_BFLOAT16_CONVERSIONS__>)
+target_link_libraries(flash_attn PRIVATE ${TORCH_LIBRARIES}) # c10 / ATen headers
+target_include_directories(flash_attn SYSTEM PRIVATE "${TORCH_DIR}/../nvidia/cu13/include")
+
 # pre-training (libtorch)
 add_library(nanochat_train
         src/nanochat/model/embedding.cpp
         src/nanochat/model/embedding_kernel.cu
         src/nanochat/model/fp8.cpp
         src/nanochat/model/fp8_kernel.cu
+        src/nanochat/model/flash_attention.cpp
         src/nanochat/model/gpt.cpp
         src/nanochat/model/mx_attention.cpp
         src/nanochat/model/mx_attention_kernel.cu
@@ -74,6 +93,7 @@ add_library(nanochat_train
         src/nanochat/train/safetensors.cpp
         src/nanochat/train/trainer.cpp)
 target_link_libraries(nanochat_train PUBLIC nanochat ${TORCH_LIBRARIES})
+target_link_libraries(nanochat_train PRIVATE flash_attn)
 # ATen/cuda headers need the CUDA library headers (cuBLAS, cuSPARSE, ...), which come with the NVIDIA wheels
 target_include_directories(nanochat_train SYSTEM PUBLIC "${TORCH_DIR}/../nvidia/cu13/include")
 target_include_directories(nanochat_train SYSTEM PRIVATE "${TORCH_DIR}/../nvidia/nccl/include") # ProcessGroupNCCL
@@ -107,6 +127,7 @@ add_executable(train_tests
         tests/test_dataloader.cpp
         tests/test_dist.cpp
         tests/test_embedding.cpp
+        tests/test_flash_attention.cpp
         tests/test_fp8.cpp
         tests/test_gpt.cpp
         tests/test_loss_eval.cpp

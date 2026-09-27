@@ -7,6 +7,11 @@ curl -fsSL https://pixi.sh/install.sh | bash
 pixi install                                   
 ```
 
+```bash
+git clone https://github.com/Dao-AILab/flash-attention external/flash-attention
+git -C external/flash-attention submodule update --init csrc/cutlass
+```
+
 # common tasks
 
 ```bash
