@@ -79,8 +79,6 @@ target_include_directories(nanochat_train SYSTEM PUBLIC "${TORCH_DIR}/../nvidia/
 target_include_directories(nanochat_train SYSTEM PRIVATE "${TORCH_DIR}/../nvidia/nccl/include") # ProcessGroupNCCL
 target_compile_options(nanochat_train PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Xptxas=-warn-spills>) # warn on register spills
 
-add_executable(nanochat_cpp main.cpp)
-
 add_executable(tok_train apps/tok_train.cpp)
 target_link_libraries(tok_train PRIVATE nanochat)
 

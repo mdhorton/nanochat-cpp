@@ -110,13 +110,6 @@ steps:
     the merged MX buffers: 30 fewer quantizes per micro-step. The mix is one kernel each way instead of torch's
     broadcast ops. Bit-identical but for the gate logits' gradient (sum order, 1 ulp). quick-d12 2 GPUs: 233.0k
     tok/s (+2.4%).
-    todo: MX in the remaining producers (d12: 24 quantizes of 16384x768 each per micro-step, 76 us each):
-    - residual_norm fwd (attn/MLP inputs), ~0.5%: bf16 n is still needed (autograd output, gate input). 32-row
-      CTAs (1024 threads) for the transposed copy; MX returned as non-differentiable outputs, passed explicitly
-      through forward_split to fp8_qkv / the MLP.
-    - residual_norm bwd (c_proj output grads), ~0.5%: bf16 ds is still needed (residual stream). c_proj's backward
-      can't receive extra tensors through autograd: needs a handoff (MX copy keyed on data_ptr, numel, version,
-      picked up by quantize_grad).
     done: lm_head grad_w: MX writes every chunk's transposed gradient into one (V, N) buffer for a single grad_w GEMM
     (no per-chunk fp32 adds; tensorwise's per-chunk scales can't share one); all paths add g * grad_w straight into
     the weight's .grad (no scaled copy for autograd to add), fp8 without a zero fill. quick-d12 2 GPUs: MX 236.8k
@@ -124,5 +117,13 @@ steps:
     done: x0's gradient summed in one buffer by the residual_norm backwards (`X0Grad`, fused path), in autograd's
     order: bit-identical, no autograd adds (12 per micro-step at d12, layer 0's x gradient folded in). quick-d12 2
     GPUs: MX 238.7k tok/s (+0.8%).
-    todo (d12_6 profile, ms per 150 ms micro-step):
-    - other weights' fp32 .grad accumulation adds, ~0.8 ms (needs cublasLt with beta = 1).
+    todo (later; d12, % of a 150 ms micro-step): MX in the remaining producers (24 quantizes of 16384x768 each per
+    micro-step, 76 us each), and the fp32 .grad adds:
+    - residual_norm fwd (attn/MLP inputs), ~0.5%: bf16 n is still needed (autograd output, gate input). 32-row
+      CTAs (1024 threads) for the transposed copy; MX returned as non-differentiable outputs, passed explicitly
+      through forward_split to fp8_qkv / the MLP.
+    - residual_norm bwd (c_proj output grads), ~0.5%: bf16 ds is still needed (residual stream). c_proj's backward
+      can't receive extra tensors through autograd: needs a handoff (MX copy keyed on data_ptr, numel, version,
+      picked up by quantize_grad).
+    - other weights' fp32 .grad accumulation adds, ~0.5% (0.8 ms): GEMMs accumulate straight into .grad (cublasLt
+      beta = 1).
