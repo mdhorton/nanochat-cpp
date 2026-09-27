@@ -388,13 +388,14 @@ torch::Tensor GPTImpl::forward(
   const int64_t backout_layer = config_.n_layer / 2;
   torch::Tensor x_backout;
   torch::Tensor pending; // fused: the previous block's MLP output, added to x by the next residual_norm
+  const auto x0_grad = c10::make_intrusive<X0Grad>();
   for (int64_t i = 0; i < config_.n_layer; ++i) {
     torch::Tensor ve = ves[i];
     if (const auto key = std::to_string(i); !fused_ && value_embeds->contains(key))
       ve = value_embeds[key]->as<EmbeddingImpl>()->forward(idx).to(x.scalar_type());
     const auto& block = transformer->h[i]->as<BlockImpl>();
     if (fused_) {
-      auto [res, res_norm] = residual_norm(x, pending, x0, resid_lambdas, x0_lambdas, i);
+      auto [res, res_norm] = residual_norm(x, pending, x0, resid_lambdas, x0_lambdas, i, x0_grad);
       auto [y, m] = block->forward_split(res, res_norm, ve, cos, sin, windows_[i]);
       // the backout and the final layer need the block output itself
       if (i == backout_layer || i == config_.n_layer - 1) {

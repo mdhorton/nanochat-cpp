@@ -185,3 +185,36 @@ TEST(ResidualNorm, ModelMatchesOpByOp) {
   EXPECT_LT(rel_diff(gr_f, gr_o), 1e-1);
   EXPECT_LT(rel_diff(g0_f, g0_o), 1e-1);
 }
+
+// X0Grad sums x0's gradient over the layers in one buffer: bit-identical to autograd's adds, also over a retained
+// graph's second backward.
+TEST(ResidualNorm, X0GradMatchesAutograd) {
+  torch::manual_seed(0);
+  const std::vector<int64_t> shape{4, 64, 768};
+  const auto opts = torch::TensorOptions().device(torch::kCUDA);
+  const auto x0_in = randn_bf16(shape).to(torch::kBFloat16), w = randn_bf16(shape, 0.5).to(torch::kBFloat16);
+  const auto lr_in = torch::rand({4}, opts) + 0.5, l0_in = torch::rand({4}, opts) * 0.3;
+  const auto g = randn_bf16(shape);
+  for (const bool x_is_x0 : {true, false}) {
+    auto run_chain = [&](bool sum) {
+      auto x0 = x0_in.clone().requires_grad_(), lr = lr_in.clone().requires_grad_(),
+           l0 = l0_in.clone().requires_grad_();
+      const auto x0_grad = sum ? c10::make_intrusive<X0Grad>() : c10::intrusive_ptr<X0Grad>();
+      auto x = x_is_x0 ? x0 : x0 * 2;
+      torch::Tensor pending;
+      for (int64_t i = 0; i < 4; ++i) {
+        auto [res, n] = residual_norm(x, pending, x0, lr, l0, i, x0_grad);
+        x = res + n * w;
+        pending = i % 2 == 0 ? n * w : torch::Tensor();
+      }
+      auto loss = (x.to(torch::kFloat64) * g).sum();
+      loss.backward({}, true);
+      loss.backward();
+      return std::tuple{x0.grad(), lr.grad(), l0.grad()};
+    };
+    const auto [dx0_s, dlr_s, dl0_s] = run_chain(true);
+    const auto [dx0_a, dlr_a, dl0_a] = run_chain(false);
+    EXPECT_TRUE(torch::equal(dx0_s, dx0_a)) << x_is_x0;
+    EXPECT_TRUE(torch::equal(dlr_s, dlr_a) && torch::equal(dl0_s, dl0_a)) << x_is_x0;
+  }
+}

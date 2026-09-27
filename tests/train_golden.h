@@ -30,6 +30,7 @@ inline TrainOptions options_from_json(const nlohmann::json& j) {
   o.eval_every = j["eval_every"];
   o.eval_tokens = j["eval_tokens"];
   o.fp8 = j.value("fp8", false);
+  o.fp8_recipe = "tensorwise"; // as Python
   return o;
 }
 

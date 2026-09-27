@@ -36,8 +36,8 @@ Runs based on the sm120 customizations and tuning.
 |  15 |  221,792 | 4.805797 | 1.436430 |   8.4g | 3.93m | --fp8-recipe=mxfp8 (relu² backward)           |
 |  16 |  225,049 | 4.804839 | 1.436043 |   8.4g | 3.86m | --fp8-recipe=mxfp8 (softcap CE grads)         |
 |  17 |  230,934 | 4.802351 | 1.435362 |   8.4g | 3.77m | --fp8-recipe=mxfp8 (qkv + rotary + val embed) |
-|  18 |  234,497 | 4.806611 | 1.436663 |   8.7g | 3.71m |                                               |
-|  19 |          |          |          |        |       |                                               |
+|  18 |  234,497 | 4.806611 | 1.436663 |   8.7g | 3.71m | --fp8-recipe=mxfp8 (lm_head grad_w fold)      |
+|  19 |  237,122 | 4.802950 | 1.435503 |   8.7g | 3.68m | x0 gradient fold                              |
 |  20 |          |          |          |        |       |                                               |
 
 Run 4: sm120 can't use fa3. however, fa2 works pretty good. --attention=fa2 enabled by default going forward.
@@ -49,7 +49,10 @@ Runs 6-10: sm120 have lower memory bandwidth than datacenter GPUs. for example, 
 bandwidth vs H100. fusing memory bound kernels is usually worth it. this is also the parts normally covered by pytorch
 inductor.
 
-Runs 10-13: these are results of running nsys and ncu and then asking claude to look them.
+Runs 14-18: mxfp8 support. this reduced memory traffic around quantization. this worked because several kernels were
+memory bound.
+
+Run 19: --fp8-recipe=mxfp8 and --fp8=true enabled by default going forward.
 
 # medium runs @ d24
 

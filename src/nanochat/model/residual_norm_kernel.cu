@@ -184,15 +184,18 @@ __device__ __forceinline__ void residual_norm_bwd_body(const kernels::ResidualNo
         continue;
       }
       const Vec8 s = load8(a.s, i), x0 = load8(a.x0, i);
-      Vec8 ds, dx0;
+      Vec8 ds, dx0 = a.dx0_sum ? load8(a.dx0, i) : Vec8{};
 #pragma unroll
       for (int k = 0; k < kVec; ++k) {
         sr += d.v[k] * s.v[k];
         s0 += d.v[k] * x0.v[k];
         ds.v[k] = lr * d.v[k];
-        dx0.v[k] = l0 * d.v[k];
+        if (a.dx0_add_ds)
+          dx0.v[k] = round_bf16(dx0.v[k] + round_bf16(ds.v[k]));
+        dx0.v[k] += round_bf16(l0 * d.v[k]);
       }
-      store8(a.ds, i, ds);
+      if (a.ds != nullptr)
+        store8(a.ds, i, ds);
       store8(a.dx0, i, dx0);
     }
   }

@@ -34,7 +34,7 @@ class ResidualNorm : public torch::autograd::Function<ResidualNorm> {
 public:
   static variable_list forward(
         AutogradContext* ctx, const torch::Tensor& x, const Optional& r_in, const Optional& x0_in,
-        const Optional& lr_in, const Optional& l0_in, int64_t layer) {
+        const Optional& lr_in, const Optional& l0_in, int64_t layer, const c10::intrusive_ptr<X0Grad>& x0_grad) {
     const auto r = r_in.value_or(torch::Tensor()), x0 = x0_in.value_or(torch::Tensor());
     const auto lr = lr_in.value_or(torch::Tensor()), l0 = l0_in.value_or(torch::Tensor());
     check_bf16(x, x);
@@ -71,6 +71,13 @@ public:
     ctx->save_for_backward({blend ? (add ? s : x) : torch::Tensor(), x0, lr, l0, res, rstd});
     ctx->saved_data["layer"] = layer;
     ctx->saved_data["add"] = add;
+    if (x0_grad) {
+      TORCH_CHECK(blend, "x0_grad needs x0");
+      ctx->saved_data["x0_grad"] = c10::IValue::make_capsule(x0_grad);
+      ctx->saved_data["x0_grad_owner"] = !x0_grad->claimed;
+      ctx->saved_data["x_is_x0"] = x.is_same(x0);
+      x0_grad->claimed = true;
+    }
     return {res, n};
   }
 
@@ -84,10 +91,24 @@ public:
     for (const auto& g : {g_res, g_n})
       if (g.defined())
         check_bf16(g, res);
-    auto ds = torch::empty_like(res);
+    c10::intrusive_ptr<X0Grad> x0_grad;
+    bool owner = false, fold_x = false, sum = false;
+    if (ctx->saved_data.count("x0_grad") != 0) {
+      x0_grad = c10::static_intrusive_pointer_cast<X0Grad>(ctx->saved_data["x0_grad"].toCapsule());
+      owner = ctx->saved_data["x0_grad_owner"].toBool();
+      fold_x = owner && ctx->saved_data["x_is_x0"].toBool();
+    }
+    const auto ds = fold_x && !add ? torch::Tensor() : torch::empty_like(res);
     torch::Tensor dx0, dlr, dl0, partials;
     if (blend) {
-      dx0 = torch::empty_like(x0);
+      if (x0_grad) {
+        sum = x0_grad->sum.defined();
+        if (!sum)
+          x0_grad->sum = torch::empty_like(x0);
+        dx0 = x0_grad->sum;
+      }
+      else
+        dx0 = torch::empty_like(x0);
       dlr = torch::empty_like(lr);
       dl0 = torch::empty_like(l0);
       partials = torch::empty({2 * kernels::residual_norm_bwd_blocks(rstd.numel())}, lr.options());
@@ -101,8 +122,10 @@ public:
            .x0 = ptr(x0),
            .lr = blend ? lr.data_ptr<float>() + layer : nullptr,
            .l0 = blend ? l0.data_ptr<float>() + layer : nullptr,
-           .ds = ds.data_ptr(),
+           .ds = ds.defined() ? ds.data_ptr() : nullptr,
            .dx0 = blend ? dx0.data_ptr() : nullptr,
+           .dx0_sum = sum,
+           .dx0_add_ds = fold_x,
            .partials = blend ? partials.data_ptr<float>() : nullptr,
            .dlr = blend ? dlr.data_ptr<float>() : nullptr,
            .dl0 = blend ? dl0.data_ptr<float>() : nullptr,
@@ -112,8 +135,16 @@ public:
            .cols = static_cast<int>(res.size(-1))},
           at::cuda::getCurrentCUDAStream().stream());
     C10_CUDA_KERNEL_LAUNCH_CHECK();
+    if (x0_grad) {
+      if (!owner)
+        dx0 = torch::Tensor();
+      else
+        x0_grad->sum = torch::Tensor(); // a retained graph's next backward starts over
+      if (fold_x)
+        return {dx0, add ? ds : torch::Tensor(), torch::Tensor(), dlr, dl0, torch::Tensor(), torch::Tensor()};
+    }
     // the add passes ds to both of its inputs
-    return {ds, add ? ds : torch::Tensor(), dx0, dlr, dl0, torch::Tensor()};
+    return {ds, add ? ds : torch::Tensor(), dx0, dlr, dl0, torch::Tensor(), torch::Tensor()};
   }
 };
 
@@ -121,9 +152,9 @@ public:
 
 std::pair<torch::Tensor, torch::Tensor> residual_norm(
       const torch::Tensor& x, const torch::Tensor& r, const torch::Tensor& x0, const torch::Tensor& resid_lambdas,
-      const torch::Tensor& x0_lambdas, int64_t layer) {
+      const torch::Tensor& x0_lambdas, int64_t layer, const c10::intrusive_ptr<X0Grad>& x0_grad) {
   const auto out = ResidualNorm::apply(
-        x, optional(r), optional(x0), optional(resid_lambdas), optional(x0_lambdas), layer);
+        x, optional(r), optional(x0), optional(resid_lambdas), optional(x0_lambdas), layer, x0_grad);
   return {out[0], out[1]};
 }
 

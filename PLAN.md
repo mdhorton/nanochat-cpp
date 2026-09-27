@@ -93,7 +93,7 @@ steps:
     quick-d12 2 GPUs: 208.3k tok/s (+7.5%; --fused=false 145.2k), bpb 1.7791 vs 1.7784 with bf16 lm_head (30 steps).
     done: FP8 weights cached between optimizer steps (`Fp8WeightCache`, fused path): reused while the weight keeps its
     storage and version counter, bit-identical. quick-d12 2 GPUs: 210.8k tok/s (+1.2%), peak mem 8.32 GB.
-    done: MXFP8 (`--fp8-recipe=mxfp8`, not in Python; default tensorwise): every operand e4m3 with an e8m0 scale per
+    done: MXFP8 (`--fp8-recipe=mxfp8`, not in Python; the default, as is `--fp8`): every operand e4m3 with an e8m0 scale per
     32 values along K (2^ceil(log2(amax/448))), written in cuBLAS's swizzled layout by one kernel that also writes
     the transpose (`model/fp8_kernel.cu`). No amax pass; merged q/k/v dgrad becomes one GEMM. Needs dims % 128, else
     tensorwise. GEMMs as fast as tensorwise (bench: 67.9 vs 68.3 ms per micro-step). quick-d12 2 GPUs: 217.3k tok/s
@@ -121,6 +121,8 @@ steps:
     (no per-chunk fp32 adds; tensorwise's per-chunk scales can't share one); all paths add g * grad_w straight into
     the weight's .grad (no scaled copy for autograd to add), fp8 without a zero fill. quick-d12 2 GPUs: MX 236.8k
     tok/s (+1.6%), peak mem 8.66 GB (+0.31, the buffer); tensorwise 210.5k (within noise).
+    done: x0's gradient summed in one buffer by the residual_norm backwards (`X0Grad`, fused path), in autograd's
+    order: bit-identical, no autograd adds (12 per micro-step at d12, layer 0's x gradient folded in). quick-d12 2
+    GPUs: MX 238.7k tok/s (+0.8%).
     todo (d12_6 profile, ms per 150 ms micro-step):
-    - x0's gradient: autograd sums 12 bf16 dx0 (11 adds), ~1 ms.
     - other weights' fp32 .grad accumulation adds, ~0.8 ms (needs cublasLt with beta = 1).

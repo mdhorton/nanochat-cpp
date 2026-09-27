@@ -11,11 +11,13 @@ pixi install
 
 ```bash
 pixi run build | test | tok-train | tok-eval
-pixi run base-train --depth=12            # pretrain (flags as scripts/base_train.py, see --help)
+pixi run base-train --depth=12            # pretrain (flags as scripts/base_train.py, see --help); MXFP8 by default
 pixi run base-train --depth=12 --run=NAME # checkpoints in base_checkpoints/NAME, metrics (for wandb) in metrics/NAME/metrics-TSTAMP.jsonl
-pixi run base-train --depth=24 --nproc=2 --fp8  # one process per GPU (as torchrun), FP8 matmuls
-pixi run quick-d12 | quick-d24            # smoke tests (FP8, 2 GPUs): tok/s, early loss, final val bpb
-pixi run full-d12 | full-d24              # full runs (FP8, 2 GPUs)
+pixi run base-train --depth=24 --nproc=2  # one process per GPU (as torchrun)
+pixi run base-train --fp8=false            # bf16 matmuls (Python's default)
+pixi run base-train --fp8-recipe=tensorwise # FP8 as Python's --fp8
+pixi run quick-d12 | quick-d24            # smoke tests (MXFP8, 2 GPUs): tok/s, early loss, final val bpb
+pixi run full-d12 | full-d24              # full runs (MXFP8, 2 GPUs)
 pixi run profile-d12 | profile-d24        # nsys (steps 2-4) + ncu (1 GPU, step 2) -> cache/profiles/d12_N.{nsys,ncu}-rep
 pixi run profile-d12 ncu --metrics M --kernel-name regex:K -c 5   # one tool only (nsys|ncu); flags after it go to ncu and override its defaults
 nsys stats --report nvtx_sum,cuda_gpu_kern_sum cache/profiles/d12_1.nsys-rep   # summary tables in the terminal

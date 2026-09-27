@@ -25,8 +25,8 @@ static int run(int argc, char** argv) {
   o.attention = flags.str("attention", o.attention, "fa2 (FlashAttention-2) or sdpa (bit-identical to Python)");
   o.loss_chunk_rows = flags.i64(
         "loss-chunk-rows", o.loss_chunk_rows, "rows per chunk of the fused lm_head + loss (0 = unchunked, as Python)");
-  o.fp8 = flags.boolean("fp8", o.fp8, "FP8 training (eval stays bf16)");
-  o.fp8_recipe = flags.str("fp8-recipe", o.fp8_recipe, "tensorwise (as Python) or mxfp8 (32-value block scales)");
+  o.fp8 = flags.boolean("fp8", o.fp8, "FP8 training (eval stays bf16); false = bf16, as Python's default");
+  o.fp8_recipe = flags.str("fp8-recipe", o.fp8_recipe, "mxfp8 (32-value block scales) or tensorwise (as Python)");
   o.fused = flags.boolean("fused", o.fused, "fused elementwise CUDA kernels (false = op by op, as Python)");
   // horizon
   o.num_iterations = flags.i64("num-iterations", o.num_iterations, "explicit number of steps (-1 = disable)");

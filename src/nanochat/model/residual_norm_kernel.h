@@ -30,13 +30,15 @@ int residual_norm_bwd_blocks(int64_t rows);
 
 // g = g_res + rms_norm backward of g_n (each may be null: no gradient). Without x0: ds = g. With x0: ds = lr * g,
 // dx0 = l0 * g, dlr[layer] = sum(g * s), dl0[layer] = sum(g * x0), and 0 at the other n_layer - 1 entries.
+// dx0_sum: dx0 += (ds if dx0_add_ds) + l0 * g, each add rounded to bf16 as autograd's accumulation.
 struct ResidualNormBwd {
   const void *g_res, *g_n;
   const void* res;
   const float* rstd;
   const void *s, *x0; // blend only: s = the blend's input
   const float *lr, *l0;
-  void *ds, *dx0;
+  void *ds, *dx0; // ds may be null with x0
+  bool dx0_sum, dx0_add_ds;
   float *partials, *dlr, *dl0; // partials: 2 * residual_norm_bwd_blocks(rows) floats of scratch
   int layer, n_layer;
   int64_t rows;
