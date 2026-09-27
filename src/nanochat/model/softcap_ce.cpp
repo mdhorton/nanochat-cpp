@@ -18,8 +18,9 @@ using torch::autograd::variable_list;
 // grad_x = dlogits @ w and grad_w += dlogits^T @ x (fp32 accumulate). Undefined outputs are skipped.
 // bf16: w cast to x's dtype. fp8 (as fp8.py's Float8Matmul): x and weight quantized once (e4m3); each chunk's
 // gradient is quantized (e5m2) with its own scale, from the amax the kernel reports (python: one scale for all rows).
-// mx: MXFP8 instead (x's transpose quantized per chunk, its scales run along the rows); the gradient is quantized
-// from the logits and each row's lse, never written in bf16. cache (optional): the weight's FP8 copy.
+// mx: MXFP8 instead; the gradient is quantized from the logits and each row's lse, never written in bf16, its
+// transpose into one (padded, N) buffer for a single grad_w GEMM (block scales along N allow it; tensorwise's
+// per-chunk scales don't). cache (optional): the weight's FP8 copy. grad_w: written (fp8) or accumulated (bf16).
 void run_chunks(
       const torch::Tensor& x, const torch::Tensor& weight, const torch::Tensor& targets, int64_t vocab, double softcap,
       int64_t chunk_rows, bool fp8, bool mx, const torch::Tensor& losses, const torch::Tensor& grad_x,
@@ -27,10 +28,10 @@ void run_chunks(
       Fp8WeightCache* cache) {
   const int64_t N = x.size(0), padded = weight.size(0);
   const bool grad = grad_x.defined();
-  Fp8Tensor xq, wq;
+  Fp8Tensor xq, wq, g_all; // g_all: MX, every chunk's gradient transposed
   torch::Tensor w;
   if (fp8) {
-    xq = mx ? quantize_mx(x, true, false) : quantize_fp8(x, torch::kFloat8_e4m3fn);
+    xq = mx ? quantize_mx(x, true, grad) : quantize_fp8(x, torch::kFloat8_e4m3fn);
     wq = quantize_fp8_weight(weight, cache, mx ? Fp8Recipe::Mx : Fp8Recipe::Tensorwise);
   }
   else
@@ -70,30 +71,39 @@ void run_chunks(
       at::addmm_out(const_cast<torch::Tensor&>(grad_w), grad_w, buf.t(), xc, torch::kFloat32);
       continue;
     }
-    Fp8Tensor gq;
     if (mx) {
-      gq = empty_mx(end - begin, padded, x.options());
-      const auto [out, out_t] = mx_outs(gq);
+      if (!g_all.data_t.defined())
+        g_all = empty_mx(N, padded, x.options(), false, true);
+      const auto gq = empty_mx(end - begin, padded, x.options(), true, false);
       kernels::softcap_ce_grad_mx(
             buf.data_ptr(), end - begin, padded, chunk_targets, lse.data_ptr<float>(), static_cast<int>(vocab),
-            static_cast<int>(padded), static_cast<float>(softcap), chunk_scale, scale_stride, valid, out, out_t,
-            stream);
+            static_cast<int>(padded), static_cast<float>(softcap), chunk_scale, scale_stride, valid,
+            mx_out(gq.data, gq.inv_scale, 0, 0), mx_out(g_all.data_t, g_all.inv_scale_t, 0, begin), stream);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
+      at::_scaled_mm_out(gx, gq.data, wq.data_t.t(), gq.inv_scale, wq.inv_t(), {}, {}, x.scalar_type(), false);
+      continue;
     }
-    else
-      gq = quantize_fp8_amax_ready(buf, torch::kFloat8_e5m2, scalars);
+    const auto gq = quantize_fp8_amax_ready(buf, torch::kFloat8_e5m2, scalars);
     at::_scaled_mm_out(gx, gq.data, wq.data_t.t(), gq.inv_scale, wq.inv_t(), {}, {}, x.scalar_type(), false);
-    // x_t's columns of this chunk, column-major
-    const auto xt = mx ? quantize_mx(xc, false, true) : Fp8Tensor{};
-    const auto xc_t = mx ? xt.data_t.t() : xq.data_t.slice(1, begin, end).t();
-    const auto& xc_inv = mx ? xt.inv_scale_t : xq.inv_scale;
+    const auto xc_t = xq.data_t.slice(1, begin, end).t(); // x_t's columns of this chunk, column-major
     if (begin == 0)
       at::_scaled_mm_out(
-            const_cast<torch::Tensor&>(grad_w), gq.data_t, xc_t, gq.inv_t(), xc_inv, {}, {}, torch::kFloat32, false);
+            const_cast<torch::Tensor&>(grad_w), gq.data_t, xc_t, gq.inv_t(), xq.inv_scale, {}, {}, torch::kFloat32,
+            false);
     else
       const_cast<torch::Tensor&>(grad_w).add_(
-            at::_scaled_mm(gq.data_t, xc_t, gq.inv_t(), xc_inv, {}, {}, torch::kFloat32, false));
+            at::_scaled_mm(gq.data_t, xc_t, gq.inv_t(), xq.inv_scale, {}, {}, torch::kFloat32, false));
   }
+  if (g_all.data_t.defined())
+    at::_scaled_mm_out(
+          const_cast<torch::Tensor&>(grad_w), g_all.data_t, xq.data_t.t(), g_all.inv_scale_t, xq.inv_scale_t, {}, {},
+          torch::kFloat32, false);
+}
+
+// fp8 writes grad_w; bf16 accumulates into it
+torch::Tensor empty_grad_w(const torch::Tensor& weight, bool fp8) {
+  const auto options = weight.options().dtype(torch::kFloat32);
+  return fp8 ? torch::empty(weight.sizes(), options) : torch::zeros(weight.sizes(), options);
 }
 
 // For mean/sum the incoming gradient is a scalar, so forward computes the gradients at once (no recompute)
@@ -111,13 +121,16 @@ public:
     torch::Tensor grad_x, grad_w;
     if (precompute) {
       grad_x = torch::empty_like(x);
-      grad_w = torch::zeros(weight.sizes(), weight.options().dtype(torch::kFloat32));
+      grad_w = empty_grad_w(weight, fp8);
     }
     run_chunks(
           x, weight, targets, vocab_size, softcap, chunk_rows, fp8, mx, losses, grad_x, grad_w, {},
           reduction == LossReduction::Mean ? num_valid : torch::Tensor(), cache);
-    if (precompute)
+    if (precompute) {
       ctx->save_for_backward({grad_x, grad_w});
+      if (weight.is_leaf() && weight.requires_grad())
+        ctx->saved_data["weight"] = weight; // the parameter itself: backward adds into its .grad
+    }
     else if (needs_grad)
       ctx->save_for_backward({x, weight, targets});
     ctx->saved_data["precomputed"] = precompute;
@@ -141,12 +154,22 @@ public:
     if (saved.empty())
       throw std::logic_error("softcap_cross_entropy: backward without grad mode in forward");
     const auto& g = grad_outputs[0];
-    if (ctx->saved_data["precomputed"].toBool())
-      return {saved[0] * g, saved[1] * g.to(torch::kFloat32), {}, {}, {}, {}, {}, {}, {}, {}, {}};
+    if (ctx->saved_data["precomputed"].toBool()) {
+      const auto gw = g.to(torch::kFloat32);
+      if (ctx->saved_data.count("weight") == 0)
+        return {saved[0] * g, saved[1] * gw, {}, {}, {}, {}, {}, {}, {}, {}, {}};
+      // .grad += grad_w * g in one pass, instead of a scaled copy that autograd then adds
+      auto weight = ctx->saved_data["weight"].toTensor();
+      if (weight.grad().defined())
+        weight.mutable_grad().addcmul_(saved[1], gw);
+      else
+        weight.mutable_grad() = (saved[1] * gw).to(weight.scalar_type());
+      return {saved[0] * g, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}};
+    }
 
     const auto &x = saved[0], &weight = saved[1], &targets = saved[2];
     auto grad_x = torch::empty_like(x);
-    auto grad_w = torch::zeros(weight.sizes(), weight.options().dtype(torch::kFloat32));
+    auto grad_w = empty_grad_w(weight, ctx->saved_data["fp8"].toBool());
     run_chunks(
           x, weight, targets, ctx->saved_data["vocab_size"].toInt(), ctx->saved_data["softcap"].toDouble(),
           ctx->saved_data["chunk_rows"].toInt(), ctx->saved_data["fp8"].toBool(), ctx->saved_data["mx"].toBool(), {},

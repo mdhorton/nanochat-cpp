@@ -20,23 +20,25 @@ Runs based on the sm120 customizations and tuning.
 --fp8 --nproc=2 --depth=12 --device-batch-size=8 --num-iterations=100 --eval-tokens=4194304 --eval-every=-1 --save=false
 ```
 
-| run | toks/sec |     loss |      bpb | memory |  time | notes                                 |
-|----:|---------:|---------:|---------:|-------:|------:|---------------------------------------|
-|   4 |  107,091 | 4.820269 | 1.441330 |  16.0g | 8.15m | --attention=fa2                       |
-|   5 |  138,679 | 4.804933 | 1.436173 |   8.2g | 6.29m | --loss-chunk-rows=4096                |
-|   6 |  155,024 | 4.808020 | 1.437057 |   8.2g | 5.63m | fused rotary + QK-norm                |
-|   7 |  158,808 | 4.807032 | 1.436761 |   8.2g | 5.49m | fused resid/x0 + λ-blend              |
-|   8 |  181,216 | 4.803973 | 1.435802 |   8.2g | 4.82m | fused relu² with amax                 |
-|   9 |  183,137 | 4.806090 | 1.436472 |   8.2g | 4.77m | fused residual add + rms_norm         |
-|  10 |  188,796 | 4.807217 | 1.436816 |   7.9g | 4.62m | merged q/k/v                          |
-|  11 |  192,034 | 4.809634 | 1.437552 |   7.9g | 4.54m | write embed grads straight into .grad |
-|  12 |  206,686 | 4.821239 | 1.441635 |   8.2g | 4.22m | lm_head fp8                           |
-|  13 |  209,310 | 4.822021 | 1.441975 |   8.3g | 4.17m | weight caching                        |
-|  14 |  215,449 | 4.802828 | 1.435484 |   8.4g | 4.04m | --fp8-recipe=mxfp8                    |
-|  15 |  221,792 | 4.805797 | 1.436430 |   8.4g | 3.93m | --fp8-recipe=mxfp8 (relu² backward)   |
-|  16 |  225,049 | 4.804839 | 1.436043 |   8.4g | 3.86m | --fp8-recipe=mxfp8 (softcap CE grads) |
-|  17 |  230,934 | 4.802351 | 1.435362 |   8.4g | 3.77m | --fp8-recipe=mxfp8                    |
-|  18 |          |          |          |        |       |                                       |
+| run | toks/sec |     loss |      bpb | memory |  time | notes                                         |
+|----:|---------:|---------:|---------:|-------:|------:|-----------------------------------------------|
+|   4 |  107,091 | 4.820269 | 1.441330 |  16.0g | 8.15m | --attention=fa2                               |
+|   5 |  138,679 | 4.804933 | 1.436173 |   8.2g | 6.29m | --loss-chunk-rows=4096                        |
+|   6 |  155,024 | 4.808020 | 1.437057 |   8.2g | 5.63m | fused rotary + QK-norm                        |
+|   7 |  158,808 | 4.807032 | 1.436761 |   8.2g | 5.49m | fused resid/x0 + λ-blend                      |
+|   8 |  181,216 | 4.803973 | 1.435802 |   8.2g | 4.82m | fused relu² + amax                            |
+|   9 |  183,137 | 4.806090 | 1.436472 |   8.2g | 4.77m | fused residual add + rms_norm                 |
+|  10 |  188,796 | 4.807217 | 1.436816 |   7.9g | 4.62m | merged q/k/v                                  |
+|  11 |  192,034 | 4.809634 | 1.437552 |   7.9g | 4.54m | write embed grads straight into .grad         |
+|  12 |  206,686 | 4.821239 | 1.441635 |   8.2g | 4.22m | lm_head fp8                                   |
+|  13 |  209,310 | 4.822021 | 1.441975 |   8.3g | 4.17m | weight caching                                |
+|  14 |  215,449 | 4.802828 | 1.435484 |   8.4g | 4.04m | --fp8-recipe=mxfp8                            |
+|  15 |  221,792 | 4.805797 | 1.436430 |   8.4g | 3.93m | --fp8-recipe=mxfp8 (relu² backward)           |
+|  16 |  225,049 | 4.804839 | 1.436043 |   8.4g | 3.86m | --fp8-recipe=mxfp8 (softcap CE grads)         |
+|  17 |  230,934 | 4.802351 | 1.435362 |   8.4g | 3.77m | --fp8-recipe=mxfp8 (qkv + rotary + val embed) |
+|  18 |  234,497 | 4.806611 | 1.436663 |   8.7g | 3.71m |                                               |
+|  19 |          |          |          |        |       |                                               |
+|  20 |          |          |          |        |       |                                               |
 
 Run 4: sm120 can't use fa3. however, fa2 works pretty good. --attention=fa2 enabled by default going forward.
 

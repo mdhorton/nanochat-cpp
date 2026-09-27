@@ -153,3 +153,43 @@ TEST(SoftcapCE, MxGradMatchesQuantizedGrad) {
     EXPECT_TRUE(torch::equal(bits(q.inv_scale_t), bits(ref.inv_scale_t))) << per_row;
   }
 }
+
+// Micro-steps: backward adds each loss's weight gradient into .grad, a leaf weight's directly, a non-leaf's through
+// autograd. MX: every chunk's transposed gradient feeds one grad_w GEMM, so the chunk size doesn't change its bits.
+TEST(SoftcapCE, WeightGradAccumulates) {
+  torch::manual_seed(0);
+  const int64_t N = 512, C = 128, vocab = 1000, padded = 1024;
+  const auto opts = torch::TensorOptions().device(torch::kCUDA);
+  const auto w0 = torch::randn({padded, C}, opts) * 0.5;
+  const std::array<torch::Tensor, 2> xs{
+        torch::randn({N, C}, opts).to(torch::kBFloat16), torch::randn({N, C}, opts).to(torch::kBFloat16)};
+  const auto targets = torch::randint(0, vocab, {N}, opts.dtype(torch::kInt64));
+  const std::array<double, 2> scales{0.5, 0.25}; // e.g. 1 / grad_accum_steps
+  for (const int mode : {0, 1, 2}) {             // bf16, tensorwise, MX
+    const auto recipe = mode == 2 ? Fp8Recipe::Mx : Fp8Recipe::Tensorwise;
+    const auto loss = [&](const torch::Tensor& w, int i, int64_t chunk) {
+      return softcap_cross_entropy(xs[i], w, targets, vocab, 15, chunk, LossReduction::Mean, mode > 0, nullptr, recipe);
+    };
+    // each micro-step alone
+    std::array<torch::Tensor, 2> single;
+    for (int i = 0; i < 2; ++i) {
+      auto w = w0.clone().requires_grad_();
+      loss(w, i, N / 4).backward();
+      single[i] = w.grad();
+    }
+    const auto want = single[0] * scales[0] + single[1] * scales[1];
+    auto leaf = w0.clone().requires_grad_(), base = w0.clone().requires_grad_();
+    for (int i = 0; i < 2; ++i) {
+      (loss(leaf, i, N / 4) * scales[i]).backward();
+      (loss(base * 1.0, i, N / 4) * scales[i]).backward(); // non-leaf
+    }
+    const auto what = "mode " + std::to_string(mode);
+    EXPECT_LT(rel_norm_diff(leaf.grad(), want), 1e-6) << what;
+    EXPECT_LT(rel_norm_diff(base.grad(), want), 1e-6) << what;
+    if (mode == 2) {
+      auto w = w0.clone().requires_grad_();
+      loss(w, 0, N).backward();
+      EXPECT_TRUE(torch::equal(w.grad(), single[0])) << "MX grad_w: 1 chunk vs 4";
+    }
+  }
+}

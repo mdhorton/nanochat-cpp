@@ -117,9 +117,10 @@ steps:
     - residual_norm bwd (c_proj output grads), ~0.5%: bf16 ds is still needed (residual stream). c_proj's backward
       can't receive extra tensors through autograd: needs a handoff (MX copy keyed on data_ptr, numel, version,
       picked up by quantize_grad).
+    done: lm_head grad_w: MX writes every chunk's transposed gradient into one (V, N) buffer for a single grad_w GEMM
+    (no per-chunk fp32 adds; tensorwise's per-chunk scales can't share one); all paths add g * grad_w straight into
+    the weight's .grad (no scaled copy for autograd to add), fp8 without a zero fill. quick-d12 2 GPUs: MX 236.8k
+    tok/s (+1.6%), peak mem 8.66 GB (+0.31, the buffer); tensorwise 210.5k (within noise).
     todo (d12_6 profile, ms per 150 ms micro-step):
-    - lm_head grad_w fp32 traffic, ~2.6 ms: 3 per-chunk adds, backward's scale mul, the .grad accumulation add, the
-      zero fill. Keep every chunk's MX g_t in one (V, N) buffer (d12: 537 MB) for one grad_w GEMM; add g * grad_w
-      into .grad in one op.
     - x0's gradient: autograd sums 12 bf16 dx0 (11 adds), ~1 ms.
     - other weights' fp32 .grad accumulation adds, ~0.8 ms (needs cublasLt with beta = 1).
