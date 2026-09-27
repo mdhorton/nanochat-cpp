@@ -86,6 +86,19 @@ Fp8Tensor empty_mx(int64_t R, int64_t C, const torch::TensorOptions& options, bo
 // The kernels' views of q's buffers (null data where not allocated).
 std::pair<kernels::MxOut, kernels::MxOut> mx_outs(const Fp8Tensor& q);
 
+// e8m0 scales of a (rows, cols) MX tensor: cols / 32 blocks per row, swizzled (mx_fits: no padding).
+torch::Tensor empty_mx_scale(int64_t rows, int64_t cols, const torch::TensorOptions& options);
+
+// The kernels' view of MX data (R, ld) from (row, col) on, with its scales; row, col % 128 == 0.
+kernels::MxOut mx_out(const torch::Tensor& data, const torch::Tensor& scale, int64_t row, int64_t col);
+
+// quantize_mx of x into given buffers (e.g. mx_out views of a larger tensor).
+void quantize_mx_into(const torch::Tensor& x, bool relu_square, kernels::MxOut out, kernels::MxOut out_t);
+
+// Merged q/k/v weights under MX: {w_cat (n, C), w_cat^T, their scales}, from cache (optional) while unchanged.
+std::vector<torch::Tensor> mx_qkv_weights(
+      const torch::Tensor& wq, const torch::Tensor& wk, const torch::Tensor& wv, Fp8WeightCache* cache);
+
 // A weight's e4m3 copy (tensorwise or Mx), from cache (optional) while w is unchanged.
 Fp8Tensor quantize_fp8_weight(const torch::Tensor& w, Fp8WeightCache* cache, Fp8Recipe recipe = Fp8Recipe::Tensorwise);
 

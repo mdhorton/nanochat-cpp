@@ -103,5 +103,23 @@ steps:
     done: MX lm_head gradient: the loss kernel also writes each row's lse, then a 32x64-tile kernel recomputes the
     gradient from the logits and quantizes it (`softcap_ce_grad_mx`); bit-identical. lm_head kernels 9.3 -> 6.7 ms
     per micro-step. quick-d12 2 GPUs: 227.4k tok/s (+1.6%).
-    todo: MX quantization in residual_norm and rotary_norm bwd. The MX tile kernel (`mx_kernel.cuh`) runs at
-    ~500-530 GB/s, 90-96% of a bf16 copy (555 GB/s): little left to gain in the kernel itself.
+    The MX tile kernel (`mx_kernel.cuh`) runs at ~500-530 GB/s, 90-96% of a bf16 copy (555 GB/s): little left to gain
+    in the kernel itself.
+    done: MX attention inputs (`model/mx_attention.h`): the q/k/v GEMM, rotary + QK norm and the value-embedding mix
+    in one autograd function. Backward quantizes dq, dk (rotary norm backward) and dv (mix backward) straight into
+    the merged MX buffers: 30 fewer quantizes per micro-step. The mix is one kernel each way instead of torch's
+    broadcast ops. Bit-identical but for the gate logits' gradient (sum order, 1 ulp). quick-d12 2 GPUs: 233.0k
+    tok/s (+2.4%).
+    todo: MX in the remaining producers (d12: 24 quantizes of 16384x768 each per micro-step, 76 us each):
+    - residual_norm fwd (attn/MLP inputs), ~0.5%: bf16 n is still needed (autograd output, gate input). 32-row
+      CTAs (1024 threads) for the transposed copy; MX returned as non-differentiable outputs, passed explicitly
+      through forward_split to fp8_qkv / the MLP.
+    - residual_norm bwd (c_proj output grads), ~0.5%: bf16 ds is still needed (residual stream). c_proj's backward
+      can't receive extra tensors through autograd: needs a handoff (MX copy keyed on data_ptr, numel, version,
+      picked up by quantize_grad).
+    todo (d12_6 profile, ms per 150 ms micro-step):
+    - lm_head grad_w fp32 traffic, ~2.6 ms: 3 per-chunk adds, backward's scale mul, the .grad accumulation add, the
+      zero fill. Keep every chunk's MX g_t in one (V, N) buffer (d12: 537 MB) for one grad_w GEMM; add g * grad_w
+      into .grad in one op.
+    - x0's gradient: autograd sums 12 bf16 dx0 (11 adds), ~1 ms.
+    - other weights' fp32 .grad accumulation adds, ~0.8 ms (needs cublasLt with beta = 1).

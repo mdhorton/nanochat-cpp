@@ -85,9 +85,14 @@ public:
   static constexpr int64_t kVeGateChannels = 12;
   int64_t n_head, n_kv_head, head_dim;
   Attention attention = Attention::FA2;
-  bool fused = false; // merged q/k/v (fp8.h's fp8_qkv), rotary + QK norm in one kernel (rotary_norm.h)
+  // merged q/k/v (fp8.h's fp8_qkv), rotary + QK norm in one kernel (rotary_norm.h); MXFP8: mx_attention.h
+  bool fused = false;
   Linear c_q{nullptr}, c_k{nullptr}, c_v{nullptr}, c_proj{nullptr}, ve_gate{nullptr};
   Fp8WeightCache qkv_cache; // merged q/k/v weights
+
+private:
+  // attention over (B, T, H, D) q, k, v
+  torch::Tensor attend(const torch::Tensor& q, const torch::Tensor& k, const torch::Tensor& v, int64_t window) const;
 };
 
 TORCH_MODULE(CausalSelfAttention);

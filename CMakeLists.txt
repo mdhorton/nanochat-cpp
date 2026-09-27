@@ -55,6 +55,8 @@ add_library(nanochat_train
         src/nanochat/model/fp8.cpp
         src/nanochat/model/fp8_kernel.cu
         src/nanochat/model/gpt.cpp
+        src/nanochat/model/mx_attention.cpp
+        src/nanochat/model/mx_attention_kernel.cu
         src/nanochat/model/qkv_kernel.cu
         src/nanochat/model/relu_square.cpp
         src/nanochat/model/relu_square_kernel.cu

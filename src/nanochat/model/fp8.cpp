@@ -107,18 +107,16 @@ std::vector<torch::Tensor> cached(
   return cache != nullptr ? cache->get(static_cast<int64_t>(recipe), weights, make) : make();
 }
 
-// e8m0 scales of a (rows, cols) MX tensor: cols / 32 blocks per row, swizzled (mx_fits: no padding)
+} // namespace
+
 torch::Tensor empty_mx_scale(int64_t rows, int64_t cols, const torch::TensorOptions& options) {
   return torch::empty({rows * cols / 32}, options.dtype(torch::kFloat8_e8m0fnu));
 }
 
-// the kernel's view of data (R, ld) from (row, col) on, with its scales; row, col % 128 == 0
 kernels::MxOut mx_out(const torch::Tensor& data, const torch::Tensor& scale, int64_t row, int64_t col) {
   const int64_t ld = data.size(1), tiles = ld / 128;
   return {offset(data, row * ld + col), ld, offset(scale, ((row / 128) * tiles + col / 128) * 512), tiles};
 }
-
-} // namespace
 
 Fp8Tensor empty_mx(int64_t R, int64_t C, const torch::TensorOptions& options, bool rows, bool cols) {
   Fp8Tensor q;
@@ -142,8 +140,6 @@ std::pair<kernels::MxOut, kernels::MxOut> mx_outs(const Fp8Tensor& q) {
   return {out, out_t};
 }
 
-namespace {
-
 void quantize_mx_into(const torch::Tensor& x, bool relu_square, kernels::MxOut out, kernels::MxOut out_t) {
   TORCH_CHECK(
         fusable(x) && x.is_contiguous() && mx_fits(x.size(0), x.size(1)) &&
@@ -154,6 +150,26 @@ void quantize_mx_into(const torch::Tensor& x, bool relu_square, kernels::MxOut o
         at::cuda::getCurrentCUDAStream().stream());
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
+
+std::vector<torch::Tensor> mx_qkv_weights(
+      const torch::Tensor& wq, const torch::Tensor& wk, const torch::Tensor& wv, Fp8WeightCache* cache) {
+  const int64_t C = wq.size(1), n = wq.size(0) + wk.size(0) + wv.size(0);
+  return cached(cache, Fp8Recipe::Mx, {wq, wk, wv}, [&] {
+    const auto e4m3 = wq.options().dtype(torch::kFloat8_e4m3fn);
+    std::vector<torch::Tensor> out{
+          torch::empty({n, C}, e4m3), torch::empty({C, n}, e4m3), empty_mx_scale(n, C, wq.options()),
+          empty_mx_scale(C, n, wq.options())};
+    int64_t row = 0;
+    for (const auto& w : {wq, wk, wv}) {
+      TORCH_CHECK(w.size(1) == C, "q/k/v weights must share the input dim");
+      quantize_mx_into(w.contiguous(), false, mx_out(out[0], out[2], row, 0), mx_out(out[1], out[3], 0, row));
+      row += w.size(0);
+    }
+    return out;
+  });
+}
+
+namespace {
 
 bool is_mx(const Fp8Tensor& t) {
   return t.inv_scale.scalar_type() == torch::kFloat8_e8m0fnu;
@@ -344,23 +360,9 @@ public:
   static variable_list forward(
         AutogradContext* ctx, const torch::Tensor& x, const torch::Tensor& wq, const torch::Tensor& wk,
         const torch::Tensor& wv, int64_t gate_cols, Fp8WeightCache* cache) {
-    const auto e4m3 = x.options().dtype(torch::kFloat8_e4m3fn);
-    const int64_t C = x.size(1);
     const std::array<int64_t, 3> sizes{wq.size(0), wk.size(0), wv.size(0)};
-    const int64_t n = sizes[0] + sizes[1] + sizes[2];
     const auto xq = quantize_mx(x);
-    // w_cat (n, C), its transpose, their scales
-    const auto wf = cached(cache, Fp8Recipe::Mx, {wq, wk, wv}, [&] {
-      std::vector<torch::Tensor> out{
-            torch::empty({n, C}, e4m3), torch::empty({C, n}, e4m3), empty_mx_scale(n, C, x.options()),
-            empty_mx_scale(C, n, x.options())};
-      const std::array<torch::Tensor, 3> w{wq, wk, wv};
-      for (int64_t i = 0, row = 0; i < 3; row += sizes[i++]) {
-        TORCH_CHECK(w[i].size(1) == C, "q/k/v weights must share the input dim");
-        quantize_mx_into(w[i].contiguous(), false, mx_out(out[0], out[2], row, 0), mx_out(out[1], out[3], 0, row));
-      }
-      return out;
-    });
+    const auto wf = mx_qkv_weights(wq, wk, wv, cache);
     const auto qkv = at::_scaled_mm(xq.data, wf[0].t(), xq.inv_scale, wf[2], {}, {}, x.scalar_type(), false);
     ctx->save_for_backward({xq.data_t, xq.inv_scale_t, wf[1], wf[3]});
     ctx->saved_data["gate_cols"] = gate_cols;

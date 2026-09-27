@@ -2,6 +2,7 @@
 
 #include "nanochat/model/embedding.h"
 #include "nanochat/model/fp8.h"
+#include "nanochat/model/mx_attention.h"
 #include "nanochat/model/relu_square.h"
 #include "nanochat/model/residual_norm.h"
 #include "nanochat/model/rotary_norm.h"
@@ -151,6 +152,18 @@ torch::Tensor CausalSelfAttentionImpl::forward(
       const torch::Tensor& x, const torch::Tensor& ve, const torch::Tensor& cos, const torch::Tensor& sin,
       int64_t window) {
   const int64_t B = x.size(0), T = x.size(1);
+  const bool mx = fused && c_q->fp8 && c_k->fp8 && c_v->fp8 && c_q->fp8_recipe == Fp8Recipe::Mx &&
+                  mx_attention_fits(B * T, x.size(-1), c_q->weight.size(0), c_k->weight.size(0), head_dim);
+  if (mx) { // q/k/v, rotary + QK norm and the value embedding in one autograd function
+    const auto out = mx_attention_inputs(
+          x.to(kComputeDtype).reshape({B * T, -1}), c_q->weight, c_k->weight, c_v->weight, cos, sin, 1.2,
+          ve.defined() ? ve.reshape({B * T, -1}) : torch::Tensor(), ve.defined() ? ve_gate->weight : torch::Tensor(),
+          head_dim, &qkv_cache);
+    const auto y = attend(
+          out[0].view({B, T, n_head, head_dim}), out[1].view({B, T, n_kv_head, head_dim}),
+          out[2].view({B, T, n_kv_head, head_dim}), window);
+    return c_proj(y.contiguous().view({B, T, -1}));
+  }
   torch::Tensor q, k, v, gate_in;
   if (!fused) {
     q = c_q(x);
@@ -197,10 +210,14 @@ torch::Tensor CausalSelfAttentionImpl::forward(
     k = rms_norm(k) * 1.2;
   }
 
-  auto y = attention == Attention::FA2
-                 ? fa2_attention(q, k, v, window)
-                 : sdpa_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), window).transpose(1, 2);
-  return c_proj(y.contiguous().view({B, T, -1}));
+  return c_proj(attend(q, k, v, window).contiguous().view({B, T, -1}));
+}
+
+torch::Tensor CausalSelfAttentionImpl::attend(
+      const torch::Tensor& q, const torch::Tensor& k, const torch::Tensor& v, int64_t window) const {
+  return attention == Attention::FA2
+               ? fa2_attention(q, k, v, window)
+               : sdpa_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), window).transpose(1, 2);
 }
 
 MLPImpl::MLPImpl(const GPTConfig& config, const torch::TensorOptions& options) {
