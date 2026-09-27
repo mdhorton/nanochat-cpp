@@ -48,16 +48,17 @@ Runs 10-13: these are results of running nsys and ncu and then asking claude to 
 
 # medium runs @ d24
 
-These runs didn't start until chunked CE loss was added (run 5 with d12).
+These runs started at d12 run 5 because otherwise it would OOM.
 
 ```
 --fp8 --nproc=2 --depth=24 --device-batch-size=2 --num-iterations=30 --eval-tokens=4194304 --eval-every=-1 --save=false
 ```
 
-|   | toks/sec |     loss |      bpb | memory |  time | extra args or overrides |
-|--:|---------:|---------:|---------:|-------:|------:|-------------------------|
-| 1 |   29,736 | 8.841636 | 2.107628 |  18.8g | 5.85m | based on d12 run 5      |
-| 2 |          |          |          |        |       |                         |
+| toks/sec |     loss |      bpb | memory |   time | git tag |
+|---------:|---------:|---------:|-------:|-------:|---------|
+|          |          |          |        |        | run5    |
+|   43,449 | 6.149978 | 1.720151 |  20.3g | 12.05m | run14   |
+|          |          |          |        |        |         |
 
 # full run @d12
 

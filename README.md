@@ -37,6 +37,12 @@ includes inductor fusion.
 nanochat (python) trains ~5.84B tokens in 99 minutes using 8x H100. An H100 is roughly 6x faster than a RTX Pro 4000.
 Thus, 8x H100 are roughly 24x faster than 2x RTX Pro 4000. Using that ratio we get the following target:
 
+|    | |
+|----|-|
+| 6x | 41k |
+| 5x | |
+| 4x | |
+
 ```~5.84B tokens in 2376 minutes (39.6 hours) = ~41k toks/sec```
 
 The same GPT-2 CORE threshold will be used: 0.256525
