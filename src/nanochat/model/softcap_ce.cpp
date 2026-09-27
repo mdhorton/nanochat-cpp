@@ -18,17 +18,19 @@ using torch::autograd::variable_list;
 // grad_x = dlogits @ w and grad_w += dlogits^T @ x (fp32 accumulate). Undefined outputs are skipped.
 // bf16: w cast to x's dtype. fp8 (as fp8.py's Float8Matmul): x and weight quantized once (e4m3); each chunk's
 // gradient is quantized (e5m2) with its own scale, from the amax the kernel reports (python: one scale for all rows).
+// cache (optional): the weight's FP8 copy.
 void run_chunks(
       const torch::Tensor& x, const torch::Tensor& weight, const torch::Tensor& targets, int64_t vocab, double softcap,
       int64_t chunk_rows, bool fp8, const torch::Tensor& losses, const torch::Tensor& grad_x,
-      const torch::Tensor& grad_w, const torch::Tensor& grad_scale, const torch::Tensor& num_valid) {
+      const torch::Tensor& grad_w, const torch::Tensor& grad_scale, const torch::Tensor& num_valid,
+      Fp8WeightCache* cache) {
   const int64_t N = x.size(0), padded = weight.size(0);
   const bool grad = grad_x.defined();
   Fp8Tensor xq, wq;
   torch::Tensor w;
   if (fp8) {
     xq = quantize_fp8(x, torch::kFloat8_e4m3fn);
-    wq = quantize_fp8(weight, torch::kFloat8_e4m3fn);
+    wq = quantize_fp8_weight(weight, cache);
   }
   else
     w = weight.to(x.scalar_type());
@@ -81,7 +83,8 @@ class SoftcapCrossEntropy : public torch::autograd::Function<SoftcapCrossEntropy
 public:
   static torch::Tensor forward(
         AutogradContext* ctx, const torch::Tensor& x, const torch::Tensor& weight, const torch::Tensor& targets,
-        int64_t vocab_size, double softcap, int64_t chunk_rows, int64_t reduction_int, bool needs_grad, bool fp8) {
+        int64_t vocab_size, double softcap, int64_t chunk_rows, int64_t reduction_int, bool needs_grad, bool fp8,
+        Fp8WeightCache* cache) {
     const auto reduction = static_cast<LossReduction>(reduction_int);
     const auto num_valid = (targets >= 0).sum();
     auto losses = torch::empty({x.size(0)}, x.options().dtype(torch::kFloat32));
@@ -93,7 +96,7 @@ public:
     }
     run_chunks(
           x, weight, targets, vocab_size, softcap, chunk_rows, fp8, losses, grad_x, grad_w, {},
-          reduction == LossReduction::Mean ? num_valid : torch::Tensor());
+          reduction == LossReduction::Mean ? num_valid : torch::Tensor(), cache);
     if (precompute)
       ctx->save_for_backward({grad_x, grad_w});
     else if (needs_grad)
@@ -119,7 +122,7 @@ public:
       throw std::logic_error("softcap_cross_entropy: backward without grad mode in forward");
     const auto& g = grad_outputs[0];
     if (ctx->saved_data["precomputed"].toBool())
-      return {saved[0] * g, saved[1] * g.to(torch::kFloat32), {}, {}, {}, {}, {}, {}, {}};
+      return {saved[0] * g, saved[1] * g.to(torch::kFloat32), {}, {}, {}, {}, {}, {}, {}, {}};
 
     const auto &x = saved[0], &weight = saved[1], &targets = saved[2];
     auto grad_x = torch::empty_like(x);
@@ -127,8 +130,8 @@ public:
     run_chunks(
           x, weight, targets, ctx->saved_data["vocab_size"].toInt(), ctx->saved_data["softcap"].toDouble(),
           ctx->saved_data["chunk_rows"].toInt(), ctx->saved_data["fp8"].toBool(), {}, grad_x, grad_w,
-          g.to(torch::kFloat32).contiguous(), {});
-    return {grad_x, grad_w.to(weight.scalar_type()), {}, {}, {}, {}, {}, {}, {}};
+          g.to(torch::kFloat32).contiguous(), {}, nullptr);
+    return {grad_x, grad_w.to(weight.scalar_type()), {}, {}, {}, {}, {}, {}, {}, {}};
   }
 };
 
@@ -136,7 +139,7 @@ public:
 
 torch::Tensor softcap_cross_entropy(
       const torch::Tensor& x, const torch::Tensor& weight, const torch::Tensor& targets, int64_t vocab_size,
-      double softcap, int64_t chunk_rows, LossReduction reduction, bool fp8) {
+      double softcap, int64_t chunk_rows, LossReduction reduction, bool fp8, Fp8WeightCache* cache) {
   if (x.dim() != 2 || targets.dim() != 1 || targets.size(0) != x.size(0))
     throw std::invalid_argument("softcap_cross_entropy expects x (N, C) and targets (N)");
   if (chunk_rows < 1)
@@ -150,7 +153,7 @@ torch::Tensor softcap_cross_entropy(
   fp8 = fp8 && x.size(0) % 16 == 0 && chunk_rows % 16 == 0 && x.size(1) % 16 == 0 && weight.size(0) % 16 == 0;
   return SoftcapCrossEntropy::apply(
         x.contiguous(), weight, targets.to(torch::kInt64).contiguous(), vocab_size, softcap, chunk_rows,
-        static_cast<int64_t>(reduction), needs_grad, fp8);
+        static_cast<int64_t>(reduction), needs_grad, fp8, cache);
 }
 
 } // namespace nanochat

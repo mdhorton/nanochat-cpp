@@ -91,5 +91,7 @@ steps:
     reports its gradient's amax, each chunk's gradient gets its own e5m2 scale (python: one for all rows), grad_w
     accumulates in fp32. vs the unchunked fp8 path: grad_x within 2e-5, grad_w 0.2% (python rounds it to bf16).
     quick-d12 2 GPUs: 208.3k tok/s (+7.5%; --fused=false 145.2k), bpb 1.7791 vs 1.7784 with bf16 lm_head (30 steps).
+    done: FP8 weights cached between optimizer steps (`Fp8WeightCache`, fused path): reused while the weight keeps its
+    storage and version counter, bit-identical. quick-d12 2 GPUs: 210.8k tok/s (+1.2%), peak mem 8.32 GB.
     todo: amax in the producer kernels (residual_norm, rotary_norm bwd), MXFP8 (block scales: producers quantize
     directly, no global amax).

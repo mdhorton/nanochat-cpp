@@ -31,6 +31,7 @@ Runs based on the sm120 customizations and tuning.
 | 10 |  188,796 | 4.807217 | 1.436816 |   7.9g | 4.62m | merged q/k/v                          |
 | 11 |  192,034 | 4.809634 | 1.437552 |   7.9g | 4.54m | write embed grads straight into .grad |
 | 12 |  206,686 | 4.821239 | 1.441635 |   8.2g | 4.22m | lm_head fp8                           |
+| 13 |  209,310 | 4.822021 | 1.441975 |   8.3g | 4.17m | weight caching                        |
 | 13 |          |          |          |        |       |                                       |
 
 Run 4: sm120 can't use fa3. however, fa2 works pretty good. --attention=fa2 enabled by default going forward.
@@ -41,6 +42,8 @@ fuse CE loss to reduce vram usage. --loss-chunk-rows=4096 enabled by default goi
 Runs 6-10: sm120 have lower memory bandwidth than datacenter GPUs. for example, my RTX Pro 4000 has ~6x slower dram
 bandwidth vs H100. fusing memory bound kernels is usually worth it. this is also the parts normally covered by pytorch
 inductor.
+
+Runs 10-13: these are results of running nsys and ncu and then asking claude to look them.
 
 # medium runs @ d24
 

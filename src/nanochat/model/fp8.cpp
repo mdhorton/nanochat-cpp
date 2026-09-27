@@ -101,6 +101,12 @@ Fp8Tensor to_fp8_relu_square(const torch::Tensor& h) {
   return q;
 }
 
+std::vector<torch::Tensor> cached(
+      Fp8WeightCache* cache, const std::vector<torch::Tensor>& weights,
+      const std::function<std::vector<torch::Tensor>()>& make) {
+  return cache != nullptr ? cache->get(weights, make) : make();
+}
+
 // _scaled_mm wants A row-major and B column-major: B = t.t() for a row-major t. Fast accumulation in forward only.
 torch::Tensor mm_forward(const Fp8Tensor& in, const Fp8Tensor& w, torch::ScalarType out_dtype) {
   return at::_scaled_mm(in.data, w.data.t(), in.inv_scale, w.inv_scale, {}, {}, out_dtype, true);
@@ -117,9 +123,10 @@ std::pair<torch::Tensor, torch::Tensor> mm_backward(
 
 class Float8Matmul : public torch::autograd::Function<Float8Matmul> {
 public:
-  static torch::Tensor forward(AutogradContext* ctx, const torch::Tensor& input, const torch::Tensor& weight) {
+  static torch::Tensor forward(
+        AutogradContext* ctx, const torch::Tensor& input, const torch::Tensor& weight, Fp8WeightCache* cache) {
     const auto in = to_fp8(input, torch::kFloat8_e4m3fn);
-    const auto w = to_fp8(weight, torch::kFloat8_e4m3fn);
+    const auto w = quantize_fp8_weight(weight, cache);
     ctx->save_for_backward({in.data_t, in.inv_scale, w.data_t, w.inv_scale}); // backward's layouts
     return mm_forward(in, w, input.scalar_type());
   }
@@ -129,7 +136,7 @@ public:
     const auto& grad_output = grad_outputs[0];
     const auto go = to_fp8(grad_output, torch::kFloat8_e5m2);
     auto [grad_input, grad_weight] = mm_backward(go, s[0], s[1], s[2], s[3], grad_output.scalar_type());
-    return {grad_input, grad_weight}; // autograd casts grad_weight to the weight's dtype
+    return {grad_input, grad_weight, {}}; // autograd casts grad_weight to the weight's dtype
   }
 };
 
@@ -138,10 +145,11 @@ public:
 class Fp8ReluSquareMlp : public torch::autograd::Function<Fp8ReluSquareMlp> {
 public:
   static torch::Tensor forward(
-        AutogradContext* ctx, const torch::Tensor& x, const torch::Tensor& w_fc, const torch::Tensor& w_proj) {
-    const auto xq = to_fp8(x, torch::kFloat8_e4m3fn), fcq = to_fp8(w_fc, torch::kFloat8_e4m3fn);
+        AutogradContext* ctx, const torch::Tensor& x, const torch::Tensor& w_fc, const torch::Tensor& w_proj,
+        Fp8WeightCache* fc_cache, Fp8WeightCache* proj_cache) {
+    const auto xq = to_fp8(x, torch::kFloat8_e4m3fn), fcq = quantize_fp8_weight(w_fc, fc_cache);
     const auto h = mm_forward(xq, fcq, x.scalar_type());
-    const auto aq = to_fp8_relu_square(h), projq = to_fp8(w_proj, torch::kFloat8_e4m3fn);
+    const auto aq = to_fp8_relu_square(h), projq = quantize_fp8_weight(w_proj, proj_cache);
     ctx->save_for_backward(
           {xq.data_t, xq.inv_scale, fcq.data_t, fcq.inv_scale, h, aq.data_t, aq.inv_scale, projq.data_t,
            projq.inv_scale});
@@ -164,7 +172,7 @@ public:
     C10_CUDA_KERNEL_LAUNCH_CHECK();
     const auto dhq = quantize(dh, torch::kFloat8_e5m2, scalars, true);
     auto [grad_x, grad_fc] = mm_backward(dhq, s[0], s[1], s[2], s[3], dtype);
-    return {grad_x, grad_fc, grad_proj};
+    return {grad_x, grad_fc, grad_proj, {}, {}};
   }
 };
 
@@ -175,26 +183,31 @@ class Fp8Qkv : public torch::autograd::Function<Fp8Qkv> {
 public:
   static variable_list forward(
         AutogradContext* ctx, const torch::Tensor& x, const torch::Tensor& wq, const torch::Tensor& wk,
-        const torch::Tensor& wv, int64_t gate_cols) {
+        const torch::Tensor& wv, int64_t gate_cols, Fp8WeightCache* cache) {
     const auto e4m3 = torch::kFloat8_e4m3fn;
     const int64_t N = x.size(0), C = x.size(1);
-    const std::array<torch::Tensor, 3> w{wq.contiguous(), wk.contiguous(), wv.contiguous()};
-    const std::array<int64_t, 3> sizes{w[0].size(0), w[1].size(0), w[2].size(0)};
+    const std::array<int64_t, 3> sizes{wq.size(0), wk.size(0), wv.size(0)};
     const int64_t n = sizes[0] + sizes[1] + sizes[2];
     const auto xq = to_fp8(x, e4m3);
-    auto w_cat = torch::empty({n, C}, x.options().dtype(e4m3));
-    auto w_scalars = torch::empty({3, 2}, x.options().dtype(torch::kFloat32));
-    std::array<torch::Tensor, 3> w_t;
-    for (int64_t i = 0, row = 0; i < 3; row += sizes[i++]) {
-      TORCH_CHECK(w[i].size(1) == C, "q/k/v weights must share the input dim");
-      w_t[i] = torch::empty({C, sizes[i]}, x.options().dtype(e4m3));
-      quantize_into(w[i], e4m3, offset(w_cat, row * C), w_t[i].data_ptr(), w_scalars[i].data_ptr<float>());
-    }
-    const auto w_inv = w_scalars.select(1, 1);
+    // w_cat, w_t[0..2], scalars
+    const auto wf = cached(cache, {wq, wk, wv}, [&] {
+      const std::array<torch::Tensor, 3> w{wq.contiguous(), wk.contiguous(), wv.contiguous()};
+      std::vector<torch::Tensor> out{torch::empty({n, C}, x.options().dtype(e4m3))};
+      const auto scalars = torch::empty({3, 2}, x.options().dtype(torch::kFloat32));
+      for (int64_t i = 0, row = 0; i < 3; row += sizes[i++]) {
+        TORCH_CHECK(w[i].size(1) == C, "q/k/v weights must share the input dim");
+        out.push_back(torch::empty({C, sizes[i]}, x.options().dtype(e4m3)));
+        quantize_into(w[i], e4m3, offset(out[0], row * C), out.back().data_ptr(), scalars[i].data_ptr<float>());
+      }
+      out.push_back(scalars);
+      return out;
+    });
+    const auto& w_cat = wf[0];
+    const auto w_inv = wf[4].select(1, 1);
     const auto qkv = at::_scaled_mm(
           xq.data, w_cat.t(), torch::ones({N, 1}, w_inv.options()),
           merged_scales(w_inv, xq.inv_scale, sizes).view({1, n}), {}, {}, x.scalar_type(), true);
-    ctx->save_for_backward({xq.data_t, xq.inv_scale, w_t[0], w_t[1], w_t[2], w_inv});
+    ctx->save_for_backward({xq.data_t, xq.inv_scale, wf[1], wf[2], wf[3], w_inv});
     ctx->saved_data["gate_cols"] = gate_cols;
     variable_list out{
           qkv.narrow(1, 0, sizes[0]), qkv.narrow(1, sizes[0], sizes[1]), qkv.narrow(1, sizes[0] + sizes[1], sizes[2])};
@@ -236,15 +249,47 @@ public:
           g_t, x_t.t(), merged_scales(g_scalars.select(1, 1), x_inv, sizes).view({n, 1}),
           torch::ones({1, C}, x_inv.options()), {}, {}, dtype, false);
     return {
-          dx_sum, dw.narrow(0, 0, sizes[0]), dw.narrow(0, sizes[0], sizes[1]),
-          dw.narrow(0, sizes[0] + sizes[1], sizes[2]), torch::Tensor()};
+          dx_sum,
+          dw.narrow(0, 0, sizes[0]),
+          dw.narrow(0, sizes[0], sizes[1]),
+          dw.narrow(0, sizes[0] + sizes[1], sizes[2]),
+          torch::Tensor(),
+          torch::Tensor()};
   }
 };
 
 } // namespace
 
+std::vector<torch::Tensor> Fp8WeightCache::get(
+      const std::vector<torch::Tensor>& weights, const std::function<std::vector<torch::Tensor>()>& make) {
+  if (!enabled) {
+    keys_.clear();
+    value_.clear();
+    return make();
+  }
+  bool hit = keys_.size() == weights.size();
+  for (size_t i = 0; hit && i < weights.size(); ++i)
+    hit = keys_[i].impl == weights[i].unsafeGetTensorImpl() && keys_[i].data == weights[i].data_ptr() &&
+          keys_[i].version == weights[i]._version();
+  if (!hit) {
+    value_ = make();
+    keys_.clear();
+    for (const auto& w : weights)
+      keys_.push_back({w.unsafeGetTensorImpl(), w.data_ptr(), w._version()});
+  }
+  return value_;
+}
+
 Fp8Tensor quantize_fp8(const torch::Tensor& x, torch::ScalarType dtype, bool fused) {
   return to_fp8(x, dtype, fused);
+}
+
+Fp8Tensor quantize_fp8_weight(const torch::Tensor& w, Fp8WeightCache* cache) {
+  const auto v = cached(cache, {w}, [&] {
+    const auto q = to_fp8(w, torch::kFloat8_e4m3fn);
+    return std::vector{q.data, q.data_t, q.inv_scale};
+  });
+  return {v[0], v[1], v[2]};
 }
 
 Fp8Tensor quantize_fp8_amax_ready(const torch::Tensor& x, torch::ScalarType dtype, const torch::Tensor& scalars) {
@@ -253,18 +298,20 @@ Fp8Tensor quantize_fp8_amax_ready(const torch::Tensor& x, torch::ScalarType dtyp
   return quantize(x, dtype, scalars, true);
 }
 
-torch::Tensor fp8_matmul(const torch::Tensor& input_2d, const torch::Tensor& weight) {
-  return Float8Matmul::apply(input_2d, weight);
+torch::Tensor fp8_matmul(const torch::Tensor& input_2d, const torch::Tensor& weight, Fp8WeightCache* cache) {
+  return Float8Matmul::apply(input_2d, weight, cache);
 }
 
-torch::Tensor fp8_relu_square_mlp(const torch::Tensor& x_2d, const torch::Tensor& w_fc, const torch::Tensor& w_proj) {
-  return Fp8ReluSquareMlp::apply(x_2d, w_fc, w_proj);
+torch::Tensor fp8_relu_square_mlp(
+      const torch::Tensor& x_2d, const torch::Tensor& w_fc, const torch::Tensor& w_proj, Fp8WeightCache* fc_cache,
+      Fp8WeightCache* proj_cache) {
+  return Fp8ReluSquareMlp::apply(x_2d, w_fc, w_proj, fc_cache, proj_cache);
 }
 
 torch::autograd::variable_list fp8_qkv(
       const torch::Tensor& x_2d, const torch::Tensor& wq, const torch::Tensor& wk, const torch::Tensor& wv,
-      int64_t gate_cols) {
-  return Fp8Qkv::apply(x_2d, wq, wk, wv, gate_cols);
+      int64_t gate_cols, Fp8WeightCache* cache) {
+  return Fp8Qkv::apply(x_2d, wq, wk, wv, gate_cols, cache);
 }
 
 } // namespace nanochat

@@ -121,7 +121,7 @@ torch::Tensor LinearImpl::forward(const torch::Tensor& x) {
   const auto input = x.to(kComputeDtype);
   auto out_shape = input.sizes().vec();
   out_shape.back() = weight.size(0);
-  return fp8_matmul(input.reshape({-1, input.size(-1)}), weight).reshape(out_shape);
+  return fp8_matmul(input.reshape({-1, input.size(-1)}), weight, &fp8_cache).reshape(out_shape);
 }
 
 EmbeddingImpl::EmbeddingImpl(int64_t num_embeddings, int64_t dim, const torch::TensorOptions& options) {
@@ -160,7 +160,7 @@ torch::Tensor CausalSelfAttentionImpl::forward(
   else if (c_q->fp8 && c_k->fp8 && c_v->fp8) {
     const auto out = fp8_qkv(
           x.to(kComputeDtype).reshape({B * T, -1}), c_q->weight, c_k->weight, c_v->weight,
-          ve.defined() ? kVeGateChannels : 0);
+          ve.defined() ? kVeGateChannels : 0, &qkv_cache);
     q = out[0], k = out[1], v = out[2];
     if (ve.defined())
       gate_in = out[3].view({B, T, -1});
@@ -216,7 +216,9 @@ torch::Tensor MLPImpl::forward(const torch::Tensor& x) {
   const auto input = x.to(kComputeDtype);
   auto out_shape = input.sizes().vec();
   out_shape.back() = c_proj->weight.size(0);
-  return fp8_relu_square_mlp(input.reshape({-1, input.size(-1)}), c_fc->weight, c_proj->weight).reshape(out_shape);
+  return fp8_relu_square_mlp(
+               input.reshape({-1, input.size(-1)}), c_fc->weight, c_proj->weight, &c_fc->fp8_cache, &c_proj->fp8_cache)
+        .reshape(out_shape);
 }
 
 BlockImpl::BlockImpl(const GPTConfig& config, int64_t layer_idx, const torch::TensorOptions& options) {
@@ -408,7 +410,7 @@ torch::Tensor GPTImpl::forward(
                                                                               : LossReduction::None;
     return softcap_cross_entropy(
           x.view({-1, x.size(-1)}), lm_head->weight, targets.view(-1), config_.vocab_size, softcap, loss_chunk_rows_, r,
-          lm_head->fp8);
+          lm_head->fp8, &lm_head->fp8_cache);
   }
   auto logits = lm_head(x).index({"...", Slice(None, config_.vocab_size)}).to(torch::kFloat32);
   logits = softcap * torch::tanh(logits / softcap);
@@ -446,8 +448,12 @@ void GPTImpl::set_fused(bool fused) {
   fused_ = fused;
   for (const auto& m : *transformer->h) {
     m->as<BlockImpl>()->attn->fused = fused;
+    m->as<BlockImpl>()->attn->qkv_cache.enabled = fused;
     m->as<BlockImpl>()->mlp->fused = fused;
   }
+  for (const auto& m : modules(false))
+    if (auto* linear = dynamic_cast<LinearImpl*>(m.get()))
+      linear->fp8_cache.enabled = fused;
 }
 
 safetensors::TensorMap GPTImpl::state_dict() const {

@@ -9,6 +9,7 @@
 
 #include <torch/torch.h>
 
+#include "nanochat/model/fp8.h"
 #include "nanochat/train/safetensors.h"
 
 namespace nanochat {
@@ -58,6 +59,7 @@ public:
   torch::Tensor forward(const torch::Tensor& x);
   torch::Tensor weight;
   bool fp8 = false;
+  Fp8WeightCache fp8_cache; // enabled by GPT's set_fused
 };
 
 TORCH_MODULE(Linear);
@@ -84,6 +86,7 @@ public:
   Attention attention = Attention::FA2;
   bool fused = false; // merged q/k/v (fp8.h's fp8_qkv), rotary + QK norm in one kernel (rotary_norm.h)
   Linear c_q{nullptr}, c_k{nullptr}, c_v{nullptr}, c_proj{nullptr}, ve_gate{nullptr};
+  Fp8WeightCache qkv_cache; // merged q/k/v weights
 };
 
 TORCH_MODULE(CausalSelfAttention);
@@ -160,7 +163,8 @@ public:
 
   void set_attention(Attention attention);
 
-  // Fused CUDA kernels for elementwise chains (rotary + QK norm, resid/x0 blend). false = Python's op-by-op path.
+  // Fused CUDA kernels for elementwise chains (rotary + QK norm, resid/x0 blend) and FP8 weights cached between
+  // optimizer steps. false = Python's op-by-op path.
   void set_fused(bool fused);
 
   // > 0: compute the training loss a chunk of rows at a time (softcap_ce.h), never materializing all logits.
@@ -170,7 +174,7 @@ public:
   }
 
   // FP8 matmuls for the Linears that qualify (fp8_eligible), as convert_to_float8_training; false = bf16 (eval).
-  // Returns the number of Linears switched. The chunked loss keeps lm_head in bf16.
+  // Returns the number of Linears switched.
   int set_fp8(bool enabled);
   int num_linears();
 
