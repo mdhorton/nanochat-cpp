@@ -103,5 +103,5 @@ steps:
     done: MX lm_head gradient: the loss kernel also writes each row's lse, then a 32x64-tile kernel recomputes the
     gradient from the logits and quantizes it (`softcap_ce_grad_mx`); bit-identical. lm_head kernels 9.3 -> 6.7 ms
     per micro-step. quick-d12 2 GPUs: 227.4k tok/s (+1.6%).
-    todo: MX quantization in residual_norm and rotary_norm bwd. The MX tile kernel (`mx_kernel.cuh`) reaches only
-    ~500 GB/s of 672.
+    todo: MX quantization in residual_norm and rotary_norm bwd. The MX tile kernel (`mx_kernel.cuh`) runs at
+    ~500-530 GB/s, 90-96% of a bf16 copy (555 GB/s): little left to gain in the kernel itself.

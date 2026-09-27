@@ -36,7 +36,7 @@ Runs based on the sm120 customizations and tuning.
 |  15 |  221,792 | 4.805797 | 1.436430 |   8.4g | 3.93m | --fp8-recipe=mxfp8 (relu² backward)   |
 |  16 |  225,049 | 4.804839 | 1.436043 |   8.4g | 3.86m | --fp8-recipe=mxfp8 (softcap CE grads) |
 |  17 |          |          |          |        |       |                                       |
-|  17 |          |          |          |        |       |                                       |
+|  18 |          |          |          |        |       |                                       |
 
 Run 4: sm120 can't use fa3. however, fa2 works pretty good. --attention=fa2 enabled by default going forward.
 

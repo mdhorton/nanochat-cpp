@@ -119,8 +119,24 @@ if [[ $mode != nsys ]]; then
   has '--call-stack' || ncu_defaults+=(--call-stack)
   has '--metrics' || ncu_defaults+=(--metrics "$(IFS=,; echo "${ncu_metrics[*]}")")
 
+  # last value of base_train flag --$1, else $2
+  train_flag() {
+    local v=$2 i
+    for ((i = 0; i < ${#train_args[@]}; ++i)); do
+      case ${train_args[i]} in
+        --$1=*) v=${train_args[i]#*=} ;;
+        --$1) v=${train_args[i + 1]:-$v} ;;
+      esac
+    done
+    echo "$v"
+  }
+  # 2 micro-steps (the 2nd adds the gradient accumulation kernels) instead of ~32 unprofiled ones, unless given
+  ncu_train=()
+  [[ " ${train_args[*]} " == *" --total-batch-size"* ]] ||
+    ncu_train+=(--total-batch-size=$((2 * $(train_flag device-batch-size 32) * $(train_flag max-seq-len 2048))))
+
   ncu --nvtx --nvtx-include profile "${ncu_defaults[@]}" "${ncu_args[@]}" \
-    "${base_train[@]}" --nproc=1 --num-iterations=3 --profile-start=2 --profile-steps=1
+    "${base_train[@]}" "${ncu_train[@]}" --nproc=1 --num-iterations=3 --profile-start=2 --profile-steps=1
 fi
 
 echo "reports: $(ls "$report".*-rep 2>/dev/null | tr '\n' ' ')"
