@@ -4,6 +4,9 @@
 #include "nanochat/model/fp8.h"
 #include "nanochat/model/gpt.h"
 #include "nanochat/model/softcap_ce.h"
+#include "nanochat/model/softcap_ce_kernel.h"
+
+#include <ATen/cuda/CUDAContext.h>
 
 using namespace nanochat;
 namespace F = torch::nn::functional;
@@ -109,5 +112,44 @@ TEST(SoftcapCE, Fp8MatchesUnchunked) {
       EXPECT_LT(rel_norm_diff(w1.grad(), w2.grad()), 5e-3) << what;
       EXPECT_EQ(w1.grad().slice(0, vocab).abs().max().item<float>(), 0.0f) << what;
     }
+  }
+}
+
+// The MX gradient kernel (from the logits and lse) vs the bf16 gradient kernel then quantize_mx: bit-identical.
+TEST(SoftcapCE, MxGradMatchesQuantizedGrad) {
+  torch::manual_seed(0);
+  const auto opts = torch::TensorOptions().device(torch::kCUDA);
+  const int64_t rows = 256, padded = 512, vocab = 500;
+  const auto logits = (torch::randn({rows, padded}, opts) * 8).to(torch::kBFloat16);
+  auto targets = torch::randint(vocab, {rows}, opts.dtype(torch::kInt64));
+  targets.slice(0, 0, 7).fill_(-1); // ignored rows
+  const auto grad_scale = torch::rand({rows}, opts) + 0.5;
+  const auto num_valid = (targets >= 0).sum();
+  const auto stream = at::cuda::getCurrentCUDAStream().stream();
+  for (const bool per_row : {false, true}) {
+    const float* scale = per_row ? grad_scale.data_ptr<float>() : nullptr;
+    const int64_t* valid = per_row ? nullptr : num_valid.data_ptr<int64_t>();
+    auto grad = logits.clone();
+    auto loss_ref = torch::empty({rows}, opts), loss = torch::empty({rows}, opts), lse = torch::empty({rows}, opts);
+    kernels::softcap_ce(
+          grad.data_ptr(), rows, padded, targets.data_ptr<int64_t>(), vocab, padded, 15.f, loss_ref.data_ptr<float>(),
+          scale, 1, valid, true, nullptr, nullptr, stream);
+    const auto ref = quantize_mx(grad);
+    kernels::softcap_ce(
+          logits.data_ptr(), rows, padded, targets.data_ptr<int64_t>(), vocab, padded, 15.f, loss.data_ptr<float>(),
+          scale, 1, valid, false, nullptr, lse.data_ptr<float>(), stream);
+    const auto q = empty_mx(rows, padded, opts);
+    const auto [out, out_t] = mx_outs(q);
+    kernels::softcap_ce_grad_mx(
+          logits.data_ptr(), rows, padded, targets.data_ptr<int64_t>(), lse.data_ptr<float>(), vocab, padded, 15.f,
+          scale, 1, valid, out, out_t, stream);
+    const auto bits = [](const torch::Tensor& t) {
+      return t.view(torch::kUInt8);
+    };
+    EXPECT_TRUE(torch::equal(loss, loss_ref)) << per_row;
+    EXPECT_TRUE(torch::equal(bits(q.data), bits(ref.data))) << per_row;
+    EXPECT_TRUE(torch::equal(bits(q.data_t), bits(ref.data_t))) << per_row;
+    EXPECT_TRUE(torch::equal(bits(q.inv_scale), bits(ref.inv_scale))) << per_row;
+    EXPECT_TRUE(torch::equal(bits(q.inv_scale_t), bits(ref.inv_scale_t))) << per_row;
   }
 }

@@ -118,8 +118,9 @@ kernels::MxOut mx_out(const torch::Tensor& data, const torch::Tensor& scale, int
   return {offset(data, row * ld + col), ld, offset(scale, ((row / 128) * tiles + col / 128) * 512), tiles};
 }
 
-// MX buffers for x (R, C): rows / cols allocate data / data_t with their scales
-Fp8Tensor empty_mx(int64_t R, int64_t C, const torch::TensorOptions& options, bool rows = true, bool cols = true) {
+} // namespace
+
+Fp8Tensor empty_mx(int64_t R, int64_t C, const torch::TensorOptions& options, bool rows, bool cols) {
   Fp8Tensor q;
   if (rows) {
     q.data = torch::empty({R, C}, options.dtype(torch::kFloat8_e4m3fn));
@@ -132,7 +133,6 @@ Fp8Tensor empty_mx(int64_t R, int64_t C, const torch::TensorOptions& options, bo
   return q;
 }
 
-// the kernel's views of q's buffers (none where not allocated)
 std::pair<kernels::MxOut, kernels::MxOut> mx_outs(const Fp8Tensor& q) {
   kernels::MxOut out{}, out_t{};
   if (q.data.defined())
@@ -141,6 +141,8 @@ std::pair<kernels::MxOut, kernels::MxOut> mx_outs(const Fp8Tensor& q) {
     out_t = mx_out(q.data_t, q.inv_scale_t, 0, 0);
   return {out, out_t};
 }
+
+namespace {
 
 void quantize_mx_into(const torch::Tensor& x, bool relu_square, kernels::MxOut out, kernels::MxOut out_t) {
   TORCH_CHECK(

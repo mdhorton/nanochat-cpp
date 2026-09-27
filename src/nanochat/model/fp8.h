@@ -9,6 +9,8 @@
 
 #include <torch/torch.h>
 
+#include "nanochat/model/fp8_kernel.h"
+
 namespace nanochat {
 
 enum class Fp8Recipe { Tensorwise, Mx };
@@ -77,6 +79,12 @@ Fp8Tensor quantize_mx(const torch::Tensor& x, bool rows = true, bool cols = true
 inline bool mx_fits(int64_t rows, int64_t cols) {
   return rows % 128 == 0 && cols % 128 == 0;
 }
+
+// Uninitialized MX buffers for a (R, C) tensor, dims % 128; rows / cols: allocate data / data_t with their scales.
+Fp8Tensor empty_mx(int64_t R, int64_t C, const torch::TensorOptions& options, bool rows = true, bool cols = true);
+
+// The kernels' views of q's buffers (null data where not allocated).
+std::pair<kernels::MxOut, kernels::MxOut> mx_outs(const Fp8Tensor& q);
 
 // A weight's e4m3 copy (tensorwise or Mx), from cache (optional) while w is unchanged.
 Fp8Tensor quantize_fp8_weight(const torch::Tensor& w, Fp8WeightCache* cache, Fp8Recipe recipe = Fp8Recipe::Tensorwise);

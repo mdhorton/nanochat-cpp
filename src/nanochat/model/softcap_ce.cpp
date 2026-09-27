@@ -18,8 +18,8 @@ using torch::autograd::variable_list;
 // grad_x = dlogits @ w and grad_w += dlogits^T @ x (fp32 accumulate). Undefined outputs are skipped.
 // bf16: w cast to x's dtype. fp8 (as fp8.py's Float8Matmul): x and weight quantized once (e4m3); each chunk's
 // gradient is quantized (e5m2) with its own scale, from the amax the kernel reports (python: one scale for all rows).
-// mx: MXFP8 instead (x's transpose quantized per chunk, its scales run along the rows). cache (optional): the
-// weight's FP8 copy.
+// mx: MXFP8 instead (x's transpose quantized per chunk, its scales run along the rows); the gradient is quantized
+// from the logits and each row's lse, never written in bf16. cache (optional): the weight's FP8 copy.
 void run_chunks(
       const torch::Tensor& x, const torch::Tensor& weight, const torch::Tensor& targets, int64_t vocab, double softcap,
       int64_t chunk_rows, bool fp8, bool mx, const torch::Tensor& losses, const torch::Tensor& grad_x,
@@ -37,6 +37,7 @@ void run_chunks(
     w = weight.to(x.scalar_type());
   auto logits = torch::empty({std::min(N, chunk_rows), padded}, x.options());
   const auto scalars = torch::empty({2}, x.options().dtype(torch::kFloat32)); // gradient amax, inverse scale
+  const auto lse = mx && grad ? torch::empty({logits.size(0)}, scalars.options()) : torch::Tensor();
   const auto stream = at::cuda::getCurrentCUDAStream().stream();
   for (int64_t begin = 0; begin < N; begin += chunk_rows) {
     const int64_t end = std::min(N, begin + chunk_rows);
@@ -52,13 +53,14 @@ void run_chunks(
     else
       at::mm_out(buf, xc, w.t());
     const int64_t scale_stride = grad_scale.defined() && grad_scale.dim() == 1 ? 1 : 0;
+    const auto* chunk_targets = targets.data_ptr<int64_t>() + begin;
+    const auto* chunk_scale = grad_scale.defined() ? grad_scale.data_ptr<float>() + begin * scale_stride : nullptr;
+    const auto* valid = num_valid.defined() ? num_valid.data_ptr<int64_t>() : nullptr;
     kernels::softcap_ce(
-          buf.data_ptr(), end - begin, padded, targets.data_ptr<int64_t>() + begin, static_cast<int>(vocab),
-          static_cast<int>(padded), static_cast<float>(softcap),
-          losses.defined() ? losses.data_ptr<float>() + begin : nullptr,
-          grad_scale.defined() ? grad_scale.data_ptr<float>() + begin * scale_stride : nullptr, scale_stride,
-          num_valid.defined() ? num_valid.data_ptr<int64_t>() : nullptr, grad,
-          fp8 && !mx && grad ? scalars.data_ptr<float>() : nullptr, stream);
+          buf.data_ptr(), end - begin, padded, chunk_targets, static_cast<int>(vocab), static_cast<int>(padded),
+          static_cast<float>(softcap), losses.defined() ? losses.data_ptr<float>() + begin : nullptr, chunk_scale,
+          scale_stride, valid, grad && !mx, fp8 && !mx && grad ? scalars.data_ptr<float>() : nullptr,
+          lse.defined() ? lse.data_ptr<float>() : nullptr, stream);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
     if (!grad)
       continue;
@@ -68,7 +70,18 @@ void run_chunks(
       at::addmm_out(const_cast<torch::Tensor&>(grad_w), grad_w, buf.t(), xc, torch::kFloat32);
       continue;
     }
-    const auto gq = mx ? quantize_mx(buf) : quantize_fp8_amax_ready(buf, torch::kFloat8_e5m2, scalars);
+    Fp8Tensor gq;
+    if (mx) {
+      gq = empty_mx(end - begin, padded, x.options());
+      const auto [out, out_t] = mx_outs(gq);
+      kernels::softcap_ce_grad_mx(
+            buf.data_ptr(), end - begin, padded, chunk_targets, lse.data_ptr<float>(), static_cast<int>(vocab),
+            static_cast<int>(padded), static_cast<float>(softcap), chunk_scale, scale_stride, valid, out, out_t,
+            stream);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+    }
+    else
+      gq = quantize_fp8_amax_ready(buf, torch::kFloat8_e5m2, scalars);
     at::_scaled_mm_out(gx, gq.data, wq.data_t.t(), gq.inv_scale, wq.inv_t(), {}, {}, x.scalar_type(), false);
     // x_t's columns of this chunk, column-major
     const auto xt = mx ? quantize_mx(xc, false, true) : Fp8Tensor{};

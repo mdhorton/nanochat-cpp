@@ -5,6 +5,8 @@
 #include <cuda_bf16.h>
 #include <cuda_fp8.h>
 
+#include "nanochat/model/mx_kernel.cuh"
+
 namespace nanochat {
 
 namespace {
@@ -88,21 +90,6 @@ __device__ float fp8_scale(float amax, float fp8_max) {
 // then writes 16 bytes of one transposed row. Needs cols % 8 == 0.
 constexpr int kTile = 64, kTileThreads = 256, kPad = 16;
 
-template <typename T>
-__device__ void load8(const T* p, float (&v)[8]) {
-  if constexpr (sizeof(T) == 2) {
-    const uint4 raw = *reinterpret_cast<const uint4*>(p);
-    const auto* b = reinterpret_cast<const __nv_bfloat16*>(&raw);
-#pragma unroll
-    for (int k = 0; k < 8; ++k)
-      v[k] = __bfloat162float(b[k]);
-  }
-  else {
-    const float4 a = reinterpret_cast<const float4*>(p)[0], b = reinterpret_cast<const float4*>(p)[1];
-    v[0] = a.x, v[1] = a.y, v[2] = a.z, v[3] = a.w, v[4] = b.x, v[5] = b.y, v[6] = b.z, v[7] = b.w;
-  }
-}
-
 template <typename T, __nv_fp8_interpretation_t kFormat, typename P>
 __device__ __forceinline__ void cast_body(
       const T* x, int64_t rows, int64_t cols, float fp8_max, const float* amax, __nv_fp8_storage_t* out,
@@ -150,55 +137,14 @@ __device__ __forceinline__ void cast_body(
       dst[k] = q[k];
 }
 
-// MXFP8: biased e8m0 exponent of 2^ceil(log2(amax / 448)) (448 = 1.75 * 2^8), exact integer math
-__device__ __forceinline__ int mx_exponent(float amax) {
-  const uint32_t bits = __float_as_uint(amax);
-  const int e = static_cast<int>(bits >> 23) - 8 + ((bits & 0x7fffffu) > 0x600000u ? 1 : 0);
-  return min(max(e, 0), 253);
-}
-
-// 2^-(e - 127), exact
-__device__ __forceinline__ float mx_multiplier(int e) {
-  return __uint_as_float(static_cast<uint32_t>(254 - e) << 23);
-}
-
-// cuBLAS's swizzled scale layout: 128x4 tiles of (row, block), 512 bytes each, row-major over tiles
-__device__ __forceinline__ int64_t mx_scale_index(int64_t row, int64_t block, int64_t tiles) {
-  return ((row >> 7) * tiles + (block >> 2)) * 512 + (row & 31) * 16 + ((row >> 5) & 3) * 4 + (block & 3);
-}
-
-struct MxOutDev {
-  __nv_fp8_storage_t* data;
-  int64_t ld;
-  uint8_t* scale;
-  int64_t scale_tiles;
-};
-
-__device__ __forceinline__ void mx_store8(
-      const float (&v)[8], float amax, const MxOutDev& o, int64_t row, int64_t col, int64_t scale_row,
-      bool write_scale) {
-  const int e = mx_exponent(amax);
-  const float mul = mx_multiplier(e);
-  __align__(8) __nv_fp8_storage_t q[8];
-#pragma unroll
-  for (int k = 0; k < 8; ++k)
-    q[k] = __nv_cvt_float_to_fp8(v[k] * mul, __NV_SATFINITE, __NV_E4M3);
-  *reinterpret_cast<uint2*>(o.data + row * o.ld + col) = *reinterpret_cast<const uint2*>(q);
-  if (write_scale)
-    o.scale[mx_scale_index(scale_row, col / 32, o.scale_tiles)] = static_cast<uint8_t>(e);
-}
-
-// 32x64 tiles, 256 threads. Rows: each thread quantizes 8 values, 4 threads per 32-value block. Columns: from the
-// tile in shared memory, each thread 8 rows of a column, 4 threads per block.
-constexpr int kMxRows = 32, kMxCols = 64, kMxThreads = 256;
-
-// mx_body's input: the 8 values at element offset i
+// mx_body's input: P of x (rows, cols)
 template <typename T, typename P>
 struct MxLoad {
   const T* x;
+  int64_t cols;
 
-  __device__ void operator()(int64_t i, float (&v)[8]) const {
-    load8(x + i, v);
+  __device__ void operator()(int64_t row, int64_t col, float (&v)[8]) const {
+    load8(x + row * cols + col, v);
 #pragma unroll
     for (int k = 0; k < 8; ++k)
       v[k] = P{}(v[k]);
@@ -208,8 +154,10 @@ struct MxLoad {
 // dh = bf16(h > 0 ? g * 2h : 0), as relu_square_kernel.cu's backward
 struct MxLoadReluSquareGrad {
   const __nv_bfloat16 *g, *h;
+  int64_t cols;
 
-  __device__ void operator()(int64_t i, float (&v)[8]) const {
+  __device__ void operator()(int64_t row, int64_t col, float (&v)[8]) const {
+    const int64_t i = row * cols + col;
     float hv[8];
     load8(g + i, v);
     load8(h + i, hv);
@@ -218,43 +166,6 @@ struct MxLoadReluSquareGrad {
       v[k] = __bfloat162float(__float2bfloat16(hv[k] <= 0.f ? 0.f : v[k] * (2.f * hv[k])));
   }
 };
-
-template <typename L>
-__device__ __forceinline__ void mx_body(L load, int64_t cols, MxOutDev out, MxOutDev out_t) {
-  __shared__ float tile[kMxRows][kMxCols + 1];
-  const int t = static_cast<int>(threadIdx.x);
-  const int64_t row0 = static_cast<int64_t>(blockIdx.y) * kMxRows, col0 = static_cast<int64_t>(blockIdx.x) * kMxCols;
-  {
-    const int r = t / 8, c = t % 8 * 8;
-    float v[8];
-    load((row0 + r) * cols + col0 + c, v);
-    float m = 0.f;
-#pragma unroll
-    for (int k = 0; k < 8; ++k) {
-      m = fmaxf(m, fabsf(v[k]));
-      tile[r][c + k] = v[k];
-    }
-    if (out.data != nullptr) {
-      m = fmaxf(m, __shfl_xor_sync(0xffffffff, m, 1));
-      m = fmaxf(m, __shfl_xor_sync(0xffffffff, m, 2));
-      mx_store8(v, m, out, row0 + r, col0 + c, row0 + r, t % 4 == 0);
-    }
-  }
-  if (out_t.data == nullptr)
-    return;
-  __syncthreads();
-  const int c = t / 4, r = t % 4 * 8;
-  float v[8];
-  float m = 0.f;
-#pragma unroll
-  for (int k = 0; k < 8; ++k) {
-    v[k] = tile[r + k][c];
-    m = fmaxf(m, fabsf(v[k]));
-  }
-  m = fmaxf(m, __shfl_xor_sync(0xffffffff, m, 1));
-  m = fmaxf(m, __shfl_xor_sync(0xffffffff, m, 2));
-  mx_store8(v, m, out_t, col0 + c, row0 + r, col0 + c, t % 4 == 0);
-}
 
 } // namespace
 
@@ -286,7 +197,7 @@ NANOCHAT_FP8_CAST(nanochat_fp8_cast_e4m3_relu_square_bf16, __nv_bfloat16, __NV_E
 #define NANOCHAT_MX(name, T, P)                                                                                        \
   __global__ void __launch_bounds__(nanochat::kMxThreads)                                                              \
         name(const T* x, int64_t cols, nanochat::MxOutDev out, nanochat::MxOutDev out_t) {                             \
-    nanochat::mx_body(nanochat::MxLoad<T, P>{x}, cols, out, out_t);                                                    \
+    nanochat::mx_body(nanochat::MxLoad<T, P>{x, cols}, out, out_t);                                                    \
   }
 
 NANOCHAT_MX(nanochat_mx_quantize_bf16, __nv_bfloat16, nanochat::Identity)
@@ -295,7 +206,7 @@ NANOCHAT_MX(nanochat_mx_quantize_relu_square_bf16, __nv_bfloat16, nanochat::Relu
 
 __global__ void __launch_bounds__(nanochat::kMxThreads) nanochat_mx_quantize_relu_square_bwd_bf16(
       const __nv_bfloat16* g, const __nv_bfloat16* h, int64_t cols, nanochat::MxOutDev out, nanochat::MxOutDev out_t) {
-  nanochat::mx_body(nanochat::MxLoadReluSquareGrad{g, h}, cols, out, out_t);
+  nanochat::mx_body(nanochat::MxLoadReluSquareGrad{g, h, cols}, out, out_t);
 }
 
 namespace nanochat::kernels {
@@ -359,36 +270,25 @@ void quantize_fp8_relu_square(
         nanochat_fp8_cast_e4m3_relu_square_bf16, out, out_t, amax, inv_scale, stream);
 }
 
-namespace {
-
-MxOutDev dev(const MxOut& o) {
-  return {static_cast<__nv_fp8_storage_t*>(o.data), o.ld, static_cast<uint8_t*>(o.scale), o.scale_tiles};
-}
-
-dim3 mx_grid(int64_t rows, int64_t cols) {
-  return {static_cast<unsigned>(cols / kMxCols), static_cast<unsigned>(rows / kMxRows)};
-}
-
-} // namespace
-
 void quantize_mx(
       const void* x, bool x_bf16, int64_t rows, int64_t cols, MxOut out, MxOut out_t, bool relu_square,
       cudaStream_t stream) {
   const dim3 grid = mx_grid(rows, cols);
   if (!x_bf16)
-    nanochat_mx_quantize_f32<<<grid, kMxThreads, 0, stream>>>(static_cast<const float*>(x), cols, dev(out), dev(out_t));
+    nanochat_mx_quantize_f32<<<grid, kMxThreads, 0, stream>>>(
+          static_cast<const float*>(x), cols, mx_dev(out), mx_dev(out_t));
   else if (relu_square)
     nanochat_mx_quantize_relu_square_bf16<<<grid, kMxThreads, 0, stream>>>(
-          static_cast<const __nv_bfloat16*>(x), cols, dev(out), dev(out_t));
+          static_cast<const __nv_bfloat16*>(x), cols, mx_dev(out), mx_dev(out_t));
   else
     nanochat_mx_quantize_bf16<<<grid, kMxThreads, 0, stream>>>(
-          static_cast<const __nv_bfloat16*>(x), cols, dev(out), dev(out_t));
+          static_cast<const __nv_bfloat16*>(x), cols, mx_dev(out), mx_dev(out_t));
 }
 
 void quantize_mx_relu_square_bwd(
       const void* g, const void* h, int64_t rows, int64_t cols, MxOut out, MxOut out_t, cudaStream_t stream) {
   nanochat_mx_quantize_relu_square_bwd_bf16<<<mx_grid(rows, cols), kMxThreads, 0, stream>>>(
-        static_cast<const __nv_bfloat16*>(g), static_cast<const __nv_bfloat16*>(h), cols, dev(out), dev(out_t));
+        static_cast<const __nv_bfloat16*>(g), static_cast<const __nv_bfloat16*>(h), cols, mx_dev(out), mx_dev(out_t));
 }
 
 } // namespace nanochat::kernels

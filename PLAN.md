@@ -100,5 +100,8 @@ steps:
     (+3.1%), bpb 1.7783 vs 1.7792 tensorwise (30 steps).
     done: MX relu^2 backward: dh quantized straight from g and h (`quantize_mx_relu_square_bwd`), never written in
     bf16; bit-identical. quick-d12 2 GPUs: 223.8k tok/s (+3.0%).
-    todo: MX quantization in the other producer kernels (softcap CE grad, residual_norm, rotary_norm bwd): no bf16
-    write + re-read. The transposed copy needs 32-row tiles.
+    done: MX lm_head gradient: the loss kernel also writes each row's lse, then a 32x64-tile kernel recomputes the
+    gradient from the logits and quantizes it (`softcap_ce_grad_mx`); bit-identical. lm_head kernels 9.3 -> 6.7 ms
+    per micro-step. quick-d12 2 GPUs: 227.4k tok/s (+1.6%).
+    todo: MX quantization in residual_norm and rotary_norm bwd. The MX tile kernel (`mx_kernel.cuh`) reaches only
+    ~500 GB/s of 672.
