@@ -73,6 +73,7 @@ profile-d12 = { cmd = "tools/profile.sh d12 $D12_BASE", depends-on = ["build"] }
 profile-d24 = { cmd = "tools/profile.sh d24 $D24_BASE", depends-on = ["build"] }
 
 test = { cmd = "ctest --test-dir cmake-build-pixi --output-on-failure", depends-on = ["build"] }
+
 tok-train = { cmd = "cmake-build-pixi/tok_train", depends-on = ["build"] }
 tok-eval = { cmd = "cmake-build-pixi/tok_eval", depends-on = ["build"] }
 
