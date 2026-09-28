@@ -23,7 +23,7 @@ set(CUDA_TOOLKIT_ROOT_DIR "${PIXI_ENV}/targets/x86_64-linux")
 set(CMAKE_CUDA_COMPILER "${PIXI_ENV}/bin/nvcc")
 set(CMAKE_CUDA_HOST_COMPILER "${CMAKE_CXX_COMPILER}")
 set(CUDA_nvrtc_LIBRARY "${TORCH_DIR}/../nvidia/cu13/lib/libnvrtc.so.13") # not in the conda env
-set(TORCH_CUDA_ARCH_LIST 12.0) # torch sets the nvcc -gencode flags from this
+set(TORCH_CUDA_ARCH_LIST 12.0a) # torch sets the nvcc -gencode flags from this; "a" for block-scaled mma.sync
 set(CMAKE_CUDA_STANDARD 20)
 set(CMAKE_CUDA_RUNTIME_LIBRARY None) # use torch's libcudart
 enable_language(CUDA)
@@ -59,6 +59,8 @@ add_library(nanochat_train
         src/nanochat/model/gpt.cpp
         src/nanochat/model/mx_attention.cpp
         src/nanochat/model/mx_attention_kernel.cu
+        src/nanochat/model/mx_flash.cpp
+        src/nanochat/model/mx_flash_kernel.cu
         src/nanochat/model/mx_gemm.cpp
         src/nanochat/model/qkv_kernel.cu
         src/nanochat/model/relu_square.cpp
@@ -98,9 +100,18 @@ target_link_libraries(base_train PRIVATE nanochat_train)
 add_executable(bench_gemm apps/bench_gemm.cpp)
 target_link_libraries(bench_gemm PRIVATE nanochat_train)
 
-# attention backends (FA2, cuDNN, memory-efficient) at a micro-step's shapes
+# SageAttention2's FP8 forward (sm89 kernels, run on sm120), a speed probe for bench_attention
+add_library(bench_sage OBJECT
+        external/SageAttention/csrc/qattn/sm89_qk_int8_sv_f8_accum_f32_fuse_v_scale_attn_inst_buf.cu
+        external/SageAttention/csrc/qattn/sm89_qk_int8_sv_f8_accum_f16_fuse_v_scale_attn_inst_buf.cu)
+target_include_directories(bench_sage PRIVATE apps/sage_shim)
+target_link_libraries(bench_sage PRIVATE nanochat_train)
+target_compile_options(bench_sage PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
+        -U__CUDA_NO_HALF_OPERATORS__ -U__CUDA_NO_HALF_CONVERSIONS__ --use_fast_math -diag-suppress=174>)
+
+# attention backends (FA2, cuDNN, memory-efficient, SageAttention2 fwd) at a micro-step's shapes
 add_executable(bench_attention apps/bench_attention.cpp)
-target_link_libraries(bench_attention PRIVATE nanochat_train)
+target_link_libraries(bench_attention PRIVATE nanochat_train bench_sage)
 
 enable_testing()
 find_package(GTest REQUIRED)
@@ -125,6 +136,7 @@ add_executable(train_tests
         tests/test_fp8.cpp
         tests/test_gpt.cpp
         tests/test_loss_eval.cpp
+        tests/test_mx_flash.cpp
         tests/test_optim.cpp
         tests/test_qkv.cpp
         tests/test_relu_square.cpp
