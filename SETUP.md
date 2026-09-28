@@ -2,6 +2,8 @@
 
 All dependencies (compiler, CUDA, C++ libs, Python oracle incl. torch) come from pixi.
 
+sm_120a
+
 ```bash
 curl -fsSL https://pixi.sh/install.sh | bash   
 pixi install                                   
