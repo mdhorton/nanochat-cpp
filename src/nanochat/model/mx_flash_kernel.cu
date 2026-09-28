@@ -43,8 +43,8 @@ __device__ __forceinline__ void mx_flash_fwd_body(
       __nv_bfloat16* __restrict__ out, float* __restrict__ lse, int T, int H, int Hkv, int window, float scale_log2) {
   __shared__ __align__(128) uint8_t smem[kSmemBytes];
   const int tid = static_cast<int>(threadIdx.x), lane = tid % 32, warp = tid / 32;
-  const int m0 = (static_cast<int>(gridDim.x - 1 - blockIdx.x)) * kBlockM; // most keys first
-  const int h = static_cast<int>(blockIdx.y), b = static_cast<int>(blockIdx.z), hk = h / (H / Hkv);
+  const int m0 = static_cast<int>(gridDim.z - 1 - blockIdx.z) * kBlockM; // most keys first, over all heads
+  const int h = static_cast<int>(blockIdx.x), b = static_cast<int>(blockIdx.y), hk = h / (H / Hkv);
   const uint32_t sbase = static_cast<uint32_t>(__cvta_generic_to_shared(smem));
 
   const int64_t q_ld = static_cast<int64_t>(H) * kD, k_ld = static_cast<int64_t>(Hkv) * kD;
@@ -278,7 +278,7 @@ void mx_flash_fwd(
       const void* q, const uint32_t* q_scale, const void* k, const uint32_t* k_scale, const void* vt,
       const uint8_t* v_scale, void* out, float* lse, int B, int64_t T, int H, int Hkv, int64_t window,
       cudaStream_t stream) {
-  const dim3 grid(static_cast<unsigned>(T / kBlockM), H, B);
+  const dim3 grid(H, B, static_cast<unsigned>(T / kBlockM)); // tiles slowest: blocks start in order of work
   const float scale_log2 = 1.4426950408889634f / sqrtf(static_cast<float>(kD));
   nanochat_mx_flash_fwd<<<grid, kThreads, 0, stream>>>(
         static_cast<const uint8_t*>(q), q_scale, static_cast<const uint8_t*>(k), k_scale,

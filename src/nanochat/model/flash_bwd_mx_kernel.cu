@@ -34,11 +34,11 @@ template <class C>
 __device__ __forceinline__ void flash_bwd_mx_dq_body(
       const kernels::FlashBwdMxInputs& in, __nv_bfloat16* __restrict__ dq, int T, int H, int Hkv, int window,
       float scale_log2, float scale) {
-  constexpr int kBlockM = C::kBlockM, kBlockN = C::kBlockN, kNT = kBlockN / 8;
+  constexpr int kBlockM = C::kBlockM, kBlockN = C::kBlockN;
   extern __shared__ __align__(128) uint8_t smem[];
   const int tid = static_cast<int>(threadIdx.x), lane = tid % 32, warp = tid / 32;
-  const int m0 = static_cast<int>(gridDim.x - 1 - blockIdx.x) * kBlockM; // most keys first
-  const int h = static_cast<int>(blockIdx.y), b = static_cast<int>(blockIdx.z), hk = h / (H / Hkv);
+  const int m0 = static_cast<int>(gridDim.z - 1 - blockIdx.z) * kBlockM; // most keys first, over all heads
+  const int h = static_cast<int>(blockIdx.x), b = static_cast<int>(blockIdx.y), hk = h / (H / Hkv);
   const uint32_t sbase = static_cast<uint32_t>(__cvta_generic_to_shared(smem));
   const int64_t bh = static_cast<int64_t>(b) * H + h, bhk = static_cast<int64_t>(b) * Hkv + hk;
   const int64_t q_ld = static_cast<int64_t>(H) * kD, kv_ld = static_cast<int64_t>(Hkv) * kD; // bytes (e4m3)
@@ -98,45 +98,49 @@ __device__ __forceinline__ void flash_bwd_mx_dq_body(
     const auto* vs_s = reinterpret_cast<const uint32_t*>(smem + so + C::kVs);
     const uint8_t* kts_s = smem + so + C::kKts;
 
-    // S = Q Kᵀ, dP = dout Vᵀ
-    float s[kNT][4] = {}, dp[kNT][4] = {};
-    uint32_t sfk[kNT], sfv[kNT];
+    // Per 32 keys kk: S = Q Kᵀ, dP = dout Vᵀ
+    const auto scores = [&](int kk, float (&s)[4][4], float (&dp)[4][4]) {
+      uint32_t sfk[4], sfv[4];
 #pragma unroll
-    for (int nt = 0; nt < kNT; ++nt)
-      sfk[nt] = ks_s[nt * 8 + lane / 4], sfv[nt] = vs_s[nt * 8 + lane / 4];
+      for (int nt = 0; nt < 4; ++nt) {
+        sfk[nt] = ks_s[(4 * kk + nt) * 8 + lane / 4], sfv[nt] = vs_s[(4 * kk + nt) * 8 + lane / 4];
 #pragma unroll
-    for (int ks = 0; ks < kKSteps8; ++ks) {
-#pragma unroll
-      for (int np = 0; np < kNT / 2; ++np) {
-        const int r = np * 16 + lane % 8 + (lane / 16) * 8, c = 2 * ks + (lane / 8) % 2;
-        uint32_t bk[4], bv[4];
-        ldmatrix_x4(bk, st + C::kK + swz8<kD>(r, c));
-        ldmatrix_x4(bv, st + C::kV + swz8<kD>(r, c));
-        mma_mx(s[2 * np], rq[ks], bk[0], bk[1], sfa_q, sfk[2 * np], ks, ks);
-        mma_mx(s[2 * np + 1], rq[ks], bk[2], bk[3], sfa_q, sfk[2 * np + 1], ks, ks);
-        mma_mx(dp[2 * np], rdo[ks], bv[0], bv[1], sfa_do, sfv[2 * np], ks, ks);
-        mma_mx(dp[2 * np + 1], rdo[ks], bv[2], bv[3], sfa_do, sfv[2 * np + 1], ks, ks);
+        for (int j = 0; j < 4; ++j)
+          s[nt][j] = 0.0f, dp[nt][j] = 0.0f;
       }
-    }
-    // dS = P (dP - delta), P = exp2(S log2e / sqrt(D) - lse log2e)
 #pragma unroll
-    for (int nt = 0; nt < kNT; ++nt) {
+      for (int ks = 0; ks < kKSteps8; ++ks) {
 #pragma unroll
-      for (int j = 0; j < 4; ++j) {
-        float p = fast_exp2(fmaf(s[nt][j], scale_log2, -lse2[j / 2]));
-        if constexpr (kMasked) {
-          const int row = row0 + 8 * (j / 2), key = n * kBlockN + nt * 8 + 2 * (lane % 4) + j % 2;
-          if (key > row || (window >= 0 && row - key > window))
-            p = 0.0f;
+        for (int np = 0; np < 2; ++np) {
+          const int r = (2 * kk + np) * 16 + lane % 8 + (lane / 16) * 8, c = 2 * ks + (lane / 8) % 2;
+          uint32_t bk[4], bv[4];
+          ldmatrix_x4(bk, st + C::kK + swz8<kD>(r, c));
+          ldmatrix_x4(bv, st + C::kV + swz8<kD>(r, c));
+          mma_mx(s[2 * np], rq[ks], bk[0], bk[1], sfa_q, sfk[2 * np], ks, ks);
+          mma_mx(s[2 * np + 1], rq[ks], bk[2], bk[3], sfa_q, sfk[2 * np + 1], ks, ks);
+          mma_mx(dp[2 * np], rdo[ks], bv[0], bv[1], sfa_do, sfv[2 * np], ks, ks);
+          mma_mx(dp[2 * np + 1], rdo[ks], bv[2], bv[3], sfa_do, sfv[2 * np + 1], ks, ks);
         }
-        s[nt][j] = p * (dp[nt][j] - dlt[j / 2]);
       }
-    }
-    // dq += dS K (Kᵀ's tokens permuted as dS's A fragment)
+    };
+    // dS = P (dP - delta), P = exp2(S log2e / sqrt(D) - lse log2e), then dq += dS K (Kᵀ's tokens permuted as dS's A
+    // fragment)
+    const auto update = [&](int kk, float (&s)[4][4], const float (&dp)[4][4]) {
 #pragma unroll
-    for (int kk = 0; kk < kBlockN / 32; ++kk) {
+      for (int nt = 0; nt < 4; ++nt) {
+#pragma unroll
+        for (int j = 0; j < 4; ++j) {
+          float p = fast_exp2(fmaf(s[nt][j], scale_log2, -lse2[j / 2]));
+          if constexpr (kMasked) {
+            const int row = row0 + 8 * (j / 2), key = n * kBlockN + (4 * kk + nt) * 8 + 2 * (lane % 4) + j % 2;
+            if (key > row || (window >= 0 && row - key > window))
+              p = 0.0f;
+          }
+          s[nt][j] = p * (dp[nt][j] - dlt[j / 2]);
+        }
+      }
       uint32_t a[4];
-      const uint32_t sfa = pack_a8_scaled(a, s[4 * kk], s[4 * kk + 1], s[4 * kk + 2], s[4 * kk + 3]);
+      const uint32_t sfa = pack_a8_scaled(a, s[0], s[1], s[2], s[3]);
       uint32_t tsk[4];
       load_t_scales(tsk, kts_s + kk * kD);
 #pragma unroll
@@ -146,6 +150,15 @@ __device__ __forceinline__ void flash_bwd_mx_dq_body(
         mma_mx(acc[2 * dp2], a, bk[0], bk[1], sfa, tsk[dp2 / 2], 0, dp2 % 2 * 2);
         mma_mx(acc[2 * dp2 + 1], a, bk[2], bk[3], sfa, tsk[dp2 / 2], 0, dp2 % 2 * 2 + 1);
       }
+    };
+    // chunk kk + 1's mmas go ahead of chunk kk's softmax, to overlap it
+    float s[2][4][4], dp[2][4][4];
+    scores(0, s[0], dp[0]);
+#pragma unroll
+    for (int kk = 0; kk < kBlockN / 32; ++kk) {
+      if (kk + 1 < kBlockN / 32)
+        scores(kk + 1, s[(kk + 1) % 2], dp[(kk + 1) % 2]);
+      update(kk, s[kk % 2], dp[kk % 2]);
     }
   };
   for (int n = n_lo; n <= n_hi; ++n)
@@ -178,11 +191,11 @@ template <class C>
 __device__ __forceinline__ void flash_bwd_mx_dkv_body(
       const kernels::FlashBwdMxInputs& in, __nv_bfloat16* __restrict__ dk, __nv_bfloat16* __restrict__ dv, int T, int H,
       int Hkv, int window, float scale_log2, float scale) {
-  constexpr int kBlockM = C::kBlockM, kBlockN = C::kBlockN, kMT = kBlockM / 8;
+  constexpr int kBlockM = C::kBlockM, kBlockN = C::kBlockN;
   extern __shared__ __align__(128) uint8_t smem[];
   const int tid = static_cast<int>(threadIdx.x), lane = tid % 32, warp = tid / 32;
-  const int n0 = static_cast<int>(blockIdx.x) * kBlockN; // early keys (most queries) first
-  const int hk = static_cast<int>(blockIdx.y), b = static_cast<int>(blockIdx.z), group = H / Hkv;
+  const int n0 = static_cast<int>(blockIdx.z) * kBlockN; // early keys (most queries) first, over all heads
+  const int hk = static_cast<int>(blockIdx.x), b = static_cast<int>(blockIdx.y), group = H / Hkv;
   const uint32_t sbase = static_cast<uint32_t>(__cvta_generic_to_shared(smem));
   const int64_t q_ld = static_cast<int64_t>(H) * kD, kv_ld = static_cast<int64_t>(Hkv) * kD; // bytes (e4m3)
   const int64_t bhk = static_cast<int64_t>(b) * Hkv + hk;
@@ -246,50 +259,55 @@ __device__ __forceinline__ void flash_bwd_mx_dkv_body(
     const auto* s_lse = reinterpret_cast<const float*>(smem + so + C::kLse);
     const auto* s_delta = reinterpret_cast<const float*>(smem + so + C::kDelta);
 
-    // Sᵀ = K Qᵀ, dPᵀ = V doutᵀ (rows: keys, columns: queries)
-    float s[kMT][4] = {}, dp[kMT][4] = {};
-    uint32_t sfq[kMT], sfd[kMT];
+    // Per 32 queries kk: Sᵀ = K Qᵀ, dPᵀ = V doutᵀ (rows: keys, columns: queries)
+    const auto scores = [&](int kk, float (&s)[4][4], float (&dp)[4][4]) {
+      uint32_t sfq[4], sfd[4];
 #pragma unroll
-    for (int mt = 0; mt < kMT; ++mt)
-      sfq[mt] = qs_s[mt * 8 + lane / 4], sfd[mt] = dos_s[mt * 8 + lane / 4];
+      for (int mt = 0; mt < 4; ++mt) {
+        sfq[mt] = qs_s[(4 * kk + mt) * 8 + lane / 4], sfd[mt] = dos_s[(4 * kk + mt) * 8 + lane / 4];
 #pragma unroll
-    for (int ks = 0; ks < kKSteps8; ++ks) {
-#pragma unroll
-      for (int mp = 0; mp < kMT / 2; ++mp) {
-        const int r = mp * 16 + lane % 8 + (lane / 16) * 8, c = 2 * ks + (lane / 8) % 2;
-        uint32_t bq[4], bd[4];
-        ldmatrix_x4(bq, st + C::kQ + swz8<kD>(r, c));
-        ldmatrix_x4(bd, st + C::kDo + swz8<kD>(r, c));
-        mma_mx(s[2 * mp], rk[ks], bq[0], bq[1], sfa_k, sfq[2 * mp], ks, ks);
-        mma_mx(s[2 * mp + 1], rk[ks], bq[2], bq[3], sfa_k, sfq[2 * mp + 1], ks, ks);
-        mma_mx(dp[2 * mp], rv[ks], bd[0], bd[1], sfa_v, sfd[2 * mp], ks, ks);
-        mma_mx(dp[2 * mp + 1], rv[ks], bd[2], bd[3], sfa_v, sfd[2 * mp + 1], ks, ks);
+        for (int j = 0; j < 4; ++j)
+          s[mt][j] = 0.0f, dp[mt][j] = 0.0f;
       }
-    }
-    // Pᵀ and dSᵀ = Pᵀ (dPᵀ - delta)
 #pragma unroll
-    for (int mt = 0; mt < kMT; ++mt) {
-      const int col = mt * 8 + 2 * (lane % 4);
-      const float2 l2 = *reinterpret_cast<const float2*>(s_lse + col);
-      const float2 d2 = *reinterpret_cast<const float2*>(s_delta + col);
+      for (int ks = 0; ks < kKSteps8; ++ks) {
 #pragma unroll
-      for (int j = 0; j < 4; ++j) {
-        float p = fast_exp2(fmaf(s[mt][j], scale_log2, -(j % 2 ? l2.y : l2.x) * 1.4426950408889634f));
-        if constexpr (kMasked) {
-          const int key = key0 + 8 * (j / 2), query = m * kBlockM + col + j % 2;
-          if (key > query || (window >= 0 && query - key > window))
-            p = 0.0f;
+        for (int mp = 0; mp < 2; ++mp) {
+          const int r = (2 * kk + mp) * 16 + lane % 8 + (lane / 16) * 8, c = 2 * ks + (lane / 8) % 2;
+          uint32_t bq[4], bd[4];
+          ldmatrix_x4(bq, st + C::kQ + swz8<kD>(r, c));
+          ldmatrix_x4(bd, st + C::kDo + swz8<kD>(r, c));
+          mma_mx(s[2 * mp], rk[ks], bq[0], bq[1], sfa_k, sfq[2 * mp], ks, ks);
+          mma_mx(s[2 * mp + 1], rk[ks], bq[2], bq[3], sfa_k, sfq[2 * mp + 1], ks, ks);
+          mma_mx(dp[2 * mp], rv[ks], bd[0], bd[1], sfa_v, sfd[2 * mp], ks, ks);
+          mma_mx(dp[2 * mp + 1], rv[ks], bd[2], bd[3], sfa_v, sfd[2 * mp + 1], ks, ks);
         }
-        s[mt][j] = p;
-        dp[mt][j] = p * (dp[mt][j] - (j % 2 ? d2.y : d2.x));
       }
-    }
-    // dv += Pᵀ dout, dk += dSᵀ Q (doutᵀ's and Qᵀ's tokens permuted as the A fragments)
+    };
+    // 256 Pᵀ and 256 dSᵀ = 256 Pᵀ (dPᵀ - delta), then dv += Pᵀ dout, dk += dSᵀ Q (doutᵀ's and Qᵀ's tokens permuted
+    // as the A fragments)
+    const auto update = [&](int kk, float (&s)[4][4], float (&dp)[4][4]) {
 #pragma unroll
-    for (int kk = 0; kk < kBlockM / 32; ++kk) {
+      for (int mt = 0; mt < 4; ++mt) {
+        const int col = (4 * kk + mt) * 8 + 2 * (lane % 4);
+        const float2 l2 = *reinterpret_cast<const float2*>(s_lse + col);
+        const float2 d2 = *reinterpret_cast<const float2*>(s_delta + col);
+        const float lo[2] = {fmaf(l2.x, -1.4426950408889634f, 8.0f), fmaf(l2.y, -1.4426950408889634f, 8.0f)};
+#pragma unroll
+        for (int j = 0; j < 4; ++j) {
+          float p = fast_exp2(fmaf(s[mt][j], scale_log2, lo[j % 2]));
+          if constexpr (kMasked) {
+            const int key = key0 + 8 * (j / 2), query = m * kBlockM + col + j % 2;
+            if (key > query || (window >= 0 && query - key > window))
+              p = 0.0f;
+          }
+          s[mt][j] = p;
+          dp[mt][j] = p * (dp[mt][j] - (j % 2 ? d2.y : d2.x));
+        }
+      }
       uint32_t ap[4], ads[4];
-      pack_a8(ap, s[4 * kk], s[4 * kk + 1], s[4 * kk + 2], s[4 * kk + 3], 256.0f, 256.0f);
-      const uint32_t sfa_ds = pack_a8_scaled(ads, dp[4 * kk], dp[4 * kk + 1], dp[4 * kk + 2], dp[4 * kk + 3]);
+      pack_a8(ap, s[0], s[1], s[2], s[3], 1.0f, 1.0f);
+      const uint32_t sfa_ds = pack_a8_scaled(ads, dp[0], dp[1], dp[2], dp[3]);
       uint32_t tsd[4], tsq[4];
       load_t_scales(tsd, dots_s + kk * kD);
       load_t_scales(tsq, qts_s + kk * kD);
@@ -305,6 +323,15 @@ __device__ __forceinline__ void flash_bwd_mx_dkv_body(
         mma_mx(acc_k[2 * dp2], ads, bq[0], bq[1], sfa_ds, tsq[dp2 / 2], 0, b0);
         mma_mx(acc_k[2 * dp2 + 1], ads, bq[2], bq[3], sfa_ds, tsq[dp2 / 2], 0, b1);
       }
+    };
+    // chunk kk + 1's mmas go ahead of chunk kk's softmax, to overlap it
+    float s[2][4][4], dp[2][4][4];
+    scores(0, s[0], dp[0]);
+#pragma unroll
+    for (int kk = 0; kk < kBlockM / 32; ++kk) {
+      if (kk + 1 < kBlockM / 32)
+        scores(kk + 1, s[(kk + 1) % 2], dp[(kk + 1) % 2]);
+      update(kk, s[kk % 2], dp[kk % 2]);
     }
   };
   for (int i = 0, m = m_lo; i < tiles; ++i, m = m == m_hi ? m_lo : m + 1)
@@ -314,7 +341,7 @@ __device__ __forceinline__ void flash_bwd_mx_dkv_body(
       step(i, m, std::false_type{});
 
   __syncthreads();
-  stage_acc(smem, warp * 16, acc_k, scale);
+  stage_acc(smem, warp * 16, acc_k, scale / 256.0f); // dS was 256 dS
   stage_acc(smem + kBlockN * kRowBytes, warp * 16, acc_v, 1.0f);
   __syncthreads();
   const int64_t out_ld = static_cast<int64_t>(Hkv) * kD, row = static_cast<int64_t>(b) * T + n0;
@@ -537,9 +564,10 @@ void flash_bwd_mx(
   set_smem(c.kernel, c.smem, dkv_set[ki]);
   const float scale = 1.0f / sqrtf(static_cast<float>(kD)), scale_log2 = scale * 1.4426950408889634f;
   const int w = window >= 0 && window < T ? static_cast<int>(window) : -1;
-  a.kernel<<<dim3(static_cast<unsigned>(T / a.block_m), H, B), a.threads, a.smem, stream>>>(
+  // tiles slowest: blocks start in order of work (causal), so the last wave is the small ones
+  a.kernel<<<dim3(H, B, static_cast<unsigned>(T / a.block_m)), a.threads, a.smem, stream>>>(
         in, static_cast<bf16*>(dq), static_cast<int>(T), H, Hkv, w, scale_log2, scale);
-  c.kernel<<<dim3(static_cast<unsigned>(T / c.block_n), Hkv, B), c.threads, c.smem, stream>>>(
+  c.kernel<<<dim3(Hkv, B, static_cast<unsigned>(T / c.block_n)), c.threads, c.smem, stream>>>(
         in, static_cast<bf16*>(dk), static_cast<bf16*>(dv), static_cast<int>(T), H, Hkv, w, scale_log2, scale);
 }
 
