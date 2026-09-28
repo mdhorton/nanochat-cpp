@@ -31,29 +31,6 @@ __device__ __forceinline__ void load_rows(uint32_t dst, const __nv_bfloat16* src
   }
 }
 
-// rows x 128 bf16 from swizzled shared memory to global (ld elements apart)
-template <int Threads>
-__device__ __forceinline__ void store_rows(const uint8_t* src, __nv_bfloat16* dst, int64_t ld, int rows) {
-  for (int idx = static_cast<int>(threadIdx.x); idx < rows * 16; idx += Threads) {
-    const int r = idx / 16, c = idx % 16;
-    *reinterpret_cast<uint4*>(reinterpret_cast<uint8_t*>(dst + r * ld) + c * 16) = *reinterpret_cast<const uint4*>(
-          src + swz(r, c));
-  }
-}
-
-// an m16 x 128 fp32 accumulator (16 n8 tiles), times scale, as bf16 into rows row0.. of swizzled shared memory
-__device__ __forceinline__ void stage_acc(uint8_t* smem, int row0, const float (&acc)[kDTiles][4], float scale) {
-  const int lane = static_cast<int>(threadIdx.x % 32);
-#pragma unroll
-  for (int r = 0; r < 2; ++r) {
-    const int row = row0 + lane / 4 + 8 * r;
-#pragma unroll
-    for (int dt = 0; dt < kDTiles; ++dt)
-      *reinterpret_cast<uint32_t*>(smem + swz(row, dt) + (lane % 4) * 4) = pack_bf16(
-            acc[dt][2 * r] * scale, acc[dt][2 * r + 1] * scale);
-  }
-}
-
 // A fragments of an m16 x 128 tile in swizzled shared memory at rows row0..
 __device__ __forceinline__ void load_a(uint32_t (&a)[kKSteps][4], uint32_t base, int row0) {
   const int lane = static_cast<int>(threadIdx.x % 32);

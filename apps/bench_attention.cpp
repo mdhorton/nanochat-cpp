@@ -1,7 +1,8 @@
 // Times the attention backends at a training micro-step's shapes: the FA2 path the model uses (fa2_attention in
 // gpt.cpp) against SDPA's cuDNN and memory-efficient kernels, forward and forward + backward, full causal and
 // sliding window (SDPA takes the window as an explicit mask; FA2 natively). Checks each against FA2. bf16: our flash
-// attention forward (flash.h, default tiles) with FA2's backward; bf16[...]: its tile configurations, forward only.
+// attention forward (flash.h, default tiles) with FA2's backward; bf16mx: with our MXFP8 backward; bf16[...]: its tile
+// configurations, forward only. Backward only: FA2's vs ours (bf16, MXFP8 incl. quantization) per tile configuration.
 // Usage: bench_attention [--batch B] [--seq T] [--heads H] [--kv-heads Hkv] [--head-dim D] [--window W]
 //                        [--depth L] [--pattern SSSL] [--iters N]
 #include <algorithm>
@@ -207,6 +208,18 @@ void bench_backward(
       std::printf("  %-32s %8.3f ms %6.1f TFLOPs (FA2-equivalent)\n", name.c_str(), ms, bwd_flops / ms / 1e9);
     }
   }
+  for (int dqv = 0; dqv < nanochat::kernels::kFlashBwdMxDqVariants; ++dqv) {
+    for (int dkvv = 0; dkvv < nanochat::kernels::kFlashBwdMxDkvVariants; ++dkvv) {
+      const double ms = time_ms(
+            [&] {
+              nanochat::flash_backward_mx(g, q, k, v, out, lse, window, dqv, dkvv);
+            },
+            a.iters);
+      const auto name = std::string(nanochat::kernels::flash_bwd_mx_dq_variant_name(dqv)) + "; " +
+                        nanochat::kernels::flash_bwd_mx_dkv_variant_name(dkvv);
+      std::printf("  %-32s %8.3f ms %6.1f TFLOPs (FA2-equivalent)\n", name.c_str(), ms, bwd_flops / ms / 1e9);
+    }
+  }
 }
 
 } // namespace
@@ -302,6 +315,12 @@ int main(int argc, char** argv) {
           "bf16",
           [&](const auto& q, const auto& k, const auto& v) {
             return nanochat::flash_attention(q, k, v, window);
+          },
+          q, k, v, g, ref, a.iters));
+    results.push_back(bench(
+          "bf16mx",
+          [&](const auto& q, const auto& k, const auto& v) {
+            return nanochat::flash_attention(q, k, v, window, true);
           },
           q, k, v, g, ref, a.iters));
     for (int variant = 0; variant < nanochat::kernels::kFlashVariants; ++variant)

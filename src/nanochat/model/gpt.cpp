@@ -112,7 +112,9 @@ Attention attention_from_string(const std::string& name) {
     return Attention::SDPA;
   if (name == "bf16")
     return Attention::BF16;
-  throw std::invalid_argument("unknown attention: " + name + " (use fa2, sdpa or bf16)");
+  if (name == "bf16mx")
+    return Attention::BF16_MX;
+  throw std::invalid_argument("unknown attention: " + name + " (use fa2, sdpa, bf16 or bf16mx)");
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -225,8 +227,8 @@ torch::Tensor CausalSelfAttentionImpl::forward(
 
 torch::Tensor CausalSelfAttentionImpl::attend(
       const torch::Tensor& q, const torch::Tensor& k, const torch::Tensor& v, int64_t window) const {
-  if (attention == Attention::BF16 && flash_supported(q, k, v))
-    return flash_attention(q, k, v, window);
+  if ((attention == Attention::BF16 || attention == Attention::BF16_MX) && flash_supported(q, k, v))
+    return flash_attention(q, k, v, window, attention == Attention::BF16_MX);
   if (attention != Attention::SDPA)
     return fa2_attention(q, k, v, window);
   return sdpa_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), window).transpose(1, 2);

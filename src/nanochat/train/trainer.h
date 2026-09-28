@@ -18,7 +18,7 @@ struct TrainOptions {
   // model
   int64_t depth = 20, aspect_ratio = 64, head_dim = 128, max_seq_len = 2048;
   std::string window_pattern = "SSSL";
-  std::string attention = "bf16";     // bf16 (ours), fa2 or sdpa (bit-identical to Python nanochat)
+  std::string attention = "bf16";     // bf16 (ours), bf16mx (+ MXFP8 bwd), fa2, sdpa (as Python)
   int64_t loss_chunk_rows = 4096;     // > 0: fused chunked lm_head + loss (never all logits at once); 0: as Python
   bool fp8 = true;                    // FP8 matmuls for training (eval stays bf16)
   std::string fp8_recipe = "mxfp8";   // mxfp8 or tensorwise (as Python)

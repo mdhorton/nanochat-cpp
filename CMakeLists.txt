@@ -23,7 +23,7 @@ set(CUDA_TOOLKIT_ROOT_DIR "${PIXI_ENV}/targets/x86_64-linux")
 set(CMAKE_CUDA_COMPILER "${PIXI_ENV}/bin/nvcc")
 set(CMAKE_CUDA_HOST_COMPILER "${CMAKE_CXX_COMPILER}")
 set(CUDA_nvrtc_LIBRARY "${TORCH_DIR}/../nvidia/cu13/lib/libnvrtc.so.13") # not in the conda env
-set(TORCH_CUDA_ARCH_LIST 12.0) # torch sets the nvcc -gencode flags from this
+set(TORCH_CUDA_ARCH_LIST 12.0a) # torch sets the nvcc -gencode flags from this; a: block-scaled mma.sync
 set(CMAKE_CUDA_STANDARD 20)
 set(CMAKE_CUDA_RUNTIME_LIBRARY None) # use torch's libcudart
 enable_language(CUDA)
@@ -57,6 +57,7 @@ add_library(nanochat_train
         src/nanochat/model/fp8.cpp
         src/nanochat/model/flash.cpp
         src/nanochat/model/flash_bwd_kernel.cu
+        src/nanochat/model/flash_bwd_mx_kernel.cu
         src/nanochat/model/flash_kernel.cu
         src/nanochat/model/fp8_kernel.cu
         src/nanochat/model/gpt.cpp
