@@ -1,17 +1,17 @@
 # run history
 
-Most of the sm120 tuning was done using `--depth=12`. This helped speedup development iterations.
+To speedup dev iterations, most of the initial sm120 tuning was done using `--depth=12`.
 
 # medium runs @ d12
 
-These runs are designed to finish in under 5 minutes. It's easier to spot bpb regressions than quick runs.
-
 `--depth=12 --device-batch-size=8 --num-iterations=100 --eval-tokens=4194304 --eval-every=-1 --save=false`
+
+These runs are designed to finish in under 5 minutes.
 
 Runs 1-3 are from the original nanochat port (python → c++). No tuning yet.
 
-Runs 4+ are our tuning and customisation for sm120. Most of the tuning is fusing and other optimisations that would
-normally be done by inductor and triton.
+Runs 4+ are the tuning and customisations for sm120. Probably half the tuning is fusing and other optimisations that
+would normally be handled by inductor and triton.
 
 | run | toks/sec |     loss |      bpb | memory |   time | notes                                          |
 |----:|---------:|---------:|---------:|-------:|-------:|------------------------------------------------|
@@ -26,8 +26,8 @@ normally be done by inductor and triton.
 |   9 |  183,137 | 4.806090 | 1.436472 |   8.2g |  4.77m | fused residual add + rms_norm                  |
 |  10 |  188,796 | 4.807217 | 1.436816 |   7.9g |  4.62m | merged q/k/v                                   |
 |  11 |  192,034 | 4.809634 | 1.437552 |   7.9g |  4.54m | embed grads into .grad                         |
-|  12 |  206,686 | 4.821239 | 1.441635 |   8.2g |  4.22m | lm_head fp8                                    |
-|  13 |  209,310 | 4.822021 | 1.441975 |   8.3g |  4.17m | weight caching                                 |
+|  12 |  206,686 | 4.821239 | 1.441635 |   8.2g |  4.22m | fp8 lm_head                                    |
+|  13 |  209,310 | 4.822021 | 1.441975 |   8.3g |  4.17m | added weight caching                           |
 |  14 |  215,449 | 4.802828 | 1.435484 |   8.4g |  4.04m | --fp8-recipe=mxfp8                             |
 |  15 |  221,792 | 4.805797 | 1.436430 |   8.4g |  3.93m | --fp8-recipe=mxfp8 (relu² backward)            |
 |  16 |  225,049 | 4.804839 | 1.436043 |   8.4g |  3.86m | --fp8-recipe=mxfp8 (softcap CE grads)          |
@@ -43,6 +43,7 @@ normally be done by inductor and triton.
 |  26 |  267,715 | 4.803928 | 1.435875 |   8.6g |  3.26m | custom FA with mxfp8                           |
 |  27 |  273,814 | 4.804844 | 1.436141 |   8.0g |  3.17m | cutlass mxfp8 gemms                            |
 |  28 |          |          |          |        |        |                                                |
+|  29 |          |          |          |        |        |                                                |
 
 Run 4: sm120 can't use fa3. however, fa2 works pretty good. `--nproc=2 --fp8=true --attention=fa2` enabled by default
 going forward.
@@ -57,9 +58,9 @@ inductor.
 Runs 14-18: mxfp8 support. this reduced memory traffic around quantisation. this worked because several kernels are
 memory bound. `--fp8-recipe=mxfp8` enabled by default going forward.
 
-Runs 22: NCCL optimisations. `NCCL_PROTO = "Simple" NCCL_MIN_NCHANNELS = "8"` enabled by default going forward.
+Run 22: `NCCL_PROTO = "Simple" NCCL_MIN_NCHANNELS = "8"` enabled by default going forward.
 
-Run 26: custom flash attention with mxfp8. `--attention=mx` enabled by default going forward.
+Run 26: `--attention=mx` enabled by default going forward.
 
 # medium runs @ d24
 

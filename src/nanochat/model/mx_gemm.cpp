@@ -120,6 +120,46 @@ void mx_gemm_out(
   cutlass_out(out, a, a_scale, b, b_scale);
 }
 
+bool mx_gemm_relu_square(
+      const torch::Tensor& h, const torch::Tensor& q, const torch::Tensor& q_scale, const torch::Tensor& a,
+      const torch::Tensor& a_scale, const torch::Tensor& b, const torch::Tensor& b_scale) {
+  if (!cutlass_fits(a, b, h.scalar_type()) || h.scalar_type() != torch::kBFloat16)
+    return false;
+  const int64_t M = a.size(0), N = b.size(0), K = a.size(1);
+  TORCH_CHECK(
+        h.is_contiguous() && q.is_contiguous() && h.size(0) == M && h.size(1) == N && q.sizes() == h.sizes() &&
+              b.size(1) == K && q.scalar_type() == torch::kFloat8_e4m3fn && q_scale.numel() == M * N / 32,
+        "mx_gemm_relu_square: shape mismatch");
+  check_cutlass(
+        kernels::cutlass_mx_gemm_relu_square(
+              a.data_ptr(), a_scale.data_ptr(), b.data_ptr(), b_scale.data_ptr(), h.data_ptr(), q.data_ptr(),
+              q_scale.data_ptr(), M, N, K, at::cuda::getCurrentCUDAStream().stream()));
+  return true;
+}
+
+bool mx_gemm_relu_square_bwd(
+      const torch::Tensor& a, const torch::Tensor& a_scale, const torch::Tensor& b, const torch::Tensor& b_scale,
+      const torch::Tensor& h, const torch::Tensor& dh, const torch::Tensor& dh_scale, const torch::Tensor& dh_t,
+      const torch::Tensor& dh_t_scale, const torch::Tensor& a_t, const torch::Tensor& a_t_scale) {
+  if (!cutlass_fits(a, b, h.scalar_type()) || h.scalar_type() != torch::kBFloat16)
+    return false;
+  const int64_t M = a.size(0), N = b.size(0), K = a.size(1);
+  TORCH_CHECK(
+        h.is_contiguous() && h.size(0) == M && h.size(1) == N && b.size(1) == K && dh.sizes() == h.sizes() &&
+              dh_t.size(0) == N && dh_t.size(1) == M && a_t.sizes() == dh_t.sizes(),
+        "mx_gemm_relu_square_bwd: shape mismatch");
+  for (const auto* t : {&dh, &dh_t, &a_t})
+    TORCH_CHECK(t->is_contiguous() && t->scalar_type() == torch::kFloat8_e4m3fn, "mx_gemm_relu_square_bwd: e4m3 out");
+  for (const auto* t : {&dh_scale, &dh_t_scale, &a_t_scale})
+    TORCH_CHECK(t->numel() == M * N / 32, "mx_gemm_relu_square_bwd: scales");
+  check_cutlass(
+        kernels::cutlass_mx_gemm_relu_square_bwd(
+              a.data_ptr(), a_scale.data_ptr(), b.data_ptr(), b_scale.data_ptr(), h.data_ptr(), dh.data_ptr(),
+              dh_scale.data_ptr(), dh_t.data_ptr(), dh_t_scale.data_ptr(), a_t.data_ptr(), a_t_scale.data_ptr(), M, N,
+              K, at::cuda::getCurrentCUDAStream().stream()));
+  return true;
+}
+
 void mx_gemm_f32(
       const torch::Tensor& a, const torch::Tensor& a_scale, const torch::Tensor& b, const torch::Tensor& b_scale,
       const torch::Tensor& out, bool accumulate, const torch::Tensor& alpha) {

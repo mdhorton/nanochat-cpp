@@ -4,6 +4,7 @@
 #include <ATen/cuda/CUDAContext.h>
 
 #include "nanochat/model/fp8.h"
+#include "nanochat/model/fp8_kernel.h"
 #include "nanochat/model/gpt.h"
 #include "nanochat/model/mx_gemm.h"
 #include "nanochat/model/mx_gemm_kernel.h"
@@ -355,6 +356,66 @@ TEST(Fp8, CutlassGemmMatchesCublas) {
           nullptr);
     mx_gemm_f32(qa.data, qa.inv_scale, qb.data, qb.inv_scale, want, true, alpha);
     EXPECT_LT(rel_norm_diff(got, want), 1e-5) << what;
+  }
+}
+
+// c_fc's GEMM with relu^2's MX quantize in the epilogue vs the GEMM then quantize_mx: bit for bit.
+TEST(Fp8, CutlassReluSquareGemmMatchesUnfused) {
+  torch::manual_seed(0);
+  const auto opts = torch::TensorOptions().device(torch::kCUDA);
+  const GemmBackend scope(MxGemmBackend::Cutlass);
+  for (const auto& [M, N, K] :
+       {std::tuple<int64_t, int64_t, int64_t>{128, 128, 128}, {256, 384, 512}, {640, 512, 1536}}) {
+    const auto what = std::to_string(M) + "x" + std::to_string(N) + "x" + std::to_string(K);
+    const auto a = (torch::randn({M, K}, opts) * torch::logspace(-2, 2, K, 10.0, opts)).to(torch::kBFloat16);
+    const auto b = torch::randn({N, K}, opts).to(torch::kBFloat16);
+    const auto qa = quantize_mx(a, true, false), qb = quantize_mx(b, true, false);
+    const auto want_h = mx_gemm(qa.data, qa.inv_scale, qb.data, qb.inv_scale, torch::kBFloat16);
+    const auto want = quantize_mx(want_h, true, false, true);
+    const auto h = torch::full_like(want_h, std::nan(""));
+    const auto q = torch::zeros_like(want.data), q_scale = torch::zeros_like(want.inv_scale);
+    ASSERT_TRUE(mx_gemm_relu_square(h, q, q_scale, qa.data, qa.inv_scale, qb.data, qb.inv_scale)) << what;
+    EXPECT_TRUE(torch::equal(h, want_h)) << what;
+    EXPECT_TRUE(torch::equal(q.view(torch::kUInt8), want.data.view(torch::kUInt8))) << what;
+    EXPECT_TRUE(torch::equal(q_scale.view(torch::kUInt8), want.inv_scale.view(torch::kUInt8))) << what;
+  }
+}
+
+// The MLP c_proj dgrad GEMM with relu^2's backward quantize in the epilogue vs the GEMM then
+// quantize_mx_relu_square_bwd: bit for bit.
+TEST(Fp8, CutlassReluSquareBwdGemmMatchesUnfused) {
+  torch::manual_seed(0);
+  const auto opts = torch::TensorOptions().device(torch::kCUDA);
+  const GemmBackend scope(MxGemmBackend::Cutlass);
+  const auto stream = at::cuda::getCurrentCUDAStream().stream();
+  for (const auto& [M, N, K] :
+       {std::tuple<int64_t, int64_t, int64_t>{128, 128, 128}, {256, 384, 512}, {640, 512, 1536}}) {
+    const auto what = std::to_string(M) + "x" + std::to_string(N) + "x" + std::to_string(K);
+    const auto a = (torch::randn({M, K}, opts) * torch::logspace(-2, 2, K, 10.0, opts)).to(torch::kBFloat16);
+    const auto b = torch::randn({N, K}, opts).to(torch::kBFloat16);
+    const auto h = torch::randn({M, N}, opts).to(torch::kBFloat16);
+    const auto qa = quantize_mx(a, true, false), qb = quantize_mx(b, true, false);
+    const auto e4m3 = opts.dtype(torch::kFloat8_e4m3fn);
+    const auto scales = [&] {
+      return torch::zeros({M * N / 32}, opts.dtype(torch::kUInt8));
+    };
+    // [0] dh, [1] dh^T, [2] relu(h)^2^T: data, scales
+    const auto outs = [&] {
+      return std::vector<torch::Tensor>{torch::zeros({M, N}, e4m3), scales(), torch::zeros({N, M}, e4m3), scales(),
+                                        torch::zeros({N, M}, e4m3), scales()};
+    };
+    const auto want = outs(), got = outs();
+    const auto ga = mx_gemm(qa.data, qa.inv_scale, qb.data, qb.inv_scale, torch::kBFloat16);
+    const auto mx = [](const torch::Tensor& data, const torch::Tensor& scale) {
+      return kernels::MxOut{data.data_ptr(), data.size(1), scale.data_ptr(), data.size(1) / 128};
+    };
+    kernels::quantize_mx_relu_square_bwd(
+          ga.data_ptr(), h.data_ptr(), M, N, mx(want[0], want[1]), mx(want[2], want[3]), stream, mx(want[4], want[5]));
+    ASSERT_TRUE(mx_gemm_relu_square_bwd(
+          qa.data, qa.inv_scale, qb.data, qb.inv_scale, h, got[0], got[1], got[2], got[3], got[4], got[5]))
+          << what;
+    for (size_t i = 0; i < want.size(); ++i)
+      EXPECT_TRUE(torch::equal(got[i].view(torch::kUInt8), want[i].view(torch::kUInt8))) << what << " output " << i;
   }
 }
 

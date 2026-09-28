@@ -19,4 +19,16 @@ const char* cutlass_mx_gemm_f32(
       const void* a, const void* a_scale, const void* b, const void* b_scale, float* d, int64_t M, int64_t N, int64_t K,
       const float* alpha, bool accumulate, cudaStream_t stream);
 
+// h (M, N) bf16 = a . b^T as cutlass_mx_gemm_bf16, and q (M, N) e4m3 + q_scale = quantize_mx(h, relu_square)'s rows
+// (fp8_kernel.h), bit for bit, from the epilogue.
+const char* cutlass_mx_gemm_relu_square(
+      const void* a, const void* a_scale, const void* b, const void* b_scale, void* h, void* q, void* q_scale,
+      int64_t M, int64_t N, int64_t K, cudaStream_t stream);
+
+// ga = a . b^T (bf16, not written) and h (M, N) bf16 -> quantize_mx_relu_square_bwd's outputs from the epilogue, bit
+// for bit: dh (M, N) e4m3 + dh_scale, dh_t (N, M) + dh_t_scale, and relu(h)^2's a_t (N, M) + a_t_scale.
+const char* cutlass_mx_gemm_relu_square_bwd(
+      const void* a, const void* a_scale, const void* b, const void* b_scale, const void* h, void* dh, void* dh_scale,
+      void* dh_t, void* dh_t_scale, void* a_t, void* a_t_scale, int64_t M, int64_t N, int64_t K, cudaStream_t stream);
+
 } // namespace nanochat::kernels

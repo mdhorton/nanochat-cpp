@@ -36,7 +36,7 @@ inductor.
 # goal with 2x RTX Pro 4000 blackwell GPUs (sm120)
 
 nanochat (python) trains ~5.84B tokens in 99 minutes using 8x H100. We have to assume nanochat is properly tuned. The
-current record has not been improved upon in several months. 
+current record has not been improved upon in several months.
 
 On paper an H100 is roughly 6x faster than a RTX Pro 4000.
 Thus, 8x H100 are roughly 24x faster than 2x RTX Pro 4000. Using that ratio we get the following target:
@@ -55,3 +55,7 @@ A secondary goal would be to train within 24 hours (1440 minutes). This is an ar
 achieve.
 
 ```~5.84B tokens in 1440 minutes = ~68k toks/sec```
+
+# RTX Pro 4000 == 145 watts
+
+Ths makes tuning precarious because what looks like overhead can sometimes hit the power cap. 
