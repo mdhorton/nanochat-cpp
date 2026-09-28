@@ -20,12 +20,14 @@ using torch::autograd::variable_list;
 // gradient is quantized (e5m2) with its own scale, from the amax the kernel reports (python: one scale for all rows).
 // mx: MXFP8 instead; the gradient is quantized from the logits and each row's lse, never written in bf16, its
 // transpose into one (padded, N) buffer for a single grad_w GEMM (block scales along N allow it; tensorwise's
-// per-chunk scales don't). cache (optional): the weight's FP8 copy. grad_w: written (fp8) or accumulated (bf16).
+// per-chunk scales don't). cache (optional): the weight's FP8 copy. grad_w: written (fp8) or accumulated (bf16);
+// mx with deferred_x / deferred_g: not computed, the GEMM's operands (x and the gradient, transposed) are returned
+// for the backward to run it straight into .grad.
 void run_chunks(
       const torch::Tensor& x, const torch::Tensor& weight, const torch::Tensor& targets, int64_t vocab, double softcap,
       int64_t chunk_rows, bool fp8, bool mx, const torch::Tensor& losses, const torch::Tensor& grad_x,
       const torch::Tensor& grad_w, const torch::Tensor& grad_scale, const torch::Tensor& num_valid,
-      Fp8WeightCache* cache) {
+      Fp8WeightCache* cache, Fp8Tensor* deferred_x = nullptr, Fp8Tensor* deferred_g = nullptr) {
   const int64_t N = x.size(0), padded = weight.size(0);
   const bool grad = grad_x.defined();
   Fp8Tensor xq, wq, g_all; // g_all: MX, every chunk's gradient transposed
@@ -94,7 +96,13 @@ void run_chunks(
       const_cast<torch::Tensor&>(grad_w).add_(
             at::_scaled_mm(gq.data_t, xc_t, gq.inv_t(), xq.inv_scale, {}, {}, torch::kFloat32, false));
   }
-  if (g_all.data_t.defined())
+  if (!g_all.data_t.defined())
+    return;
+  if (deferred_x != nullptr) {
+    *deferred_x = xq;
+    *deferred_g = g_all;
+  }
+  else
     at::_scaled_mm_out(
           const_cast<torch::Tensor&>(grad_w), g_all.data_t, xq.data_t.t(), g_all.inv_scale_t, xq.inv_scale_t, {}, {},
           torch::kFloat32, false);
@@ -118,15 +126,24 @@ public:
     const auto num_valid = (targets >= 0).sum();
     auto losses = torch::empty({x.size(0)}, x.options().dtype(torch::kFloat32));
     const bool precompute = needs_grad && reduction != LossReduction::None;
+    // mx: the weight gradient's GEMM runs in backward, scaled by the loss gradient, straight into .grad
+    const bool direct = precompute && mx && mx_grad_direct(weight);
     torch::Tensor grad_x, grad_w;
+    Fp8Tensor xq, gq;
     if (precompute) {
       grad_x = torch::empty_like(x);
-      grad_w = empty_grad_w(weight, fp8);
+      if (!direct)
+        grad_w = empty_grad_w(weight, fp8);
     }
     run_chunks(
           x, weight, targets, vocab_size, softcap, chunk_rows, fp8, mx, losses, grad_x, grad_w, {},
-          reduction == LossReduction::Mean ? num_valid : torch::Tensor(), cache);
-    if (precompute) {
+          reduction == LossReduction::Mean ? num_valid : torch::Tensor(), cache, direct ? &xq : nullptr,
+          direct ? &gq : nullptr);
+    if (direct) {
+      ctx->save_for_backward({grad_x, gq.data_t, gq.inv_scale_t, xq.data_t, xq.inv_scale_t});
+      ctx->saved_data["weight"] = weight;
+    }
+    else if (precompute) {
       ctx->save_for_backward({grad_x, grad_w});
       if (weight.is_leaf() && weight.requires_grad())
         ctx->saved_data["weight"] = weight; // the parameter itself: backward adds into its .grad
@@ -134,6 +151,7 @@ public:
     else if (needs_grad)
       ctx->save_for_backward({x, weight, targets});
     ctx->saved_data["precomputed"] = precompute;
+    ctx->saved_data["direct"] = direct;
     ctx->saved_data["vocab_size"] = vocab_size;
     ctx->saved_data["softcap"] = softcap;
     ctx->saved_data["chunk_rows"] = chunk_rows;
@@ -156,6 +174,10 @@ public:
     const auto& g = grad_outputs[0];
     if (ctx->saved_data["precomputed"].toBool()) {
       const auto gw = g.to(torch::kFloat32);
+      if (ctx->saved_data["direct"].toBool()) { // .grad (+)= g * dlogits^T @ x, one GEMM
+        mx_grad_weights(saved[1], saved[2], saved[3], saved[4], {ctx->saved_data["weight"].toTensor()}, gw);
+        return {saved[0] * g, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}};
+      }
       if (ctx->saved_data.count("weight") == 0)
         return {saved[0] * g, saved[1] * gw, {}, {}, {}, {}, {}, {}, {}, {}, {}};
       // .grad += grad_w * g in one pass, instead of a scaled copy that autograd then adds

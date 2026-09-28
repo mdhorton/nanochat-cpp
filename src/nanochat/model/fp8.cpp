@@ -3,6 +3,7 @@
 #include <ATen/cuda/CUDAContext.h>
 
 #include "nanochat/model/fp8_kernel.h"
+#include "nanochat/model/mx_gemm.h"
 #include "nanochat/model/qkv_kernel.h"
 #include "nanochat/model/relu_square_kernel.h"
 
@@ -188,19 +189,47 @@ Fp8Recipe recipe_of(bool mx) {
   return mx ? Fp8Recipe::Mx : Fp8Recipe::Tensorwise;
 }
 
+// rows [row, row + size) of dw, or undefined when the gradient went into .grad
+torch::Tensor part(const torch::Tensor& dw, int64_t row, int64_t size) {
+  return dw.defined() ? dw.narrow(0, row, size) : torch::Tensor();
+}
+
 // _scaled_mm wants A row-major and B column-major: B = t.t() for a row-major t. Fast accumulation in forward only
 // (tensorwise).
 torch::Tensor mm_forward(const Fp8Tensor& in, const Fp8Tensor& w, torch::ScalarType out_dtype) {
   return at::_scaled_mm(in.data, w.data.t(), in.inv_scale, w.inv_scale, {}, {}, out_dtype, !is_mx(in));
 }
 
-// grad_input = grad_output @ weight, grad_weight = grad_output.T @ input; in_t, w_t: forward's transposes
-std::pair<torch::Tensor, torch::Tensor> mm_backward(
-      const Fp8Tensor& go, const torch::Tensor& in_t, const torch::Tensor& in_inv, const torch::Tensor& w_t,
-      const torch::Tensor& w_inv, torch::ScalarType out_dtype) {
-  return {
-        at::_scaled_mm(go.data, w_t.t(), go.inv_scale, w_inv, {}, {}, out_dtype, false),
-        at::_scaled_mm(go.data_t, in_t.t(), go.inv_t(), in_inv, {}, {}, out_dtype, false)};
+// grad_input = grad_output @ weight; w_t: forward's transpose
+torch::Tensor mm_grad_input(
+      const Fp8Tensor& go, const torch::Tensor& w_t, const torch::Tensor& w_inv, torch::ScalarType out_dtype) {
+  return at::_scaled_mm(go.data, w_t.t(), go.inv_scale, w_inv, {}, {}, out_dtype, false);
+}
+
+// grad_weight = grad_output.T @ input; in_t: forward's transpose. With params (MX: the weights themselves, saved by
+// forward), written straight into their .grad and undefined is returned; else the gradient for autograd (which casts
+// it to the weight's dtype).
+torch::Tensor mm_grad_weight(
+      const Fp8Tensor& go, const torch::Tensor& in_t, const torch::Tensor& in_inv, torch::ScalarType out_dtype,
+      const std::vector<torch::Tensor>& params) {
+  if (params.empty())
+    return at::_scaled_mm(go.data_t, in_t.t(), go.inv_t(), in_inv, {}, {}, out_dtype, false);
+  mx_grad_weights(go.data_t, go.inv_t(), in_t, in_inv, params);
+  return {};
+}
+
+// forward saves the weights whose .grad backward writes itself (MX; all of ws or none)
+void save_grad_params(AutogradContext* ctx, const char* key, bool mx, const std::vector<torch::Tensor>& ws) {
+  if (!mx)
+    return;
+  for (const auto& w : ws)
+    if (!mx_grad_direct(w))
+      return;
+  ctx->saved_data[key] = ws;
+}
+
+std::vector<torch::Tensor> grad_params(AutogradContext* ctx, const char* key) {
+  return ctx->saved_data.count(key) != 0 ? ctx->saved_data[key].toTensorVector() : std::vector<torch::Tensor>{};
 }
 
 class Float8Matmul : public torch::autograd::Function<Float8Matmul> {
@@ -211,15 +240,17 @@ public:
     const auto w = quantize_fp8_weight(weight, cache, recipe_of(mx));
     ctx->save_for_backward({in.data_t, in.inv_t(), w.data_t, w.inv_t()}); // backward's layouts
     ctx->saved_data["mx"] = mx;
+    save_grad_params(ctx, "weight", mx, {weight});
     return mm_forward(in, w, input.scalar_type());
   }
 
   static variable_list backward(AutogradContext* ctx, variable_list grad_outputs) {
     const auto s = ctx->get_saved_variables();
     const auto& grad_output = grad_outputs[0];
+    const auto dtype = grad_output.scalar_type();
     const auto go = quantize_grad(grad_output, ctx->saved_data["mx"].toBool());
-    auto [grad_input, grad_weight] = mm_backward(go, s[0], s[1], s[2], s[3], grad_output.scalar_type());
-    return {grad_input, grad_weight, {}, {}}; // autograd casts grad_weight to the weight's dtype
+    const auto grad_input = mm_grad_input(go, s[2], s[3], dtype);
+    return {grad_input, mm_grad_weight(go, s[0], s[1], dtype, grad_params(ctx, "weight")), {}, {}};
   }
 };
 
@@ -238,6 +269,8 @@ public:
     ctx->save_for_backward(
           {xq.data_t, xq.inv_t(), fcq.data_t, fcq.inv_t(), h, aq.data_t, aq.inv_t(), projq.data_t, projq.inv_t()});
     ctx->saved_data["mx"] = mx;
+    save_grad_params(ctx, "w_fc", mx, {w_fc});
+    save_grad_params(ctx, "w_proj", mx, {w_proj});
     return mm_forward(aq, projq, x.scalar_type());
   }
 
@@ -248,7 +281,8 @@ public:
     const auto& grad_output = grad_outputs[0];
     const auto dtype = grad_output.scalar_type();
     const auto go = quantize_grad(grad_output, mx);
-    const auto [ga, grad_proj] = mm_backward(go, s[5], s[6], s[7], s[8], dtype);
+    const auto ga = mm_grad_input(go, s[7], s[8], dtype);
+    const auto grad_proj = mm_grad_weight(go, s[5], s[6], dtype, grad_params(ctx, "w_proj"));
     TORCH_CHECK(ga.scalar_type() == torch::kBFloat16 && ga.is_contiguous() && h.is_contiguous());
     const auto stream = at::cuda::getCurrentCUDAStream().stream();
     Fp8Tensor dhq;
@@ -266,8 +300,8 @@ public:
       C10_CUDA_KERNEL_LAUNCH_CHECK();
       dhq = quantize(dh, torch::kFloat8_e5m2, scalars, true);
     }
-    auto [grad_x, grad_fc] = mm_backward(dhq, s[0], s[1], s[2], s[3], dtype);
-    return {grad_x, grad_fc, grad_proj, {}, {}, {}};
+    const auto grad_x = mm_grad_input(dhq, s[2], s[3], dtype);
+    return {grad_x, mm_grad_weight(dhq, s[0], s[1], dtype, grad_params(ctx, "w_fc")), grad_proj, {}, {}, {}};
   }
 };
 
@@ -366,6 +400,7 @@ public:
     const auto qkv = at::_scaled_mm(xq.data, wf[0].t(), xq.inv_scale, wf[2], {}, {}, x.scalar_type(), false);
     ctx->save_for_backward({xq.data_t, xq.inv_scale_t, wf[1], wf[3]});
     ctx->saved_data["gate_cols"] = gate_cols;
+    save_grad_params(ctx, "weights", true, {wq, wk, wv});
     variable_list out{
           qkv.narrow(1, 0, sizes[0]), qkv.narrow(1, sizes[0], sizes[1]), qkv.narrow(1, sizes[0] + sizes[1], sizes[2])};
     if (gate_cols > 0)
@@ -389,18 +424,62 @@ public:
     auto dx = at::_scaled_mm(g, w_t.t(), g_scale, w_scale_t, {}, {}, dtype, false);
     if (gate_cols > 0)
       dx.narrow(1, 0, gate_cols).add_(grads[3]);
-    const auto dw = at::_scaled_mm(g_t, x_t.t(), g_scale_t, x_scale_t, {}, {}, dtype, false);
-    return {
-          dx,
-          dw.narrow(0, 0, sizes[0]),
-          dw.narrow(0, sizes[0], sizes[1]),
-          dw.narrow(0, sizes[0] + sizes[1], sizes[2]),
-          torch::Tensor(),
-          torch::Tensor()};
+    const auto dw = mm_grad_weight({g, g_t, g_scale, g_scale_t}, x_t, x_scale_t, dtype, grad_params(ctx, "weights"));
+    return {dx, part(dw, 0, sizes[0]), part(dw, sizes[0], sizes[1]), part(dw, sizes[0] + sizes[1], sizes[2]), {}, {}};
   }
 };
 
 } // namespace
+
+bool mx_grad_direct(const torch::Tensor& w) {
+  return w.is_leaf() && w.requires_grad() && w.scalar_type() == torch::kFloat32 && w.is_contiguous();
+}
+
+void mx_grad_weights(
+      const torch::Tensor& go_t, const torch::Tensor& go_scale_t, const torch::Tensor& in_t,
+      const torch::Tensor& in_scale_t, const std::vector<torch::Tensor>& ws, const torch::Tensor& alpha) {
+  const int64_t C = in_t.size(0);
+  int64_t n = 0;
+  size_t defined = 0;
+  for (const auto& w : ws) {
+    TORCH_CHECK(w.dim() == 2 && w.size(1) == C && w.scalar_type() == torch::kFloat32);
+    n += w.size(0);
+    defined += w.grad().defined();
+  }
+  TORCH_CHECK(go_t.size(0) == n, "mx_grad_weights: the weights' rows must add up to the gradient's");
+  // the .grads as the row blocks of one buffer: fresh, or the ones a previous call set up
+  torch::Tensor buf;
+  if (defined == 0) {
+    buf = torch::empty({n, C}, ws[0].options());
+    for (int64_t i = 0, row = 0; i < static_cast<int64_t>(ws.size()); row += ws[i++].size(0))
+      ws[i].mutable_grad() = ws.size() == 1 ? buf : buf.narrow(0, row, ws[i].size(0));
+  }
+  else if (defined == ws.size()) {
+    const auto& g0 = ws[0].grad();
+    bool blocks = g0.is_contiguous() && g0.scalar_type() == torch::kFloat32;
+    for (int64_t i = 1, row = ws[0].size(0); blocks && i < static_cast<int64_t>(ws.size()); row += ws[i++].size(0)) {
+      const auto& g = ws[i].grad();
+      blocks = g.is_contiguous() && g.scalar_type() == torch::kFloat32 && g.is_alias_of(g0) &&
+               g.data_ptr() == static_cast<char*>(g0.data_ptr()) + row * C * static_cast<int64_t>(sizeof(float));
+    }
+    if (blocks)
+      buf = g0.as_strided({n, C}, {C, 1});
+  }
+  if (buf.defined()) {
+    mx_gemm_f32(go_t, go_scale_t, in_t, in_scale_t, buf, defined > 0, alpha);
+    return;
+  }
+  // .grads set up elsewhere: one GEMM, then adds
+  const auto dw = torch::empty({n, C}, ws[0].options());
+  mx_gemm_f32(go_t, go_scale_t, in_t, in_scale_t, dw, false, alpha);
+  for (int64_t i = 0, row = 0; i < static_cast<int64_t>(ws.size()); row += ws[i++].size(0)) {
+    const auto p = dw.narrow(0, row, ws[i].size(0));
+    if (ws[i].grad().defined())
+      ws[i].mutable_grad().add_(p);
+    else
+      ws[i].mutable_grad() = p;
+  }
+}
 
 std::vector<torch::Tensor> Fp8WeightCache::get(
       int64_t kind, const std::vector<torch::Tensor>& weights,

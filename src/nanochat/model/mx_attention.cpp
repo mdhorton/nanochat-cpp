@@ -74,6 +74,8 @@ public:
 
     ctx->save_for_backward(
           {xq.data_t, xq.inv_scale_t, wf[1], wf[3], qkv, rstd_q, rstd_k, cos, sin, gate_in, w_gate_bf16, z, ve});
+    if (mx_grad_direct(wq) && mx_grad_direct(wk) && mx_grad_direct(wv))
+      ctx->saved_data["weights"] = std::vector{wq, wk, wv}; // backward writes their .grad itself
     ctx->saved_data["scale"] = scale;
     ctx->saved_data["head_dim"] = head_dim;
     ctx->saved_data["w_gate_dtype"] = static_cast<int64_t>(w_gate.defined() ? w_gate.scalar_type() : x.scalar_type());
@@ -122,14 +124,20 @@ public:
       quantize_mx_into(dv, false, v_out, v_out_t);
 
     auto dx = at::_scaled_mm(g, w_t.t(), g_scale, w_scale_t, {}, {}, dtype, false);
-    const auto dw = at::_scaled_mm(g_t, x_t.t(), g_scale_t, x_scale_t, {}, {}, dtype, false);
+    torch::Tensor dw;
+    if (ctx->saved_data.count("weights") != 0)
+      mx_grad_weights(g_t, g_scale_t, x_t, x_scale_t, ctx->saved_data["weights"].toTensorVector());
+    else
+      dw = at::_scaled_mm(g_t, x_t.t(), g_scale_t, x_scale_t, {}, {}, dtype, false);
+    const auto rows = [&](int64_t row, int64_t size) {
+      return dw.defined() ? dw.narrow(0, row, size) : torch::Tensor();
+    };
     torch::Tensor dw_gate;
     if (ve.defined()) { // the gate Linear's backward, as autograd's mm
       dx.narrow(1, 0, gate_in.size(1)).add_(at::mm(dz, w_gate_bf16));
       dw_gate = at::mm(dz.t(), gate_in).to(static_cast<torch::ScalarType>(ctx->saved_data["w_gate_dtype"].toInt()));
     }
-    return {dx, dw.narrow(0, 0, nq), dw.narrow(0, nq, nkv), dw.narrow(0, nq + nkv, nkv), {}, {}, {}, dve, dw_gate, {},
-            {}};
+    return {dx, rows(0, nq), rows(nq, nkv), rows(nq + nkv, nkv), {}, {}, {}, dve, dw_gate, {}, {}};
   }
 };
 

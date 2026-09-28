@@ -1,5 +1,6 @@
 // Times cuBLASLt's algorithms for the MXFP8 GEMM shapes of a training micro-step against at::_scaled_mm's choice.
-// Usage: bench_gemm [--tokens T] [--embd C] [--algos N] [--shape M,N,K] [--torch-ws-mb MB]
+// Usage: bench_gemm [--tokens T] [--embd C] [--algos N] [--f32] [--shape M,N,K] [--torch-ws-mb MB]
+// Also reports whether each algorithm gives the same bits twice (split-K with in-place reduction does not).
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
@@ -98,6 +99,7 @@ struct Result {
   Timing t;
   double max_err;
   size_t workspace;
+  bool deterministic;
 };
 
 void bench_shape(const Shape& s, int max_algos) {
@@ -162,7 +164,9 @@ void bench_shape(const Shape& s, int max_algos) {
           },
           flops);
     const double err = (out.to(torch::kFloat32) - ref32).abs().max().item<double>();
-    results.push_back({name, t, err, ws});
+    const auto first = out.clone();
+    run(algo, ws);
+    results.push_back({name, t, err, ws, torch::equal(first, out)});
   };
   for (int i = 0; i < n_heur; ++i) {
     if (heur[i].state != CUBLAS_STATUS_SUCCESS)
@@ -217,8 +221,9 @@ void bench_shape(const Shape& s, int max_algos) {
   const size_t show = std::min<size_t>(results.size(), 12);
   for (size_t i = 0; i < show; ++i)
     std::printf(
-          "  %8.1f us %6.0f TF/s  ws %6zu KB  err %.3g  %s\n", results[i].t.ms * 1e3, results[i].t.tflops,
-          results[i].workspace >> 10, results[i].max_err, results[i].name.c_str());
+          "  %8.1f us %6.0f TF/s  ws %6zu KB  err %.3g %s %s\n", results[i].t.ms * 1e3, results[i].t.tflops,
+          results[i].workspace >> 10, results[i].max_err, results[i].deterministic ? "det  " : "NONDET",
+          results[i].name.c_str());
 
   cublasLtMatmulPreferenceDestroy(pref);
   cublasLtMatrixLayoutDestroy(la);
@@ -233,6 +238,7 @@ int main(int argc, char** argv) {
   int64_t T = 16384, C = 768, V = 32768;
   int algos = 32;
   int64_t torch_ws_mb = -1;
+  bool f32 = false;
   std::vector<Shape> shapes;
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
@@ -247,16 +253,18 @@ int main(int argc, char** argv) {
       algos = std::stoi(next());
     else if (arg == "--torch-ws-mb")
       torch_ws_mb = std::stoll(next());
+    else if (arg == "--f32")
+      f32 = true;
     else if (arg == "--shape") {
       int64_t m, n, k;
       if (std::sscanf(next().c_str(), "%ld,%ld,%ld", &m, &n, &k) != 3)
         return std::fprintf(stderr, "bad --shape\n"), 2;
-      shapes.push_back({m, n, k, false, "custom"});
+      shapes.push_back({m, n, k, f32, "custom"});
     }
     else
       return std::fprintf(
-                   stderr,
-                   "usage: bench_gemm [--tokens T] [--embd C] [--algos N] [--shape M,N,K] [--torch-ws-mb MB]\n"),
+                   stderr, "usage: bench_gemm [--tokens T] [--embd C] [--algos N] [--f32] [--shape M,N,K] "
+                           "[--torch-ws-mb MB]\n"),
              2;
   }
   torch::manual_seed(0);

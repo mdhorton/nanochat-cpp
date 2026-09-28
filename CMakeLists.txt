@@ -50,6 +50,8 @@ target_link_libraries(nanochat PUBLIC
 
 # pre-training (libtorch)
 add_library(nanochat_train
+        src/nanochat/model/backout.cpp
+        src/nanochat/model/backout_kernel.cu
         src/nanochat/model/embedding.cpp
         src/nanochat/model/embedding_kernel.cu
         src/nanochat/model/fp8.cpp
@@ -57,6 +59,7 @@ add_library(nanochat_train
         src/nanochat/model/gpt.cpp
         src/nanochat/model/mx_attention.cpp
         src/nanochat/model/mx_attention_kernel.cu
+        src/nanochat/model/mx_gemm.cpp
         src/nanochat/model/qkv_kernel.cu
         src/nanochat/model/relu_square.cpp
         src/nanochat/model/relu_square_kernel.cu
@@ -64,6 +67,8 @@ add_library(nanochat_train
         src/nanochat/model/residual_norm_kernel.cu
         src/nanochat/model/rotary_norm.cpp
         src/nanochat/model/rotary_norm_kernel.cu
+        src/nanochat/model/smear.cpp
+        src/nanochat/model/smear_kernel.cu
         src/nanochat/model/softcap_ce.cpp
         src/nanochat/model/softcap_ce_kernel.cu
         src/nanochat/train/checkpoint.cpp
@@ -73,7 +78,7 @@ add_library(nanochat_train
         src/nanochat/train/optim.cpp
         src/nanochat/train/safetensors.cpp
         src/nanochat/train/trainer.cpp)
-target_link_libraries(nanochat_train PUBLIC nanochat ${TORCH_LIBRARIES})
+target_link_libraries(nanochat_train PUBLIC nanochat ${TORCH_LIBRARIES} "${TORCH_DIR}/../nvidia/cu13/lib/libcublasLt.so.13")
 # ATen/cuda headers need the CUDA library headers (cuBLAS, cuSPARSE, ...), which come with the NVIDIA wheels
 target_include_directories(nanochat_train SYSTEM PUBLIC "${TORCH_DIR}/../nvidia/cu13/include")
 target_include_directories(nanochat_train SYSTEM PRIVATE "${TORCH_DIR}/../nvidia/nccl/include") # ProcessGroupNCCL
@@ -90,7 +95,7 @@ target_link_libraries(base_train PRIVATE nanochat_train)
 
 # cuBLASLt algorithm search for the MX GEMM shapes
 add_executable(bench_gemm apps/bench_gemm.cpp)
-target_link_libraries(bench_gemm PRIVATE nanochat_train "${TORCH_DIR}/../nvidia/cu13/lib/libcublasLt.so.13")
+target_link_libraries(bench_gemm PRIVATE nanochat_train)
 
 enable_testing()
 find_package(GTest REQUIRED)
@@ -107,6 +112,7 @@ gtest_discover_tests(nanochat_tests DISCOVERY_TIMEOUT 30)
 
 add_executable(train_tests
         tests/main.cpp
+        tests/test_backout.cpp
         tests/test_checkpoint.cpp
         tests/test_dataloader.cpp
         tests/test_dist.cpp
@@ -120,6 +126,7 @@ add_executable(train_tests
         tests/test_residual_norm.cpp
         tests/test_rotary_norm.cpp
         tests/test_safetensors.cpp
+        tests/test_smear.cpp
         tests/test_softcap_ce.cpp
         tests/test_torch.cpp
         tests/test_train.cpp)

@@ -3,6 +3,7 @@
 
 #include "nanochat/model/fp8.h"
 #include "nanochat/model/gpt.h"
+#include "nanochat/model/mx_gemm.h"
 
 using namespace nanochat;
 
@@ -83,8 +84,27 @@ TEST(Fp8, WeightCacheReusesUntilWeightChanges) {
   EXPECT_FALSE(quantize_fp8_weight(w, &cache).data.is_same(quantize_fp8_weight(w, &cache).data));
 }
 
+// SDPA's flash and memory-efficient kernels sum dq with atomics (not bit-reproducible): math only while alive.
+struct MathSdpa {
+  bool flash = at::globalContext().userEnabledFlashSDP(), efficient = at::globalContext().userEnabledMemEfficientSDP(),
+       cudnn = at::globalContext().userEnabledCuDNNSDP();
+
+  MathSdpa() {
+    at::globalContext().setSDPUseFlash(false);
+    at::globalContext().setSDPUseMemEfficient(false);
+    at::globalContext().setSDPUseCuDNN(false);
+  }
+
+  ~MathSdpa() {
+    at::globalContext().setSDPUseFlash(flash);
+    at::globalContext().setSDPUseMemEfficient(efficient);
+    at::globalContext().setSDPUseCuDNN(cudnn);
+  }
+};
+
 // Micro-steps, a weight update, another micro-step: the same bits with and without the cache.
 TEST(Fp8, WeightCacheMatchesUncachedModel) {
+  const MathSdpa math_sdpa;
   const auto opts = torch::TensorOptions().device(torch::kCUDA).dtype(torch::kInt64);
   const GPTConfig
         config{.sequence_len = 256, .vocab_size = 1000, .n_layer = 2, .n_head = 2, .n_kv_head = 2, .n_embd = 256};
@@ -97,7 +117,7 @@ TEST(Fp8, WeightCacheMatchesUncachedModel) {
     model->set_fused(true);
     model->set_fp8(true);
     model->set_fp8_recipe(recipe);
-    model->set_attention(Attention::SDPA); // FA2's backward sums dq with atomics: not bit-reproducible
+    model->set_attention(Attention::SDPA);
     model->set_loss_chunk_rows(128);
     for (const auto& m : model->modules(false)) {
       if (auto* linear = dynamic_cast<LinearImpl*>(m.get()))
@@ -228,4 +248,59 @@ TEST(Fp8, MxModelCloseToBf16) {
   EXPECT_LT(mx_err, 0.2); // FP8 through random matrices: about 15%; a layout bug gives > 100%
   EXPECT_LT(mx_err, tw_err);
   std::cout << "max rel err vs bf16: mx " << mx_err << ", tensorwise " << tw_err << "\n";
+}
+
+// mx_gemm_f32 matches _scaled_mm's fp32 output and accumulates; the MX matmuls write a parameter's .grad themselves,
+// summing micro-steps in fp32, and merged q/k/v share one buffer.
+TEST(Fp8, MxGradAccumulatesIntoGrad) {
+  torch::manual_seed(0);
+  const auto opts = torch::TensorOptions().device(torch::kCUDA);
+  const int64_t N = 512, in = 384, out = 256;
+  const auto a = torch::randn({out, N}, opts).to(torch::kBFloat16),
+             b = torch::randn({in, N}, opts).to(torch::kBFloat16);
+  const auto qa = quantize_mx(a, true, false), qb = quantize_mx(b, true, false);
+  const auto want = at::_scaled_mm(qa.data, qb.data.t(), qa.inv_scale, qb.inv_scale, {}, {}, torch::kFloat32, false);
+  auto acc = torch::empty({out, in}, opts);
+  mx_gemm_f32(qa.data, qa.inv_scale, qb.data, qb.inv_scale, acc, false);
+  EXPECT_LT(rel_norm_diff(acc, want), 1e-6);
+  mx_gemm_f32(qa.data, qa.inv_scale, qb.data, qb.inv_scale, acc, true);
+  EXPECT_LT(rel_norm_diff(acc, 2 * want), 1e-6);
+
+  // dW of g (N, out) and x (N, in) from the dequantized MX operands
+  const auto x = torch::randn({N, in}, opts).to(torch::kBFloat16);
+  const auto dw_ref = [&](const torch::Tensor& g) {
+    const auto gq = quantize_mx(g), xq = quantize_mx(x);
+    return torch::mm(mx_dequantize(gq.data_t, gq.inv_scale_t), mx_dequantize(xq.data_t, xq.inv_scale_t).t());
+  };
+  const auto g1 = torch::randn({N, out}, opts).to(torch::kBFloat16),
+             g2 = torch::randn({N, out}, opts).to(torch::kBFloat16);
+
+  // two micro-steps of one Linear: fp32 .grad, no gradient through autograd
+  auto w = (torch::randn({out, in}, opts) * 0.05).requires_grad_();
+  fp8_matmul(x, w, nullptr, Fp8Recipe::Mx).backward(g1);
+  ASSERT_TRUE(w.grad().defined());
+  EXPECT_EQ(w.grad().scalar_type(), torch::kFloat32);
+  EXPECT_LT(rel_norm_diff(w.grad(), dw_ref(g1)), 4e-3);
+  fp8_matmul(x, w, nullptr, Fp8Recipe::Mx).backward(g2);
+  EXPECT_LT(rel_norm_diff(w.grad(), dw_ref(g1) + dw_ref(g2)), 4e-3);
+  // a .grad set up elsewhere (e.g. zero_grad(false)) is added to
+  auto w2 = w.detach().clone().requires_grad_();
+  w2.mutable_grad() = torch::ones_like(w2);
+  fp8_matmul(x, w2, nullptr, Fp8Recipe::Mx).backward(g1);
+  EXPECT_LT(rel_norm_diff(w2.grad() - 1, dw_ref(g1)), 4e-3);
+
+  // merged q/k/v: the three .grads are row blocks of one buffer, over two micro-steps
+  std::vector<torch::Tensor> ws;
+  for (const int64_t rows : {128, 256, 128})
+    ws.push_back((torch::randn({rows, in}, opts) * 0.05).requires_grad_());
+  const auto gs = torch::randn({N, 512}, opts).to(torch::kBFloat16);
+  for (int step = 0; step < 2; ++step) {
+    const auto qkv = fp8_qkv(x, ws[0], ws[1], ws[2], 0, nullptr, Fp8Recipe::Mx);
+    torch::cat({qkv[0], qkv[1], qkv[2]}, 1).backward(gs);
+  }
+  const auto dw_all = 2 * dw_ref(gs);
+  for (int64_t i = 0, row = 0; i < 3; row += ws[i++].size(0)) {
+    EXPECT_TRUE(ws[i].grad().is_alias_of(ws[0].grad())) << i;
+    EXPECT_LT(rel_norm_diff(ws[i].grad(), dw_all.narrow(0, row, ws[i].size(0))), 4e-3) << i;
+  }
 }

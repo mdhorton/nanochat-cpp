@@ -106,6 +106,17 @@ Fp8Tensor quantize_fp8_weight(const torch::Tensor& w, Fp8WeightCache* cache, Fp8
 // scalars[1] gets the inverse scale. x: aligned, contiguous 2D bf16 or fp32.
 Fp8Tensor quantize_fp8_amax_ready(const torch::Tensor& x, torch::ScalarType dtype, const torch::Tensor& scalars);
 
+// Whether the MX backward may write w's gradient straight into w.grad (mx_gemm.h: fp32, += across micro-steps; no bf16
+// copy for autograd to cast and add): a contiguous fp32 leaf that requires grad.
+bool mx_grad_direct(const torch::Tensor& w);
+
+// dW = alpha * go_t (n, N) . in_t (C, N)^T into the .grad of ws, whose rows concatenate to n: allocated (=) when
+// undefined, else accumulated (+=). Several ws (merged q/k/v): their .grads are the row blocks of one buffer, so one
+// GEMM serves. alpha: a device fp32 scalar (undefined: 1).
+void mx_grad_weights(
+      const torch::Tensor& go_t, const torch::Tensor& go_scale_t, const torch::Tensor& in_t,
+      const torch::Tensor& in_scale_t, const std::vector<torch::Tensor>& ws, const torch::Tensor& alpha = {});
+
 // base_train.py's fp8_module_filter: dims divisible by 16 and both >= 128.
 inline bool fp8_eligible(int64_t in_features, int64_t out_features) {
   return in_features % 16 == 0 && out_features % 16 == 0 && std::min(in_features, out_features) >= 128;

@@ -1,11 +1,13 @@
 #include "nanochat/model/gpt.h"
 
+#include "nanochat/model/backout.h"
 #include "nanochat/model/embedding.h"
 #include "nanochat/model/fp8.h"
 #include "nanochat/model/mx_attention.h"
 #include "nanochat/model/relu_square.h"
 #include "nanochat/model/residual_norm.h"
 #include "nanochat/model/rotary_norm.h"
+#include "nanochat/model/smear.h"
 #include "nanochat/model/softcap_ce.h"
 
 #include <cmath>
@@ -376,13 +378,16 @@ torch::Tensor GPTImpl::forward(
   auto x = rms_norm(emb.to(kComputeDtype));
 
   // smear: mix the previous token's embedding into the current position (cheap bigram info)
-  // (statement order = Python's evaluation order, see apply_rotary_emb)
-  auto lambda = smear_lambda.to(x.scalar_type());
-  auto gate = lambda * torch::sigmoid(smear_gate(x.index({Slice(), Slice(1, None), Slice(None, 24)})));
-  auto first = x.index({Slice(), Slice(None, 1)});
-  auto rest = x.index({Slice(), Slice(1, None)});
-  auto prev = gate * x.index({Slice(), Slice(None, -1)});
-  x = torch::cat({first, rest + prev}, 1);
+  if (fused_ && smear_fits(x.size(-1), smear_gate->weight.size(1)))
+    x = smear(x, smear_gate->weight, smear_lambda);
+  else { // (statement order = Python's evaluation order, see apply_rotary_emb)
+    auto lambda = smear_lambda.to(x.scalar_type());
+    auto gate = lambda * torch::sigmoid(smear_gate(x.index({Slice(), Slice(1, None), Slice(None, 24)})));
+    auto first = x.index({Slice(), Slice(None, 1)});
+    auto rest = x.index({Slice(), Slice(1, None)});
+    auto prev = gate * x.index({Slice(), Slice(None, -1)});
+    x = torch::cat({first, rest + prev}, 1);
+  }
 
   const auto x0 = x; // initial normalized embedding, blended back in at every layer
   const int64_t backout_layer = config_.n_layer / 2;
@@ -416,7 +421,9 @@ torch::Tensor GPTImpl::forward(
       x_backout = x;
   }
   // subtract the mid-layer residual to remove low-level features before the logits
-  if (x_backout.defined()) {
+  if (x_backout.defined() && fused_ && x.is_contiguous() && x_backout.is_contiguous() && x.numel() % 8 == 0)
+    x = backout(x, x_backout, backout_lambda);
+  else if (x_backout.defined()) {
     auto lambda_b = backout_lambda.to(x.scalar_type());
     x = x - lambda_b * x_backout;
   }

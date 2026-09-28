@@ -122,6 +122,15 @@ steps:
     the four dW GEMMs (K = 16384, 36-144 CTAs on 70 SMs) -13 to -23%, the K = 768 GEMMs (qkv, c_fc, lm_head
     forward) -10 to -12%, the rest unchanged. d12 2 GPUs, 30 steps: 2196 -> 2157 ms/step (-1.8%); both runs sit at
     the 145 W power cap, so isolated kernel gains (~4% of the micro-step here) show up about halved.
+    done: MX weight gradients straight into fp32 .grad (`model/mx_gemm.cpp`: cuBLASLt with beta = 1, which _scaled_mm
+    lacks; merged q/k/v share one buffer whose row blocks are the three .grads; lm_head's GEMM moves into backward
+    with the loss gradient as a device alpha): no bf16 dW copy, no autograd cast and add per matrix (81 + 105 kernels
+    per micro-step), no 100 MB addcmul for lm_head. Fused smear (`model/smear_kernel.cu`, forward bit-identical, the
+    gate logit's sum order aside) and backout (`model/backout_kernel.cu`, bit-identical but for dlambda). Backward
+    glue 3.6 -> 1.4 ms per micro-step before the lm_head and backout parts landed. d12 2 GPUs, 30 steps, dW + smear
+    only: 2145/2155 -> 2114/2118 ms/step (-1.5%); the fused lm_head gradient and backout are unmeasured. Note: SDPA's
+    flash and memory-efficient backward sum dq with atomics (198/200 runs differ); fp32 .grads expose that, so the
+    bit-identity test (`Fp8.WeightCacheMatchesUncachedModel`) forces the math backend.
     todo (later; d12, % of a 150 ms micro-step): MX in the remaining producers (24 quantizes of 16384x768 each per
     micro-step, 76 us each), and the fp32 .grad adds:
     - residual_norm fwd (attn/MLP inputs), ~0.5%: bf16 n is still needed (autograd output, gate input). 32-row
@@ -130,5 +139,3 @@ steps:
     - residual_norm bwd (c_proj output grads), ~0.5%: bf16 ds is still needed (residual stream). c_proj's backward
       can't receive extra tensors through autograd: needs a handoff (MX copy keyed on data_ptr, numel, version,
       picked up by quantize_grad).
-    - other weights' fp32 .grad accumulation adds, ~0.5% (0.8 ms): GEMMs accumulate straight into .grad (cublasLt
-      beta = 1).

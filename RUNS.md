@@ -1,4 +1,4 @@
-# medium runs @ d12 (initial port)
+# medium runs @ d12
 
 Runs based on the initial nanochat port to c++. No tuning yet.
 
@@ -12,7 +12,7 @@ Runs based on the initial nanochat port to c++. No tuning yet.
 | 2 |   72,305 | 4.800026 | 1.434599 |  16.4g | 12.08m | --nproc=2 (ZeRO-2, MuonAdamW) |
 | 3 |   80,129 | 4.820226 | 1.441378 |  16.0g | 10.91m | --nproc=2 --fp8               |
 
-# medium runs @ d12 (tuned)
+# medium runs @ d12
 
 Runs based on the sm120 customizations and tuning.
 
@@ -38,7 +38,9 @@ Runs based on the sm120 customizations and tuning.
 |  17 |  230,934 | 4.802351 | 1.435362 |   8.4g | 3.77m | --fp8-recipe=mxfp8 (qkv + rotary + val embed) |
 |  18 |  234,497 | 4.806611 | 1.436663 |   8.7g | 3.71m | --fp8-recipe=mxfp8 (lm_head grad_w fold)      |
 |  19 |  237,122 | 4.802950 | 1.435503 |   8.7g | 3.68m | x0 gradient fold                              |
-|  20 |  242,702 | 4.805256 | 1.436230 |   8.7g | 3.60m |                                               |
+|  20 |  242,702 | 4.805256 | 1.436230 |   8.7g | 3.60m | cuBLASLt workspace 32 MB (split-K)            |
+|  21 |  247,254 | 4.802301 | 1.435336 |   8.5g | 3.52m | fused smear/backout, dW into .grad            |
+|  22 |          |          |          |        |       |                                               |
 
 Run 4: sm120 can't use fa3. however, fa2 works pretty good. --attention=fa2 enabled by default going forward.
 
@@ -56,7 +58,7 @@ memory bound. --fp8-recipe=mxfp8 and --fp8=true enabled by default going forward
 
 These runs started at d12 run 5 because otherwise it would OOM.
 
-```
+```bash
 --fp8 --nproc=2 --depth=24 --device-batch-size=2 --num-iterations=30 --eval-tokens=4194304 --eval-every=-1 --save=false
 ```
 
@@ -68,7 +70,7 @@ These runs started at d12 run 5 because otherwise it would OOM.
 
 # full run @d12
 
-```
+```bash
 --fp8 --nproc=2 --depth=12 --device-batch-size=8
 ```
 
