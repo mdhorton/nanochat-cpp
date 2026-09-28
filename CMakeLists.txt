@@ -63,6 +63,8 @@ add_library(nanochat_train
         src/nanochat/model/gpt.cpp
         src/nanochat/model/mx_attention.cpp
         src/nanochat/model/mx_attention_kernel.cu
+        src/nanochat/model/mx_flash.cpp
+        src/nanochat/model/mx_flash_kernel.cu
         src/nanochat/model/mx_gemm.cpp
         src/nanochat/model/qkv_kernel.cu
         src/nanochat/model/relu_square.cpp
@@ -130,6 +132,7 @@ add_executable(train_tests
         tests/test_fp8.cpp
         tests/test_gpt.cpp
         tests/test_loss_eval.cpp
+        tests/test_mx_flash.cpp
         tests/test_optim.cpp
         tests/test_qkv.cpp
         tests/test_relu_square.cpp

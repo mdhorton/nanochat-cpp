@@ -24,8 +24,8 @@ static int run(int argc, char** argv) {
         "window-pattern", o.window_pattern, "sliding window pattern tiled across layers: L=full, S=quarter context");
   o.attention = flags.str(
         "attention", o.attention,
-        "bf16 (our sm120 flash attention, FA2 backward), bf16mx (bf16 forward, our MXFP8 backward), fa2 "
-        "(FlashAttention-2) or sdpa (bit-identical to Python)");
+        "bf16 (our sm120 flash attention, FA2 backward), bf16mx (bf16 forward, our MXFP8 backward), mx (MXFP8 "
+        "forward and backward), fa2 (FlashAttention-2) or sdpa (bit-identical to Python)");
   o.loss_chunk_rows = flags.i64(
         "loss-chunk-rows", o.loss_chunk_rows, "rows per chunk of the fused lm_head + loss (0 = unchunked, as Python)");
   o.fp8 = flags.boolean("fp8", o.fp8, "FP8 training (eval stays bf16); false = bf16, as Python's default");

@@ -14,6 +14,8 @@
 
 namespace nanochat {
 
+struct MxFlashInputs;
+
 // Activations and matmuls run in bf16; master weights stay fp32 except the embeddings.
 inline constexpr auto kComputeDtype = torch::kBFloat16;
 
@@ -21,8 +23,9 @@ inline constexpr auto kComputeDtype = torch::kBFloat16;
 // SDPA: nanochat's fallback (explicit mask for sliding windows); bit-identical to Python nanochat on sm_120.
 // BF16: our bf16 flash-attention forward for sm_120 (flash.h), FA2's backward; FA2 for shapes it does not take.
 // BF16_MX: as BF16 with our MXFP8 backward (flash_backward_mx).
-enum class Attention { FA2, SDPA, BF16, BF16_MX };
-Attention attention_from_string(const std::string& name); // "fa2", "sdpa", "bf16" or "bf16mx"
+// MX: MXFP8 flash-attention forward and backward (mx_flash.h); FA2 for shapes it does not take.
+enum class Attention { FA2, SDPA, BF16, BF16_MX, MX };
+Attention attention_from_string(const std::string& name); // "fa2", "sdpa", "bf16", "bf16mx" or "mx"
 
 struct GPTConfig {
   int64_t sequence_len = 2048;
@@ -97,7 +100,10 @@ public:
 
 private:
   // attention over (B, T, H, D) q, k, v
-  torch::Tensor attend(const torch::Tensor& q, const torch::Tensor& k, const torch::Tensor& v, int64_t window) const;
+  // pre: q, k, v already MX-quantized for Attention::MX (mx_attention_inputs)
+  torch::Tensor attend(
+        const torch::Tensor& q, const torch::Tensor& k, const torch::Tensor& v, int64_t window,
+        const MxFlashInputs* pre = nullptr) const;
 };
 
 TORCH_MODULE(CausalSelfAttention);

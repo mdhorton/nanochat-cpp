@@ -5,6 +5,7 @@
 #include <ATen/cuda/CUDAContext.h>
 
 #include "nanochat/model/mx_attention_kernel.h"
+#include "nanochat/model/mx_flash_kernel.h"
 #include "nanochat/model/rotary_norm_kernel.h"
 
 namespace nanochat {
@@ -27,7 +28,7 @@ public:
         AutogradContext* ctx, const torch::Tensor& x, const torch::Tensor& wq, const torch::Tensor& wk,
         const torch::Tensor& wv, const torch::Tensor& cos, const torch::Tensor& sin, double scale,
         const Optional& ve_in, const Optional& w_gate_in, int64_t head_dim, Fp8WeightCache* cache,
-        const Fp8Tensor* x_mx) {
+        const Fp8Tensor* x_mx, bool quantize_attention) {
     const auto ve = ve_in.value_or(torch::Tensor()), w_gate = w_gate_in.value_or(torch::Tensor());
     const int64_t N = x.size(0), T = cos.size(1), nq = wq.size(0), nkv = wk.size(0), n = nq + 2 * nkv;
     TORCH_CHECK(mx_attention_fits(N, x.size(1), nq, nkv, head_dim) && wv.size(0) == nkv && N % T == 0);
@@ -44,6 +45,24 @@ public:
     const auto wf = mx_qkv_weights(wq, wk, wv, cache);
     const auto qkv = at::_scaled_mm(xq.data, wf[0].t(), xq.inv_scale, wf[2], {}, {}, x.scalar_type(), false);
 
+    // mx_flash_attention's inputs (mx_flash_quantize_rows / mx_flash_quantize_vt layouts)
+    const int64_t B = N / T;
+    const auto u8 = x.options().dtype(torch::kUInt8), i32 = x.options().dtype(torch::kInt32);
+    torch::Tensor q8, q8_scale, k8, k8_scale, vt, vt_scale;
+    if (quantize_attention) {
+      TORCH_CHECK(T % kernels::kMxFlashBlockM == 0, "quantize_attention: T must divide by ", kernels::kMxFlashBlockM);
+      q8 = torch::empty({B, T, heads, head_dim}, u8), q8_scale = torch::empty({B, heads, T}, i32);
+      k8 = torch::empty({B, T, kv_heads, head_dim}, u8), k8_scale = torch::empty({B, kv_heads, T}, i32);
+      vt = torch::empty({B, kv_heads, head_dim, T}, u8),
+      vt_scale = torch::empty({B, kv_heads, T / 64, head_dim, 2}, u8);
+    }
+    const auto words = [](const torch::Tensor& t) {
+      return t.defined() ? reinterpret_cast<uint32_t*>(t.data_ptr<int32_t>()) : nullptr;
+    };
+    const auto ptr = [](const torch::Tensor& t) {
+      return t.defined() ? t.data_ptr() : nullptr;
+    };
+
     // rotary + QK norm of q, k (read from qkv), as rotary_rms_norm
     const auto eps = std::numeric_limits<float>::epsilon();
     auto q = torch::empty({N, nq}, x.options()), k = torch::empty({N, nkv}, x.options());
@@ -51,11 +70,11 @@ public:
     auto rstd_k = torch::empty({N * kv_heads}, rstd_q.options());
     kernels::rotary_norm_fwd(
           qkv.data_ptr(), cos.data_ptr(), sin.data_ptr(), q.data_ptr(), rstd_q.data_ptr<float>(), rstd_q.numel(), heads,
-          T, static_cast<int>(head_dim), n, static_cast<float>(scale), eps, stream);
+          T, static_cast<int>(head_dim), n, static_cast<float>(scale), eps, stream, ptr(q8), words(q8_scale));
     C10_CUDA_KERNEL_LAUNCH_CHECK();
     kernels::rotary_norm_fwd(
           offset(qkv, nq), cos.data_ptr(), sin.data_ptr(), k.data_ptr(), rstd_k.data_ptr<float>(), rstd_k.numel(),
-          kv_heads, T, static_cast<int>(head_dim), n, static_cast<float>(scale), eps, stream);
+          kv_heads, T, static_cast<int>(head_dim), n, static_cast<float>(scale), eps, stream, ptr(k8), words(k8_scale));
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 
     // value embedding mix, the gate as gpt.py's bf16 Linear
@@ -68,11 +87,17 @@ public:
       w_gate_bf16 = w_gate.to(x.scalar_type());
       z = at::mm(gate_in, w_gate_bf16.t());
       v = torch::empty({N, nkv}, x.options());
-      kernels::value_mix_fwd(offset(qkv, nq + nkv), n, z.data_ptr(), ve.data_ptr(), v.data_ptr(), N, kv_heads, stream);
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
+      if (!quantize_attention)
+        kernels::value_mix_fwd(
+              offset(qkv, nq + nkv), n, z.data_ptr(), ve.data_ptr(), v.data_ptr(), N, kv_heads, stream);
     }
     else
       v = qkv.narrow(1, nq + nkv, nkv);
+    if (quantize_attention) // the mix (with ve) and Vᵀ in one pass
+      kernels::value_mix_vt(
+            offset(qkv, nq + nkv), n, ptr(z), ptr(ve), ve.defined() ? v.data_ptr() : nullptr, vt.data_ptr(),
+            vt_scale.data_ptr<uint8_t>(), static_cast<int>(B), T, kv_heads, stream);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
 
     ctx->save_for_backward(
           {xq.data_t, xq.inv_scale_t, wf[1], wf[3], qkv, rstd_q, rstd_k, cos, sin, gate_in, w_gate_bf16, z, ve});
@@ -81,7 +106,10 @@ public:
     ctx->saved_data["scale"] = scale;
     ctx->saved_data["head_dim"] = head_dim;
     ctx->saved_data["w_gate_dtype"] = static_cast<int64_t>(w_gate.defined() ? w_gate.scalar_type() : x.scalar_type());
-    return {q, k, v};
+    if (!quantize_attention)
+      return {q, k, v};
+    ctx->mark_non_differentiable({q8, q8_scale, k8, k8_scale, vt, vt_scale});
+    return {q, k, v, q8, q8_scale, k8, k8_scale, vt, vt_scale};
   }
 
   static variable_list backward(AutogradContext* ctx, variable_list grads) {
@@ -139,7 +167,7 @@ public:
       dx.narrow(1, 0, gate_in.size(1)).add_(at::mm(dz, w_gate_bf16));
       dw_gate = at::mm(dz.t(), gate_in).to(static_cast<torch::ScalarType>(ctx->saved_data["w_gate_dtype"].toInt()));
     }
-    return {dx, rows(0, nq), rows(nq, nkv), rows(nq + nkv, nkv), {}, {}, {}, dve, dw_gate, {}, {}, {}};
+    return {dx, rows(0, nq), rows(nq, nkv), rows(nq + nkv, nkv), {}, {}, {}, dve, dw_gate, {}, {}, {}, {}};
   }
 };
 
@@ -152,12 +180,14 @@ bool mx_attention_fits(int64_t N, int64_t C, int64_t n_q, int64_t n_kv, int64_t 
 variable_list mx_attention_inputs(
       const torch::Tensor& x_2d, const torch::Tensor& wq, const torch::Tensor& wk, const torch::Tensor& wv,
       const torch::Tensor& cos, const torch::Tensor& sin, double scale, const torch::Tensor& ve,
-      const torch::Tensor& w_gate, int64_t head_dim, Fp8WeightCache* cache, const Fp8Tensor* x_mx) {
+      const torch::Tensor& w_gate, int64_t head_dim, Fp8WeightCache* cache, const Fp8Tensor* x_mx,
+      bool quantize_attention) {
   const auto opt = [](const torch::Tensor& t) {
     return t.defined() ? Optional(t) : std::nullopt;
   };
   return MxAttentionInputs::apply(
-        x_2d.contiguous(), wq, wk, wv, cos, sin, scale, opt(ve), opt(w_gate), head_dim, cache, x_mx);
+        x_2d.contiguous(), wq, wk, wv, cos, sin, scale, opt(ve), opt(w_gate), head_dim, cache, x_mx,
+        quantize_attention);
 }
 
 } // namespace nanochat

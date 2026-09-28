@@ -5,6 +5,7 @@
 #include "nanochat/model/flash.h"
 #include "nanochat/model/fp8.h"
 #include "nanochat/model/mx_attention.h"
+#include "nanochat/model/mx_flash.h"
 #include "nanochat/model/relu_square.h"
 #include "nanochat/model/residual_norm.h"
 #include "nanochat/model/rotary_norm.h"
@@ -114,7 +115,9 @@ Attention attention_from_string(const std::string& name) {
     return Attention::BF16;
   if (name == "bf16mx")
     return Attention::BF16_MX;
-  throw std::invalid_argument("unknown attention: " + name + " (use fa2, sdpa, bf16 or bf16mx)");
+  if (name == "mx")
+    return Attention::MX;
+  throw std::invalid_argument("unknown attention: " + name + " (use fa2, sdpa, bf16, bf16mx or mx)");
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -170,10 +173,13 @@ torch::Tensor CausalSelfAttentionImpl::forward(
     const auto out = mx_attention_inputs(
           x.to(kComputeDtype).reshape({B * T, -1}), c_q->weight, c_k->weight, c_v->weight, cos, sin, 1.2,
           ve.defined() ? ve.reshape({B * T, -1}) : torch::Tensor(), ve.defined() ? ve_gate->weight : torch::Tensor(),
-          head_dim, &qkv_cache, x_mx);
+          head_dim, &qkv_cache, x_mx, attention == Attention::MX);
+    MxFlashInputs pre;
+    if (attention == Attention::MX)
+      pre = {out[3], out[4], out[5], out[6], out[7], out[8]};
     const auto y = attend(
           out[0].view({B, T, n_head, head_dim}), out[1].view({B, T, n_kv_head, head_dim}),
-          out[2].view({B, T, n_kv_head, head_dim}), window);
+          out[2].view({B, T, n_kv_head, head_dim}), window, attention == Attention::MX ? &pre : nullptr);
     return c_proj(y.contiguous().view({B, T, -1}));
   }
   torch::Tensor q, k, v, gate_in;
@@ -226,7 +232,10 @@ torch::Tensor CausalSelfAttentionImpl::forward(
 }
 
 torch::Tensor CausalSelfAttentionImpl::attend(
-      const torch::Tensor& q, const torch::Tensor& k, const torch::Tensor& v, int64_t window) const {
+      const torch::Tensor& q, const torch::Tensor& k, const torch::Tensor& v, int64_t window,
+      const MxFlashInputs* pre) const {
+  if (attention == Attention::MX && (pre != nullptr || flash_supported(q, k, v)))
+    return mx_flash_attention(q, k, v, window, pre);
   if ((attention == Attention::BF16 || attention == Attention::BF16_MX) && flash_supported(q, k, v))
     return flash_attention(q, k, v, window, attention == Attention::BF16_MX);
   if (attention != Attention::SDPA)

@@ -2,6 +2,7 @@
 
 #include <cuda_bf16.h>
 
+#include "nanochat/model/mx_flash.cuh"
 #include "nanochat/model/mx_kernel.cuh"
 #include "nanochat/model/rotary_norm.cuh"
 
@@ -65,6 +66,42 @@ __device__ __forceinline__ void value_mix_fwd_body(
   *reinterpret_cast<uint4*>(out + i) = *reinterpret_cast<const uint4*>(o);
 }
 
+// value_mix_fwd_body's values on a 64-token tile, then Vᵀ. grid: (seq_len / 64, heads, B)
+__device__ __forceinline__ void value_mix_vt_body(
+      const bf16* v, int64_t v_stride, const bf16* z, const bf16* ve, bf16* out, uint8_t* vt, uint8_t* vt_scale,
+      int64_t seq_len, int heads) {
+  __shared__ __align__(16) mx_flash::VtTile tile;
+  const int n = static_cast<int>(blockIdx.x), h = static_cast<int>(blockIdx.y), b = static_cast<int>(blockIdx.z);
+  const int tid = static_cast<int>(threadIdx.x);
+  const int64_t width = static_cast<int64_t>(heads) * kMxHeadDim;
+#pragma unroll
+  for (int i = 0; i < mx_flash::kVtTokens * kMxHeadDim / 8 / mx_flash::kVtThreads; ++i) {
+    const int idx = tid + i * mx_flash::kVtThreads, t = idx / (kMxHeadDim / 8), c = idx % (kMxHeadDim / 8);
+    const int64_t token = static_cast<int64_t>(b) * seq_len + static_cast<int64_t>(n) * mx_flash::kVtTokens + t;
+    const int64_t col = static_cast<int64_t>(h) * kMxHeadDim + c * 8;
+    float a[8];
+    load8(v + token * v_stride + col, a);
+    __align__(16) bf16 o[8];
+    if (ve != nullptr) {
+      const float gate = round_bf16(3.f * sigmoid_bf16(__bfloat162float(z[token * heads + h])));
+      float e[8];
+      load8(ve + token * width + col, e);
+#pragma unroll
+      for (int k = 0; k < 8; ++k)
+        o[k] = __float2bfloat16(a[k] + round_bf16(gate * e[k]));
+      *reinterpret_cast<uint4*>(out + token * width + col) = *reinterpret_cast<const uint4*>(o);
+    }
+    else {
+#pragma unroll
+      for (int k = 0; k < 8; ++k)
+        o[k] = __float2bfloat16(a[k]);
+    }
+    *reinterpret_cast<uint4*>(&tile[t][c * 8]) = *reinterpret_cast<const uint4*>(o);
+  }
+  __syncthreads();
+  mx_flash::store_vt_tile(tile, vt, vt_scale, static_cast<int64_t>(b) * heads + h, n, seq_len);
+}
+
 // The ops' backward: dve = bf16(dout * gate); d gate = bf16(sum(bf16(dout * ve))), times 3, then sigmoid's
 // (d * (1 - s)) * s. Lane: 4 values of a row. grid: (heads, tokens / 32)
 __device__ __forceinline__ void value_mix_bwd_mx_body(
@@ -115,6 +152,12 @@ __global__ void __launch_bounds__(256) nanochat_value_mix_fwd(
   nanochat::value_mix_fwd_body(v, v_stride, z, ve, out, tokens, heads);
 }
 
+__global__ void __launch_bounds__(nanochat::mx_flash::kVtThreads) nanochat_value_mix_vt(
+      const __nv_bfloat16* v, int64_t v_stride, const __nv_bfloat16* z, const __nv_bfloat16* ve, __nv_bfloat16* out,
+      uint8_t* vt, uint8_t* vt_scale, int64_t seq_len, int heads) {
+  nanochat::value_mix_vt_body(v, v_stride, z, ve, out, vt, vt_scale, seq_len, heads);
+}
+
 __global__ void __launch_bounds__(nanochat::kMxThreads) nanochat_value_mix_bwd_mx(
       const __nv_bfloat16* dout, const __nv_bfloat16* z, const __nv_bfloat16* ve, __nv_bfloat16* dve, __nv_bfloat16* dz,
       int heads, nanochat::MxOutDev out, nanochat::MxOutDev out_t) {
@@ -148,6 +191,15 @@ void value_mix_fwd(
   nanochat_value_mix_fwd<<<static_cast<unsigned>((n + 255) / 256), 256, 0, stream>>>(
         static_cast<const bf16*>(v), v_stride, static_cast<const bf16*>(z), static_cast<const bf16*>(ve),
         static_cast<bf16*>(out), tokens, heads);
+}
+
+void value_mix_vt(
+      const void* v, int64_t v_stride, const void* z, const void* ve, void* out, void* vt, uint8_t* vt_scale, int B,
+      int64_t seq_len, int heads, cudaStream_t stream) {
+  const dim3 grid(static_cast<unsigned>(seq_len / mx_flash::kVtTokens), heads, B);
+  nanochat_value_mix_vt<<<grid, mx_flash::kVtThreads, 0, stream>>>(
+        static_cast<const bf16*>(v), v_stride, static_cast<const bf16*>(z), static_cast<const bf16*>(ve),
+        static_cast<bf16*>(out), static_cast<uint8_t*>(vt), vt_scale, seq_len, heads);
 }
 
 void value_mix_bwd_mx(

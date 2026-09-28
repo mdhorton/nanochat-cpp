@@ -2,7 +2,9 @@
 // gpt.cpp) against SDPA's cuDNN and memory-efficient kernels, forward and forward + backward, full causal and
 // sliding window (SDPA takes the window as an explicit mask; FA2 natively). Checks each against FA2. bf16: our flash
 // attention forward (flash.h, default tiles) with FA2's backward; bf16mx: with our MXFP8 backward; bf16[...]: its tile
-// configurations, forward only. Backward only: FA2's vs ours (bf16, MXFP8 incl. quantization) per tile configuration.
+// configurations, forward only. mx: our MXFP8 forward (mx_flash.h), mx-kernel: its kernel without the quantization.
+// Backward only: FA2's vs ours (bf16, MXFP8 incl. quantization) per tile configuration. Then the attention inputs' MX
+// quantization, standalone vs fused into mx_attention_inputs.
 // Usage: bench_attention [--batch B] [--seq T] [--heads H] [--kv-heads Hkv] [--head-dim D] [--window W]
 //                        [--depth L] [--pattern SSSL] [--iters N]
 #include <algorithm>
@@ -17,6 +19,9 @@
 
 #include "nanochat/model/flash.h"
 #include "nanochat/model/flash_kernel.h"
+#include "nanochat/model/mx_attention.h"
+#include "nanochat/model/mx_flash.h"
+#include "nanochat/model/mx_flash_kernel.h"
 
 namespace {
 
@@ -175,6 +180,31 @@ Result bench_flash_variant(
   return r;
 }
 
+// MXFP8 attention kernel alone, inputs quantized beforehand (its "kernel only" speed)
+Result bench_mx_kernel(
+      const torch::Tensor& q, const torch::Tensor& k, const torch::Tensor& v, int64_t window,
+      const torch::Tensor& ref_out, int iters) {
+  Result r{"mx-kernel"};
+  torch::NoGradGuard no_grad;
+  const auto [qd, qs] = nanochat::mx_flash_quantize_rows(q);
+  const auto [kd, ks] = nanochat::mx_flash_quantize_rows(k);
+  const auto [vd, vs] = nanochat::mx_flash_quantize_vt(v);
+  auto out = torch::empty_like(q);
+  auto lse = torch::empty({q.size(0), q.size(2), q.size(1)}, q.options().dtype(torch::kFloat32));
+  const auto run = [&] {
+    nanochat::kernels::mx_flash_fwd(
+          qd.data_ptr(), reinterpret_cast<const uint32_t*>(qs.data_ptr<int32_t>()), kd.data_ptr(),
+          reinterpret_cast<const uint32_t*>(ks.data_ptr<int32_t>()), vd.data_ptr(), vs.data_ptr<uint8_t>(),
+          out.data_ptr(), lse.data_ptr<float>(), static_cast<int>(q.size(0)), q.size(1), static_cast<int>(q.size(2)),
+          static_cast<int>(k.size(2)), window, at::cuda::getCurrentCUDAStream().stream());
+  };
+  run();
+  r.fwd_ms = time_ms(run, iters);
+  r.err_out = max_diff(out, ref_out);
+  r.why = "fwd only, no quantize";
+  return r;
+}
+
 // backward alone (ms): FA2's (at::_flash_attention_backward on its forward) vs ours for each tile configuration pair
 void bench_backward(
       const Args& a, const torch::Tensor& q, const torch::Tensor& k, const torch::Tensor& v, const torch::Tensor& g,
@@ -219,6 +249,52 @@ void bench_backward(
                         nanochat::kernels::flash_bwd_mx_dkv_variant_name(dkvv);
       std::printf("  %-32s %8.3f ms %6.1f TFLOPs (FA2-equivalent)\n", name.c_str(), ms, bwd_flops / ms / 1e9);
     }
+  }
+}
+
+// The attention's MX inputs: standalone quantization of q, k, v vs the extra time mx_attention_inputs takes to
+// write them (rotary norm and value mix), with and without a value embedding. n_embd = heads * head_dim.
+void bench_quantization(const Args& a) {
+  torch::NoGradGuard no_grad;
+  const auto opts = torch::TensorOptions().device(torch::kCUDA);
+  const int64_t B = a.batch, T = a.seq, D = a.head_dim, N = B * T, C = a.heads * D, gate_cols = 12;
+  const auto freqs = torch::outer(torch::arange(T, opts), torch::rand({D / 2}, opts));
+  const auto cos = freqs.cos().to(torch::kBFloat16).view({1, T, 1, D / 2});
+  const auto sin = freqs.sin().to(torch::kBFloat16).view({1, T, 1, D / 2});
+  const auto x = torch::randn({N, C}, opts).to(torch::kBFloat16);
+  const auto wq = torch::randn({a.heads * D, C}, opts) * 0.03, wk = torch::randn({a.kv_heads * D, C}, opts) * 0.03;
+  const auto wv = torch::randn({a.kv_heads * D, C}, opts) * 0.03, wg = torch::randn({a.kv_heads, gate_cols}, opts);
+  const auto ve = torch::randn({N, a.kv_heads * D}, opts).to(torch::kBFloat16);
+  std::printf("\nattention inputs' MX quantization (ms per layer):\n");
+  for (const bool with_ve : {false, true}) {
+    const auto inputs = [&](bool quantize) {
+      return nanochat::mx_attention_inputs(
+            x, wq, wk, wv, cos, sin, 1.2, with_ve ? ve : torch::Tensor(), with_ve ? wg : torch::Tensor(), D, nullptr,
+            nullptr, quantize);
+    };
+    const auto out = inputs(false);
+    const auto q = out[0].view({B, T, a.heads, D}), k = out[1].view({B, T, a.kv_heads, D});
+    const auto v = out[2].view({B, T, a.kv_heads, D});
+    const double standalone = time_ms(
+          [&] {
+            nanochat::mx_flash_quantize_rows(q);
+            nanochat::mx_flash_quantize_rows(k);
+            nanochat::mx_flash_quantize_vt(v);
+          },
+          a.iters);
+    const double plain = time_ms(
+                       [&] {
+                         inputs(false);
+                       },
+                       a.iters),
+                 fused = time_ms(
+                       [&] {
+                         inputs(true);
+                       },
+                       a.iters);
+    std::printf(
+          "  %-8s standalone %.3f, fused %.3f (mx_attention_inputs %.3f -> %.3f)\n", with_ve ? "ve" : "no ve",
+          standalone, fused - plain, plain, fused);
   }
 }
 
@@ -323,6 +399,13 @@ int main(int argc, char** argv) {
             return nanochat::flash_attention(q, k, v, window, true);
           },
           q, k, v, g, ref, a.iters));
+    results.push_back(bench(
+          "mx",
+          [&](const auto& q, const auto& k, const auto& v) {
+            return nanochat::mx_flash_attention(q, k, v, window);
+          },
+          q, k, v, g, ref, a.iters));
+    results.push_back(bench_mx_kernel(q, k, v, window, ref[0], a.iters));
     for (int variant = 0; variant < nanochat::kernels::kFlashVariants; ++variant)
       results.push_back(bench_flash_variant(variant, q, k, v, window, ref[0], a.iters));
     for (const auto& r : results) {
@@ -346,6 +429,8 @@ int main(int argc, char** argv) {
     std::printf("backward only:\n");
     bench_backward(a, q, k, v, g, window);
   }
+
+  bench_quantization(a);
 
   if (windows.size() == 2) {
     std::printf("\nper micro-step (fwd + bwd, %ld short + %ld long layers):\n", n_short, a.depth - n_short);
