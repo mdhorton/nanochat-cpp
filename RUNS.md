@@ -39,13 +39,12 @@ normally be done by inductor and triton.
 |  22 |  249,284 | 4.802814 | 1.435525 |   8.5g |  3.50m | NCCL_PROTO = "Simple" NCCL_MIN_NCHANNELS = "8" |
 |  23 |  250,734 | 4.803105 | 1.435576 |   8.5g |  3.48m | fused AdamW kernel, Muon grad stacks           |
 |  24 |  252,656 | 4.800344 | 1.434727 |   8.5g |  3.45m | fused MX quantize into residual_norm           |
-|  25 |  257,917 | 4.799418 | 1.434437 |   8.5g |  3.38m | sm120 FA (bf16 forward)                        |
+|  25 |  257,917 | 4.799418 | 1.434437 |   8.5g |  3.38m | --attention=bf16 (FA bf16 forward)             |
 |  26 |  267,715 | 4.803928 | 1.435875 |   8.6g |  3.26m | custom FA with mxfp8                           |
 |  27 |          |          |          |        |        |                                                |
 
 Run 4: sm120 can't use fa3. however, fa2 works pretty good. `--nproc=2 --fp8=true --attention=fa2` enabled by default
-going
-forward.
+going forward.
 
 Run 5: python nanochat keeps several GB of logits alive at once. this triggers OOM at `--depth=24` on my setup. chunked
 and fused CE loss to reduce vram usage. `--loss-chunk-rows=4096` enabled by default going forward.
@@ -59,7 +58,7 @@ memory bound. `--fp8-recipe=mxfp8` enabled by default going forward.
 
 Runs 22: NCCL optimisations. `NCCL_PROTO = "Simple" NCCL_MIN_NCHANNELS = "8"` enabled by default going forward.
 
-Run 26: custom flash attention with mxfp8. `--attention=mx` enabled by default going forward
+Run 26: custom flash attention with mxfp8. `--attention=mx` enabled by default going forward.
 
 # medium runs @ d24
 
