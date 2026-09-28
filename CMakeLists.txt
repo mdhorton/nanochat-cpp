@@ -56,6 +56,7 @@ add_library(nanochat_train
         src/nanochat/model/embedding_kernel.cu
         src/nanochat/model/fp8.cpp
         src/nanochat/model/flash.cpp
+        src/nanochat/model/flash_bwd_kernel.cu
         src/nanochat/model/flash_kernel.cu
         src/nanochat/model/fp8_kernel.cu
         src/nanochat/model/gpt.cpp
