@@ -15,8 +15,8 @@ namespace nanochat {
 //   v = x @ wv^T + 3 sigmoid(x[:, :gate_cols] @ w_gate^T) * ve per head (ve given), else x @ wv^T
 // Bit-identical to fp8_qkv (Mx), the ops and rotary_rms_norm, except the gate logits' gradient (its sum's order).
 // x_mx: x_2d already quantized (residual_norm_mx); x_2d then carries autograd and the gate's columns only.
-// quantize_attention: also returns mx_flash_attention's inputs (MxFlashInputs' q, q_scale, k, k_scale, vt, v_scale;
-// no gradient), written by the rotary norm and the value mix. T % 64 == 0.
+// quantize_attention: also returns mx_flash_attention's inputs (MxFlashInputs' 12 tensors in order; no gradient),
+// written by the rotary norm, the value mix and flash_mx_quantize_t on q, k. T % 128 == 0.
 torch::autograd::variable_list mx_attention_inputs(
       const torch::Tensor& x_2d, const torch::Tensor& wq, const torch::Tensor& wk, const torch::Tensor& wv,
       const torch::Tensor& cos, const torch::Tensor& sin, double scale, const torch::Tensor& ve,

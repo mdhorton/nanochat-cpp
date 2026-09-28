@@ -25,7 +25,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> flash_backward(
       const torch::Tensor& dout, const torch::Tensor& q, const torch::Tensor& k, const torch::Tensor& v,
       const torch::Tensor& out, const torch::Tensor& lse, int64_t window, int dq_variant = -1, int dkv_variant = -1);
 
-// As flash_backward with MXFP8 matmuls (kernels::flash_bwd_mx), including quantizing the inputs.
+// As flash_backward with MXFP8 matmuls: q, k, v quantized, then mx_flash_backward.
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> flash_backward_mx(
       const torch::Tensor& dout, const torch::Tensor& q, const torch::Tensor& k, const torch::Tensor& v,
       const torch::Tensor& out, const torch::Tensor& lse, int64_t window, int dq_variant = -1, int dkv_variant = -1);

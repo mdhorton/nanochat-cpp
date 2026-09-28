@@ -4,6 +4,7 @@
 
 #include <ATen/cuda/CUDAContext.h>
 
+#include "nanochat/model/flash_kernel.h"
 #include "nanochat/model/mx_attention_kernel.h"
 #include "nanochat/model/mx_flash_kernel.h"
 #include "nanochat/model/rotary_norm_kernel.h"
@@ -45,19 +46,22 @@ public:
     const auto wf = mx_qkv_weights(wq, wk, wv, cache);
     const auto qkv = at::_scaled_mm(xq.data, wf[0].t(), xq.inv_scale, wf[2], {}, {}, x.scalar_type(), false);
 
-    // mx_flash_attention's inputs (mx_flash_quantize_rows / mx_flash_quantize_vt layouts)
+    // mx_flash_attention's inputs (MxFlashInputs' order and layouts)
     const int64_t B = N / T;
     const auto u8 = x.options().dtype(torch::kUInt8), i32 = x.options().dtype(torch::kInt32);
-    torch::Tensor q8, q8_scale, k8, k8_scale, vt, vt_scale;
+    std::vector<torch::Tensor> mx;
     if (quantize_attention) {
       TORCH_CHECK(T % kernels::kMxFlashBlockM == 0, "quantize_attention: T must divide by ", kernels::kMxFlashBlockM);
-      q8 = torch::empty({B, T, heads, head_dim}, u8), q8_scale = torch::empty({B, heads, T}, i32);
-      k8 = torch::empty({B, T, kv_heads, head_dim}, u8), k8_scale = torch::empty({B, kv_heads, T}, i32);
-      vt = torch::empty({B, kv_heads, head_dim, T}, u8),
-      vt_scale = torch::empty({B, kv_heads, T / 64, head_dim, 2}, u8);
+      for (const int64_t h : {heads, kv_heads, kv_heads}) // q, k, v along head_dim
+        mx.insert(mx.end(), {torch::empty({B, T, h, head_dim}, u8), torch::empty({B, h, T}, i32)});
+      for (const int64_t h : {heads, kv_heads, kv_heads}) // qt, kt, vt
+        mx.insert(mx.end(), {torch::empty({B, h, head_dim, T}, u8), torch::empty({B, h, T / 32, head_dim}, u8)});
     }
-    const auto words = [](const torch::Tensor& t) {
-      return t.defined() ? reinterpret_cast<uint32_t*>(t.data_ptr<int32_t>()) : nullptr;
+    const auto mx_ptr = [&](int i) {
+      return mx.empty() ? nullptr : mx[static_cast<size_t>(i)].data_ptr();
+    };
+    const auto words = [&](int i) {
+      return static_cast<uint32_t*>(mx_ptr(i));
     };
     const auto ptr = [](const torch::Tensor& t) {
       return t.defined() ? t.data_ptr() : nullptr;
@@ -70,12 +74,19 @@ public:
     auto rstd_k = torch::empty({N * kv_heads}, rstd_q.options());
     kernels::rotary_norm_fwd(
           qkv.data_ptr(), cos.data_ptr(), sin.data_ptr(), q.data_ptr(), rstd_q.data_ptr<float>(), rstd_q.numel(), heads,
-          T, static_cast<int>(head_dim), n, static_cast<float>(scale), eps, stream, ptr(q8), words(q8_scale));
+          T, static_cast<int>(head_dim), n, static_cast<float>(scale), eps, stream, mx_ptr(0), words(1));
     C10_CUDA_KERNEL_LAUNCH_CHECK();
     kernels::rotary_norm_fwd(
           offset(qkv, nq), cos.data_ptr(), sin.data_ptr(), k.data_ptr(), rstd_k.data_ptr<float>(), rstd_k.numel(),
-          kv_heads, T, static_cast<int>(head_dim), n, static_cast<float>(scale), eps, stream, ptr(k8), words(k8_scale));
+          kv_heads, T, static_cast<int>(head_dim), n, static_cast<float>(scale), eps, stream, mx_ptr(2), words(3));
     C10_CUDA_KERNEL_LAUNCH_CHECK();
+    if (quantize_attention) // qt, kt
+      for (const auto& [y, h, i] : {std::tuple{q, heads, 6}, std::tuple{k, kv_heads, 8}}) {
+        kernels::flash_mx_quantize_t(
+              y.data_ptr(), y.size(1), mx_ptr(i), static_cast<uint8_t*>(mx_ptr(i + 1)), static_cast<int>(B), T, h,
+              stream);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+      }
 
     // value embedding mix, the gate as gpt.py's bf16 Linear
     torch::Tensor v, gate_in, w_gate_bf16, z;
@@ -93,10 +104,10 @@ public:
     }
     else
       v = qkv.narrow(1, nq + nkv, nkv);
-    if (quantize_attention) // the mix (with ve) and Vᵀ in one pass
-      kernels::value_mix_vt(
-            offset(qkv, nq + nkv), n, ptr(z), ptr(ve), ve.defined() ? v.data_ptr() : nullptr, vt.data_ptr(),
-            vt_scale.data_ptr<uint8_t>(), static_cast<int>(B), T, kv_heads, stream);
+    if (quantize_attention) // the mix (with ve) and v's quantization in one pass
+      kernels::value_mix_mx(
+            offset(qkv, nq + nkv), n, ptr(z), ptr(ve), ve.defined() ? v.data_ptr() : nullptr, mx_ptr(4), words(5),
+            mx_ptr(10), static_cast<uint8_t*>(mx_ptr(11)), static_cast<int>(B), T, kv_heads, stream);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 
     ctx->save_for_backward(
@@ -108,8 +119,11 @@ public:
     ctx->saved_data["w_gate_dtype"] = static_cast<int64_t>(w_gate.defined() ? w_gate.scalar_type() : x.scalar_type());
     if (!quantize_attention)
       return {q, k, v};
-    ctx->mark_non_differentiable({q8, q8_scale, k8, k8_scale, vt, vt_scale});
-    return {q, k, v, q8, q8_scale, k8, k8_scale, vt, vt_scale};
+    ctx->mark_non_differentiable(mx);
+    ctx->set_materialize_grads(false); // else autograd zero-fills a gradient for each of mx
+    variable_list outs{q, k, v};
+    outs.insert(outs.end(), mx.begin(), mx.end());
+    return outs;
   }
 
   static variable_list backward(AutogradContext* ctx, variable_list grads) {

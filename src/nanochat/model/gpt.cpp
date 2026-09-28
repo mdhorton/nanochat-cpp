@@ -176,7 +176,7 @@ torch::Tensor CausalSelfAttentionImpl::forward(
           head_dim, &qkv_cache, x_mx, attention == Attention::MX);
     MxFlashInputs pre;
     if (attention == Attention::MX)
-      pre = {out[3], out[4], out[5], out[6], out[7], out[8]};
+      pre = {out[3], out[4], out[5], out[6], out[7], out[8], out[9], out[10], out[11], out[12], out[13], out[14]};
     const auto y = attend(
           out[0].view({B, T, n_head, head_dim}), out[1].view({B, T, n_kv_head, head_dim}),
           out[2].view({B, T, n_kv_head, head_dim}), window, attention == Attention::MX ? &pre : nullptr);

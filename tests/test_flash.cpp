@@ -87,6 +87,14 @@ torch::Tensor mx_rows_roundtrip(const torch::Tensor& x) {
          torch::pow(2.0, e).repeat_interleave(32, -1).transpose(1, 2);
 }
 
+// along-token scales (..., 128) in dim order: dim d is stored at d % 8 * 16 + d / 16 * 2 + d / 8 % 2
+torch::Tensor t_scale_dims(const torch::Tensor& scale) {
+  std::vector<int64_t> pos(128);
+  for (int64_t d = 0; d < 128; ++d)
+    pos[d] = d % 8 * 16 + d / 16 * 2 + d / 8 % 2;
+  return scale.index_select(-1, torch::tensor(pos, torch::TensorOptions().dtype(torch::kInt64)).to(scale.device()));
+}
+
 const Case kBwdCases[] = {Case{2, 256, 2, 2, -1},  Case{2, 256, 2, 2, 128}, Case{1, 512, 4, 2, -1},
                           Case{1, 512, 4, 2, 200}, Case{1, 2048, 2, 2, -1}, Case{1, 2048, 2, 2, 512}};
 
@@ -184,7 +192,8 @@ TEST(Flash, MxBackwardMatchesReference) {
   }
 }
 
-// flash_mx_quantize_rows / _t dequantized vs their bf16 input: e4m3's error, so any layout or permutation slip shows
+// flash_mx_quantize_rows / _t dequantized vs their bf16 input: e4m3's error, so any layout or permutation slip shows;
+// flash_mx_quantize_dout identical to them
 TEST(Flash, MxQuantizeRoundTrip) {
   torch::manual_seed(0);
   const int64_t B = 2, T = 256, heads = 3, D = 128;
@@ -222,12 +231,25 @@ TEST(Flash, MxQuantizeRoundTrip) {
       if (perm[p] == t % 16)
         pos[t] = t / 16 * 16 + p;
   const auto tokens = e4m3(tdata).index_select(-1, torch::tensor(pos, kCuda.dtype(torch::kInt64)));
-  const auto t_scale = pow2(tscale.transpose(-1, -2)).repeat_interleave(32, -1); // (B, heads, D, T)
+  const auto t_scale = pow2(t_scale_dims(tscale).transpose(-1, -2)).repeat_interleave(32, -1); // (B, heads, D, T)
   const double t_err = rel_norm(tokens * t_scale, x64.permute({0, 2, 3, 1}));
   std::cout << "rows " << row_err << ", transposed " << t_err << ", delta " << delta_err << "\n";
   EXPECT_LT(row_err, 0.04);
   EXPECT_LT(t_err, 0.04);
   EXPECT_LT(delta_err, 1e-5);
+
+  // flash_mx_quantize_dout: both of the above in one pass
+  const auto xc = x.contiguous();
+  auto ddata = torch::empty_like(data), dscale = torch::empty_like(scale), ddelta = torch::empty_like(delta);
+  auto dtdata = torch::empty_like(tdata), dtscale = torch::empty_like(tscale);
+  kernels::flash_mx_quantize_dout(
+        xc.data_ptr(), o.data_ptr(), ddata.data_ptr(), static_cast<uint32_t*>(dscale.data_ptr()), dtdata.data_ptr(),
+        dtscale.data_ptr<uint8_t>(), ddelta.data_ptr<float>(), B, T, heads, stream);
+  EXPECT_TRUE(torch::equal(ddata, data));
+  EXPECT_TRUE(torch::equal(dscale, scale));
+  EXPECT_TRUE(torch::equal(ddelta, delta));
+  EXPECT_TRUE(torch::equal(dtdata, tdata));
+  EXPECT_TRUE(torch::equal(dtscale, tscale));
 }
 
 // flash forward + backward vs FA2 forward + backward

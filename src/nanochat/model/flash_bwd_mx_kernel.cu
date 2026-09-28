@@ -19,7 +19,6 @@ using namespace flash;
 
 constexpr int kKSteps8 = kD / 32; // k32 steps over head_dim, one MX block each
 constexpr int kDTiles = kD / 8;   // n8 tiles over head_dim
-constexpr int kTTokens = 64;      // tokens per flash_mx_quantize_t block
 
 template <int N>
 struct DqMxConfig {
@@ -53,8 +52,8 @@ __device__ __forceinline__ void flash_bwd_mx_dq_body(
 
   // Q and dout rows staged through the key buffers, into A fragments
   const int64_t row_off = (static_cast<int64_t>(b) * T + m0) * q_ld + h * kD;
-  load_rows8<C::kThreads, kD>(sbase, q + row_off, q_ld, kBlockM);
-  load_rows8<C::kThreads, kD>(sbase + kBlockM * kD, dout + row_off, q_ld, kBlockM);
+  load_rows8<C::kThreads, kD, kBlockM>(sbase, q + row_off, q_ld);
+  load_rows8<C::kThreads, kD, kBlockM>(sbase + kBlockM * kD, dout + row_off, q_ld);
   cp_async_commit();
   const int row0 = m0 + warp * 16 + lane / 4; // this thread's accumulator rows: row0, row0 + 8
   const uint32_t sfa_q = in.q_scale[bh * T + row0 + 8 * (lane % 2)];
@@ -76,12 +75,12 @@ __device__ __forceinline__ void flash_bwd_mx_dq_body(
   const auto load_kv = [&](int n) {
     const uint32_t st = sbase + ((n - n_lo) & 1) * C::kStage;
     const int64_t t0 = static_cast<int64_t>(n) * kBlockN;
-    load_rows8<C::kThreads, kD>(st + C::kK, k_head + t0 * kv_ld, kv_ld, kBlockN);
-    load_rows8<C::kThreads, kD>(st + C::kV, v_head + t0 * kv_ld, kv_ld, kBlockN);
-    load_rows8<C::kThreads, kBlockN>(st + C::kKt, kt_head + t0, T, kD);
-    load_bytes<C::kThreads>(st + C::kKs, ks_head + t0, kBlockN * 4);
-    load_bytes<C::kThreads>(st + C::kVs, vs_head + t0, kBlockN * 4);
-    load_bytes<C::kThreads>(st + C::kKts, kts_head + t0 / 32 * kD, kBlockN / 32 * kD);
+    load_rows8<C::kThreads, kD, kBlockN>(st + C::kK, k_head + t0 * kv_ld, kv_ld);
+    load_rows8<C::kThreads, kD, kBlockN>(st + C::kV, v_head + t0 * kv_ld, kv_ld);
+    load_rows8<C::kThreads, kBlockN, kD>(st + C::kKt, kt_head + t0, T);
+    load_bytes<C::kThreads, kBlockN * 4>(st + C::kKs, ks_head + t0);
+    load_bytes<C::kThreads, kBlockN * 4>(st + C::kVs, vs_head + t0);
+    load_bytes<C::kThreads, kBlockN / 32 * kD>(st + C::kKts, kts_head + t0 / 32 * kD);
     cp_async_commit();
   };
   load_kv(n_lo);
@@ -138,13 +137,14 @@ __device__ __forceinline__ void flash_bwd_mx_dq_body(
     for (int kk = 0; kk < kBlockN / 32; ++kk) {
       uint32_t a[4];
       const uint32_t sfa = pack_a8_scaled(a, s[4 * kk], s[4 * kk + 1], s[4 * kk + 2], s[4 * kk + 3]);
+      uint32_t tsk[4];
+      load_t_scales(tsk, kts_s + kk * kD);
 #pragma unroll
       for (int dp2 = 0; dp2 < kDTiles / 2; ++dp2) {
         uint32_t bk[4];
         ldmatrix_x4(bk, st + C::kKt + swz8<kBlockN>(dp2 * 16 + lane % 8 + (lane / 16) * 8, 2 * kk + (lane / 8) % 2));
-        const uint32_t sfb0 = kts_s[kk * kD + dp2 * 16 + lane / 4], sfb1 = kts_s[kk * kD + dp2 * 16 + 8 + lane / 4];
-        mma_mx(acc[2 * dp2], a, bk[0], bk[1], sfa, sfb0, 0, 0);
-        mma_mx(acc[2 * dp2 + 1], a, bk[2], bk[3], sfa, sfb1, 0, 0);
+        mma_mx(acc[2 * dp2], a, bk[0], bk[1], sfa, tsk[dp2 / 2], 0, dp2 % 2 * 2);
+        mma_mx(acc[2 * dp2 + 1], a, bk[2], bk[3], sfa, tsk[dp2 / 2], 0, dp2 % 2 * 2 + 1);
       }
     }
   };
@@ -189,8 +189,8 @@ __device__ __forceinline__ void flash_bwd_mx_dkv_body(
 
   // K and V rows staged, into A fragments (the warp's 16 keys)
   const int64_t kv_off = (static_cast<int64_t>(b) * T + n0) * kv_ld + hk * kD;
-  load_rows8<C::kThreads, kD>(sbase, static_cast<const uint8_t*>(in.k) + kv_off, kv_ld, kBlockN);
-  load_rows8<C::kThreads, kD>(sbase + kBlockN * kD, static_cast<const uint8_t*>(in.v) + kv_off, kv_ld, kBlockN);
+  load_rows8<C::kThreads, kD, kBlockN>(sbase, static_cast<const uint8_t*>(in.k) + kv_off, kv_ld);
+  load_rows8<C::kThreads, kD, kBlockN>(sbase + kBlockN * kD, static_cast<const uint8_t*>(in.v) + kv_off, kv_ld);
   cp_async_commit();
   const int key0 = n0 + warp * 16 + lane / 4; // key of this thread's accumulator rows (and + 8)
   const uint32_t sfa_k = in.k_scale[bhk * T + key0 + 8 * (lane % 2)];
@@ -208,34 +208,36 @@ __device__ __forceinline__ void flash_bwd_mx_dkv_body(
   // query tiles of every head in the group: m_lo..m_hi per head
   const int m_lo = n0 / kBlockM;
   const int q_last = window >= 0 ? min(T - 1, n0 + kBlockN - 1 + window) : T - 1;
-  const int m_hi = q_last / kBlockM, per_head = m_hi - m_lo + 1, tiles = per_head * group;
-  const auto load_tile = [&](int i) {
-    const int hq = hk * group + i / per_head;
-    const int64_t t0 = static_cast<int64_t>(m_lo + i % per_head) * kBlockM, bh = static_cast<int64_t>(b) * H + hq;
+  const int m_hi = q_last / kBlockM, tiles = (m_hi - m_lo + 1) * group;
+  int next_h = hk * group, next_m = m_lo; // the next tile to load: head, query tile
+  const auto load_next = [&](int i) {
+    const int64_t t0 = static_cast<int64_t>(next_m) * kBlockM, bh = static_cast<int64_t>(b) * H + next_h;
     const uint32_t st = sbase + (i & 1) * C::kStage;
-    const int64_t row_off = (static_cast<int64_t>(b) * T + t0) * q_ld + hq * kD;
-    load_rows8<C::kThreads, kD>(st + C::kQ, static_cast<const uint8_t*>(in.q) + row_off, q_ld, kBlockM);
-    load_rows8<C::kThreads, kD>(st + C::kDo, static_cast<const uint8_t*>(in.dout) + row_off, q_ld, kBlockM);
-    load_rows8<C::kThreads, kBlockM>(st + C::kQt, static_cast<const uint8_t*>(in.qt) + bh * kD * T + t0, T, kD);
-    load_rows8<C::kThreads, kBlockM>(st + C::kDot, static_cast<const uint8_t*>(in.doutt) + bh * kD * T + t0, T, kD);
-    load_bytes<C::kThreads>(st + C::kQs, in.q_scale + bh * T + t0, kBlockM * 4);
-    load_bytes<C::kThreads>(st + C::kDos, in.dout_scale + bh * T + t0, kBlockM * 4);
+    const int64_t row_off = (static_cast<int64_t>(b) * T + t0) * q_ld + next_h * kD;
+    load_rows8<C::kThreads, kD, kBlockM>(st + C::kQ, static_cast<const uint8_t*>(in.q) + row_off, q_ld);
+    load_rows8<C::kThreads, kD, kBlockM>(st + C::kDo, static_cast<const uint8_t*>(in.dout) + row_off, q_ld);
+    load_rows8<C::kThreads, kBlockM, kD>(st + C::kQt, static_cast<const uint8_t*>(in.qt) + bh * kD * T + t0, T);
+    load_rows8<C::kThreads, kBlockM, kD>(st + C::kDot, static_cast<const uint8_t*>(in.doutt) + bh * kD * T + t0, T);
+    load_bytes<C::kThreads, kBlockM * 4>(st + C::kQs, in.q_scale + bh * T + t0);
+    load_bytes<C::kThreads, kBlockM * 4>(st + C::kDos, in.dout_scale + bh * T + t0);
     const int64_t ts = (bh * (T / 32) + t0 / 32) * kD;
-    load_bytes<C::kThreads>(st + C::kQts, in.qt_scale + ts, kBlockM / 32 * kD);
-    load_bytes<C::kThreads>(st + C::kDots, in.doutt_scale + ts, kBlockM / 32 * kD);
-    load_bytes<C::kThreads>(st + C::kLse, in.lse + bh * T + t0, kBlockM * 4);
-    load_bytes<C::kThreads>(st + C::kDelta, in.delta + bh * T + t0, kBlockM * 4);
+    load_bytes<C::kThreads, kBlockM / 32 * kD>(st + C::kQts, in.qt_scale + ts);
+    load_bytes<C::kThreads, kBlockM / 32 * kD>(st + C::kDots, in.doutt_scale + ts);
+    load_bytes<C::kThreads, kBlockM * 4>(st + C::kLse, in.lse + bh * T + t0);
+    load_bytes<C::kThreads, kBlockM * 4>(st + C::kDelta, in.delta + bh * T + t0);
     cp_async_commit();
+    if (++next_m > m_hi)
+      next_m = m_lo, ++next_h;
   };
-  load_tile(0);
+  load_next(0);
 
   float acc_k[kDTiles][4] = {}, acc_v[kDTiles][4] = {};
-  const auto step = [&](int i, auto masked) {
+  const auto step = [&](int i, int m, auto masked) {
     constexpr bool kMasked = decltype(masked)::value;
     cp_async_wait<0>();
     __syncthreads(); // tile i landed; the other stage is free
     if (i + 1 < tiles)
-      load_tile(i + 1);
+      load_next(i + 1);
     const int so = (i & 1) * C::kStage;
     const uint32_t st = sbase + so;
     const auto* qs_s = reinterpret_cast<const uint32_t*>(smem + so + C::kQs);
@@ -243,7 +245,6 @@ __device__ __forceinline__ void flash_bwd_mx_dkv_body(
     const uint8_t *qts_s = smem + so + C::kQts, *dots_s = smem + so + C::kDots;
     const auto* s_lse = reinterpret_cast<const float*>(smem + so + C::kLse);
     const auto* s_delta = reinterpret_cast<const float*>(smem + so + C::kDelta);
-    const int m = m_lo + i % per_head;
 
     // Sᵀ = K Qᵀ, dPᵀ = V doutᵀ (rows: keys, columns: queries)
     float s[kMT][4] = {}, dp[kMT][4] = {};
@@ -289,27 +290,28 @@ __device__ __forceinline__ void flash_bwd_mx_dkv_body(
       uint32_t ap[4], ads[4];
       pack_a8(ap, s[4 * kk], s[4 * kk + 1], s[4 * kk + 2], s[4 * kk + 3], 256.0f, 256.0f);
       const uint32_t sfa_ds = pack_a8_scaled(ads, dp[4 * kk], dp[4 * kk + 1], dp[4 * kk + 2], dp[4 * kk + 3]);
+      uint32_t tsd[4], tsq[4];
+      load_t_scales(tsd, dots_s + kk * kD);
+      load_t_scales(tsq, qts_s + kk * kD);
 #pragma unroll
       for (int dp2 = 0; dp2 < kDTiles / 2; ++dp2) {
         const int r = dp2 * 16 + lane % 8 + (lane / 16) * 8, c = 2 * kk + (lane / 8) % 2;
         uint32_t bd[4], bq[4];
         ldmatrix_x4(bd, st + C::kDot + swz8<kBlockM>(r, c));
         ldmatrix_x4(bq, st + C::kQt + swz8<kBlockM>(r, c));
-        const int si = kk * kD + dp2 * 16 + lane / 4;
-        mma_mx(acc_v[2 * dp2], ap, bd[0], bd[1], kPScale, dots_s[si], 0, 0);
-        mma_mx(acc_v[2 * dp2 + 1], ap, bd[2], bd[3], kPScale, dots_s[si + 8], 0, 0);
-        mma_mx(acc_k[2 * dp2], ads, bq[0], bq[1], sfa_ds, qts_s[si], 0, 0);
-        mma_mx(acc_k[2 * dp2 + 1], ads, bq[2], bq[3], sfa_ds, qts_s[si + 8], 0, 0);
+        const uint16_t b0 = dp2 % 2 * 2, b1 = b0 + 1;
+        mma_mx(acc_v[2 * dp2], ap, bd[0], bd[1], kPScale, tsd[dp2 / 2], 0, b0);
+        mma_mx(acc_v[2 * dp2 + 1], ap, bd[2], bd[3], kPScale, tsd[dp2 / 2], 0, b1);
+        mma_mx(acc_k[2 * dp2], ads, bq[0], bq[1], sfa_ds, tsq[dp2 / 2], 0, b0);
+        mma_mx(acc_k[2 * dp2 + 1], ads, bq[2], bq[3], sfa_ds, tsq[dp2 / 2], 0, b1);
       }
     }
   };
-  for (int i = 0; i < tiles; ++i) {
-    const int m = m_lo + i % per_head;
+  for (int i = 0, m = m_lo; i < tiles; ++i, m = m == m_hi ? m_lo : m + 1)
     if (m * kBlockM < n0 + kBlockN - 1 || (window >= 0 && m * kBlockM + kBlockM - 1 - n0 > window))
-      step(i, std::true_type{});
+      step(i, m, std::true_type{});
     else
-      step(i, std::false_type{});
-  }
+      step(i, m, std::false_type{});
 
   __syncthreads();
   stage_acc(smem, warp * 16, acc_k, scale);
@@ -322,9 +324,9 @@ __device__ __forceinline__ void flash_bwd_mx_dkv_body(
 
 constexpr int kQuantWarps = 8;
 
-// one warp per (token, head) row: 4 values per lane, 8 lanes per MX block; with out, delta = rowsum(x * out)
+// one warp per (token, head) row; with out, delta = rowsum(x * out)
 __device__ __forceinline__ void flash_mx_quantize_rows_body(
-      const __nv_bfloat16* __restrict__ x, int64_t x_ld, uint32_t* __restrict__ data, uint32_t* __restrict__ scale,
+      const __nv_bfloat16* __restrict__ x, int64_t x_ld, uint8_t* __restrict__ data, uint32_t* __restrict__ scale,
       const __nv_bfloat16* __restrict__ out, float* __restrict__ delta, int64_t rows, int64_t T, int heads) {
   const int64_t row = static_cast<int64_t>(blockIdx.x) * kQuantWarps + threadIdx.x / 32;
   if (row >= rows)
@@ -336,19 +338,8 @@ __device__ __forceinline__ void flash_mx_quantize_rows_body(
   const uint2 raw = *reinterpret_cast<const uint2*>(x + bt * x_ld + static_cast<int64_t>(h) * kD + lane * 4);
   const auto* p = reinterpret_cast<const __nv_bfloat162*>(&raw);
   const float2 v01 = __bfloat1622float2(p[0]), v23 = __bfloat1622float2(p[1]);
-  float amax = fmaxf(fmaxf(fabsf(v01.x), fabsf(v01.y)), fmaxf(fabsf(v23.x), fabsf(v23.y)));
-#pragma unroll
-  for (int off = 1; off < 8; off *= 2)
-    amax = fmaxf(amax, __shfl_xor_sync(0xffffffffu, amax, off));
-  const int e = mx_exponent(amax);
-  const float mul = mx_multiplier(e);
-  data[row * (kD / 4) + lane] = pack_e4m3(v01.x * mul, v01.y * mul, v23.x * mul, v23.y * mul);
-  uint32_t word = 0;
-#pragma unroll
-  for (int j = 0; j < 4; ++j)
-    word |= static_cast<uint32_t>(__shfl_sync(0xffffffffu, e, 8 * j)) << (8 * j);
-  if (lane == 0)
-    scale[at] = word;
+  const float v[4] = {v01.x, v01.y, v23.x, v23.y};
+  store_row(v, data + row * kD, scale + at);
   if (out != nullptr) {
     const uint2 raw_o = *reinterpret_cast<const uint2*>(out + row * kD + lane * 4);
     const auto* po = reinterpret_cast<const __nv_bfloat162*>(&raw_o);
@@ -362,49 +353,44 @@ __device__ __forceinline__ void flash_mx_quantize_rows_body(
   }
 }
 
-constexpr int kTThreads = 256;  // (dim, 32-token half) per thread
-constexpr int kTPitch = kD + 8; // bf16 per tile row: 16-byte rows, conflict-free column reads
-
-// one block per (64 tokens, head, batch); layouts as kernels::flash_mx_quantize_t
+// one block per (64 tokens, head, batch)
 __device__ __forceinline__ void flash_mx_quantize_t_body(
       const __nv_bfloat16* __restrict__ x, int64_t x_ld, uint8_t* __restrict__ data, uint8_t* __restrict__ scale,
       int64_t T, int heads) {
-  __shared__ __align__(16) __nv_bfloat16 tile[kTTokens][kTPitch];
+  __shared__ __align__(16) TTile tile;
   const int n = static_cast<int>(blockIdx.x), h = static_cast<int>(blockIdx.y), b = static_cast<int>(blockIdx.z);
-  const int tid = static_cast<int>(threadIdx.x);
-#pragma unroll
-  for (int i = 0; i < kTTokens * kD / 8 / kTThreads; ++i) {
-    const int idx = tid + i * kTThreads, t = idx / (kD / 8), c = idx % (kD / 8);
-    const auto* src = x + (static_cast<int64_t>(b) * T + static_cast<int64_t>(n) * kTTokens + t) * x_ld +
-                      static_cast<int64_t>(h) * kD + c * 8;
-    *reinterpret_cast<uint4*>(&tile[t][c * 8]) = *reinterpret_cast<const uint4*>(src);
-  }
+  load_t_tile(tile, x + (static_cast<int64_t>(b) * T + static_cast<int64_t>(n) * kTTokens) * x_ld + h * kD, x_ld);
   __syncthreads();
-  const int d = tid % kD, half = tid / kD;
-  float v[32];
-  float amax = 0.0f;
+  store_t_tile(tile, data, scale, static_cast<int64_t>(b) * heads + h, n, T);
+}
+
+// dout both ways and delta = rowsum(dout * out), one block per (64 tokens, head, batch); dout, out contiguous
+__device__ __forceinline__ void flash_mx_quantize_dout_body(
+      const __nv_bfloat16* __restrict__ dout, const __nv_bfloat16* __restrict__ out, uint8_t* __restrict__ data,
+      uint32_t* __restrict__ scale, uint8_t* __restrict__ data_t, uint8_t* __restrict__ scale_t,
+      float* __restrict__ delta, int64_t T, int heads) {
+  __shared__ __align__(16) TTile tile;
+  const int n = static_cast<int>(blockIdx.x), h = static_cast<int>(blockIdx.y), b = static_cast<int>(blockIdx.z);
+  const int lane = static_cast<int>(threadIdx.x % 32);
+  const int64_t ld = static_cast<int64_t>(heads) * kD, t0 = static_cast<int64_t>(n) * kTTokens;
+  const int64_t bh = static_cast<int64_t>(b) * heads + h, off = (b * T + t0) * ld + h * kD;
+  load_t_tile(tile, dout + off, ld);
+  __syncthreads();
+  store_t_tile(tile, data_t, scale_t, bh, n, T);
+  for (int r = static_cast<int>(threadIdx.x) / 32; r < kTTokens; r += kTThreads / 32) {
+    float x[4];
+    tile_row(tile, r, x);
+    store_row(x, data + off + r * ld, scale + bh * T + t0 + r);
+    const uint2 raw_o = *reinterpret_cast<const uint2*>(out + off + r * ld + lane * 4);
+    const auto* po = reinterpret_cast<const __nv_bfloat162*>(&raw_o);
+    const float2 o01 = __bfloat1622float2(po[0]), o23 = __bfloat1622float2(po[1]);
+    float sum = x[0] * o01.x + x[1] * o01.y + x[2] * o23.x + x[3] * o23.y;
 #pragma unroll
-  for (int t = 0; t < 32; ++t) {
-    v[t] = __bfloat162float(tile[half * 32 + t][d]);
-    amax = fmaxf(amax, fabsf(v[t]));
+    for (int o = 16; o > 0; o /= 2)
+      sum += __shfl_xor_sync(0xffffffffu, sum, o);
+    if (lane == 0)
+      delta[bh * T + t0 + r] = sum;
   }
-  const int e = mx_exponent(amax);
-  const float mul = mx_multiplier(e);
-  // position p of each 16 holds token [0,1,8,9,2,3,10,11,4,5,12,13,6,7,14,15][p]
-  const auto token = [](int p) {
-    const int i = p % 16;
-    return p / 16 * 16 + 2 * (i / 4) + i % 2 + 8 * (i % 4 / 2);
-  };
-  uint32_t w[8];
-#pragma unroll
-  for (int j = 0; j < 8; ++j)
-    w[j] = pack_e4m3(
-          v[token(4 * j)] * mul, v[token(4 * j + 1)] * mul, v[token(4 * j + 2)] * mul, v[token(4 * j + 3)] * mul);
-  const int64_t bh = static_cast<int64_t>(b) * heads + h;
-  auto* dst = reinterpret_cast<uint4*>(data + (bh * kD + d) * T + static_cast<int64_t>(n) * kTTokens + half * 32);
-  dst[0] = make_uint4(w[0], w[1], w[2], w[3]);
-  dst[1] = make_uint4(w[4], w[5], w[6], w[7]);
-  scale[(bh * (T / 32) + 2 * n + half) * kD + d] = static_cast<uint8_t>(e);
 }
 
 } // namespace
@@ -434,15 +420,22 @@ NANOCHAT_FLASH_BWD_MX_DKV(8, 32)
 NANOCHAT_FLASH_BWD_MX_DKV(8, 64)
 
 __global__ void __launch_bounds__(nanochat::kQuantWarps * 32) nanochat_flash_mx_quantize_rows(
-      const __nv_bfloat16* __restrict__ x, int64_t x_ld, uint32_t* __restrict__ data, uint32_t* __restrict__ scale,
+      const __nv_bfloat16* __restrict__ x, int64_t x_ld, uint8_t* __restrict__ data, uint32_t* __restrict__ scale,
       const __nv_bfloat16* __restrict__ out, float* __restrict__ delta, int64_t rows, int64_t T, int heads) {
   nanochat::flash_mx_quantize_rows_body(x, x_ld, data, scale, out, delta, rows, T, heads);
 }
 
-__global__ void __launch_bounds__(nanochat::kTThreads) nanochat_flash_mx_quantize_t(
+__global__ void __launch_bounds__(nanochat::flash::kTThreads) nanochat_flash_mx_quantize_t(
       const __nv_bfloat16* __restrict__ x, int64_t x_ld, uint8_t* __restrict__ data, uint8_t* __restrict__ scale,
       int64_t T, int heads) {
   nanochat::flash_mx_quantize_t_body(x, x_ld, data, scale, T, heads);
+}
+
+__global__ void __launch_bounds__(nanochat::flash::kTThreads) nanochat_flash_mx_quantize_dout(
+      const __nv_bfloat16* __restrict__ dout, const __nv_bfloat16* __restrict__ out, uint8_t* __restrict__ data,
+      uint32_t* __restrict__ scale, uint8_t* __restrict__ data_t, uint8_t* __restrict__ scale_t,
+      float* __restrict__ delta, int64_t T, int heads) {
+  nanochat::flash_mx_quantize_dout_body(dout, out, data, scale, data_t, scale_t, delta, T, heads);
 }
 
 namespace nanochat::kernels {
@@ -489,7 +482,7 @@ const DkvVariant kDkv[kFlashBwdMxDkvVariants] = {
       dkv_variant<8, 64>("mx dkv 128k, m64", nanochat_flash_bwd_mx_dkv_w8_m64),
 };
 
-constexpr int kDefaultDq = 0, kDefaultDkv = 0;
+constexpr int kDefaultDq = 0, kDefaultDkv = 3; // dq n32, dkv 128k m64: fastest at d12 (bench_attention)
 
 template <class Kernel>
 void set_smem(Kernel kernel, int smem, bool& done) {
@@ -513,14 +506,24 @@ void flash_mx_quantize_rows(
       int heads, cudaStream_t stream) {
   const int64_t rows = static_cast<int64_t>(B) * T * heads;
   nanochat_flash_mx_quantize_rows<<<(rows + kQuantWarps - 1) / kQuantWarps, kQuantWarps * 32, 0, stream>>>(
-        static_cast<const bf16*>(x), x_ld, static_cast<uint32_t*>(data), scale, static_cast<const bf16*>(out), delta,
+        static_cast<const bf16*>(x), x_ld, static_cast<uint8_t*>(data), scale, static_cast<const bf16*>(out), delta,
         rows, T, heads);
 }
 
 void flash_mx_quantize_t(
       const void* x, int64_t x_ld, void* data, uint8_t* scale, int B, int64_t T, int heads, cudaStream_t stream) {
-  nanochat_flash_mx_quantize_t<<<dim3(static_cast<unsigned>(T / kTTokens), heads, B), kTThreads, 0, stream>>>(
+  nanochat_flash_mx_quantize_t<<<
+        dim3(static_cast<unsigned>(T / flash::kTTokens), heads, B), flash::kTThreads, 0, stream>>>(
         static_cast<const bf16*>(x), x_ld, static_cast<uint8_t*>(data), scale, T, heads);
+}
+
+void flash_mx_quantize_dout(
+      const void* dout, const void* out, void* data, uint32_t* scale, void* data_t, uint8_t* scale_t, float* delta,
+      int B, int64_t T, int heads, cudaStream_t stream) {
+  nanochat_flash_mx_quantize_dout<<<
+        dim3(static_cast<unsigned>(T / flash::kTTokens), heads, B), flash::kTThreads, 0, stream>>>(
+        static_cast<const bf16*>(dout), static_cast<const bf16*>(out), static_cast<uint8_t*>(data), scale,
+        static_cast<uint8_t*>(data_t), scale_t, delta, T, heads);
 }
 
 void flash_bwd_mx(

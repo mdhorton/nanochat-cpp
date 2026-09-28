@@ -2,9 +2,9 @@
 // gpt.cpp) against SDPA's cuDNN and memory-efficient kernels, forward and forward + backward, full causal and
 // sliding window (SDPA takes the window as an explicit mask; FA2 natively). Checks each against FA2. bf16: our flash
 // attention forward (flash.h, default tiles) with FA2's backward; bf16mx: with our MXFP8 backward; bf16[...]: its tile
-// configurations, forward only. mx: our MXFP8 forward (mx_flash.h), mx-kernel: its kernel without the quantization.
-// Backward only: FA2's vs ours (bf16, MXFP8 incl. quantization) per tile configuration. Then the attention inputs' MX
-// quantization, standalone vs fused into mx_attention_inputs.
+// configurations, forward only. mx: our MXFP8 forward and backward (mx_flash.h), mx-kernel: its forward kernel without
+// the quantization. Backward only: FA2's vs ours (bf16; MXFP8 on pre-quantized q, k, v, incl. dout's quantization) per
+// tile configuration. Then the attention inputs' MX quantization, standalone vs fused into mx_attention_inputs.
 // Usage: bench_attention [--batch B] [--seq T] [--heads H] [--kv-heads Hkv] [--head-dim D] [--window W]
 //                        [--depth L] [--pattern SSSL] [--iters N]
 #include <algorithm>
@@ -188,7 +188,7 @@ Result bench_mx_kernel(
   torch::NoGradGuard no_grad;
   const auto [qd, qs] = nanochat::mx_flash_quantize_rows(q);
   const auto [kd, ks] = nanochat::mx_flash_quantize_rows(k);
-  const auto [vd, vs] = nanochat::mx_flash_quantize_vt(v);
+  const auto [vd, vs] = nanochat::mx_flash_quantize_t(v);
   auto out = torch::empty_like(q);
   auto lse = torch::empty({q.size(0), q.size(2), q.size(1)}, q.options().dtype(torch::kFloat32));
   const auto run = [&] {
@@ -238,11 +238,13 @@ void bench_backward(
       std::printf("  %-32s %8.3f ms %6.1f TFLOPs (FA2-equivalent)\n", name.c_str(), ms, bwd_flops / ms / 1e9);
     }
   }
+  const auto mx_in = nanochat::mx_flash_quantize(q, k, v);
+  const auto [mx_out, mx_lse] = nanochat::mx_flash_forward(q, k, v, window, &mx_in);
   for (int dqv = 0; dqv < nanochat::kernels::kFlashBwdMxDqVariants; ++dqv) {
     for (int dkvv = 0; dkvv < nanochat::kernels::kFlashBwdMxDkvVariants; ++dkvv) {
       const double ms = time_ms(
             [&] {
-              nanochat::flash_backward_mx(g, q, k, v, out, lse, window, dqv, dkvv);
+              nanochat::mx_flash_backward(g, mx_in, mx_out, mx_lse, window, dqv, dkvv);
             },
             a.iters);
       const auto name = std::string(nanochat::kernels::flash_bwd_mx_dq_variant_name(dqv)) + "; " +
@@ -277,9 +279,7 @@ void bench_quantization(const Args& a) {
     const auto v = out[2].view({B, T, a.kv_heads, D});
     const double standalone = time_ms(
           [&] {
-            nanochat::mx_flash_quantize_rows(q);
-            nanochat::mx_flash_quantize_rows(k);
-            nanochat::mx_flash_quantize_vt(v);
+            nanochat::mx_flash_quantize(q, k, v);
           },
           a.iters);
     const double plain = time_ms(

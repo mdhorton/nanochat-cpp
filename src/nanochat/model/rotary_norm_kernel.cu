@@ -2,7 +2,7 @@
 
 #include <cuda_bf16.h>
 
-#include "nanochat/model/mx_flash.cuh"
+#include "nanochat/model/flash_mx.cuh"
 #include "nanochat/model/rotary_norm.cuh"
 
 namespace nanochat {
@@ -42,7 +42,7 @@ __device__ __forceinline__ void rotary_norm_fwd_body(
       return __bfloat162float(__float2bfloat16(v));
     };
     const int64_t b = row / heads / seq_len;
-    mx_flash::store_row_halves(
+    flash::store_row_halves(
           rb(y.y1[0][0] * k), rb(y.y1[0][1] * k), rb(y.y2[0][0] * k), rb(y.y2[0][1] * k), mx_data + row * head_dim,
           mx_scale + (b * heads + row % heads) * seq_len + t);
   }

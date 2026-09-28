@@ -3,6 +3,7 @@
 #include <ATen/cuda/CUDAContext.h>
 
 #include "nanochat/model/flash_kernel.h"
+#include "nanochat/model/mx_flash.h"
 
 namespace nanochat {
 
@@ -107,69 +108,15 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> flash_backward(
 }
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> flash_backward_mx(
-      const torch::Tensor& dout_in, const torch::Tensor& q, const torch::Tensor& k, const torch::Tensor& v,
+      const torch::Tensor& dout, const torch::Tensor& q, const torch::Tensor& k, const torch::Tensor& v,
       const torch::Tensor& out, const torch::Tensor& lse, int64_t window, int dq_variant, int dkv_variant) {
-  const int64_t q_ld = check_input(q, "q"), k_ld = check_input(k, "k"), v_ld = check_input(v, "v");
-  const int64_t B = q.size(0), T = q.size(1), H = q.size(2), Hkv = k.size(2);
-  const auto dout = dout_in.contiguous();
-  TORCH_CHECK(dout.sizes() == q.sizes() && dout.scalar_type() == torch::kBFloat16, "dout: as q");
-  TORCH_CHECK(out.sizes() == q.sizes() && out.is_contiguous() && out.scalar_type() == torch::kBFloat16, "out: as q");
-  TORCH_CHECK(lse.sizes() == torch::IntArrayRef({B, H, T}) && lse.is_contiguous(), "lse: (B, H, T) fp32");
-  const auto stream = at::cuda::getCurrentCUDAStream().stream();
-  const auto u8 = q.options().dtype(torch::kUInt8);
-  const auto delta = torch::empty({B, H, T}, lse.options());
-  // along head_dim: (data (B, T, heads, 128), scale (B, heads, T) u32)
-  const auto rows = [&](const torch::Tensor& x, int64_t ld, const torch::Tensor* o) {
-    const int64_t heads = x.size(2);
-    auto data = torch::empty({B, T, heads, kD}, u8), scale = torch::empty({B, heads, T}, u8.dtype(torch::kInt32));
-    kernels::flash_mx_quantize_rows(
-          x.data_ptr(), ld, data.data_ptr(), static_cast<uint32_t*>(scale.data_ptr()), o ? o->data_ptr() : nullptr,
-          o ? delta.data_ptr<float>() : nullptr, static_cast<int>(B), T, static_cast<int>(heads), stream);
-    return std::pair{data, scale};
-  };
-  // along tokens: (data (B, heads, 128, T), scale (B, heads, T / 32, 128))
-  const auto trans = [&](const torch::Tensor& x, int64_t ld) {
-    const int64_t heads = x.size(2);
-    auto data = torch::empty({B, heads, kD, T}, u8), scale = torch::empty({B, heads, T / 32, kD}, u8);
-    kernels::flash_mx_quantize_t(
-          x.data_ptr(), ld, data.data_ptr(), scale.data_ptr<uint8_t>(), static_cast<int>(B), T, static_cast<int>(heads),
-          stream);
-    return std::pair{data, scale};
-  };
-  const auto [q8, qs] = rows(q, q_ld, nullptr);
-  const auto [k8, ks] = rows(k, k_ld, nullptr);
-  const auto [v8, vs] = rows(v, v_ld, nullptr);
-  const auto [do8, dos] = rows(dout, H * kD, &out);
-  const auto [qt, qts] = trans(q, q_ld);
-  const auto [kt, kts] = trans(k, k_ld);
-  const auto [dot, dots] = trans(dout, H * kD);
-  const auto u32 = [](const torch::Tensor& t) {
-    return static_cast<const uint32_t*>(t.data_ptr());
-  };
-  const kernels::FlashBwdMxInputs in{
-        q8.data_ptr(),
-        k8.data_ptr(),
-        v8.data_ptr(),
-        do8.data_ptr(),
-        u32(qs),
-        u32(ks),
-        u32(vs),
-        u32(dos),
-        qt.data_ptr(),
-        kt.data_ptr(),
-        dot.data_ptr(),
-        qts.data_ptr<uint8_t>(),
-        kts.data_ptr<uint8_t>(),
-        dots.data_ptr<uint8_t>(),
-        lse.data_ptr<float>(),
-        delta.data_ptr<float>()};
-  auto dq = torch::empty({B, T, H, kD}, q.options());
-  auto dk = torch::empty({B, T, Hkv, kD}, q.options()), dv = torch::empty({B, T, Hkv, kD}, q.options());
-  kernels::flash_bwd_mx(
-        in, dq.data_ptr(), dk.data_ptr(), dv.data_ptr(), static_cast<int>(B), T, static_cast<int>(H),
-        static_cast<int>(Hkv), window, stream, dq_variant, dkv_variant);
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
-  return {dq, dk, dv};
+  MxFlashInputs in;
+  std::tie(in.q, in.q_scale) = mx_flash_quantize_rows(q);
+  std::tie(in.k, in.k_scale) = mx_flash_quantize_rows(k);
+  std::tie(in.v, in.v_scale) = mx_flash_quantize_rows(v);
+  std::tie(in.qt, in.qt_scale) = mx_flash_quantize_t(q);
+  std::tie(in.kt, in.kt_scale) = mx_flash_quantize_t(k);
+  return mx_flash_backward(dout, in, out, lse, window, dq_variant, dkv_variant);
 }
 
 torch::Tensor flash_attention(

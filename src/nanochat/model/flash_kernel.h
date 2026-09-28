@@ -46,9 +46,16 @@ void flash_mx_quantize_rows(
 
 // x as above. data: (B, heads, 128, T) e4m3, x transposed with tokens permuted in each 16 as
 // [0,1,8,9,2,3,10,11,4,5,12,13,6,7,14,15] (the order an accumulator lands in as an A fragment).
-// scale: (B, heads, T / 32, 128) ue8m0 per (32 tokens, dim).
+// scale: (B, heads, T / 32, 128) ue8m0 per (32 tokens, dim), dim d at byte d % 8 * 16 + d / 16 * 2 + d / 8 % 2 (one
+// 16-byte load per mma thread; flash_mx.cuh t_scale_pos).
 void flash_mx_quantize_t(
       const void* x, int64_t x_ld, void* data, uint8_t* scale, int B, int64_t T, int heads, cudaStream_t stream);
+
+// dout and out (B, T, heads, 128) bf16, contiguous, read once: dout as flash_mx_quantize_rows (data, scale, and
+// delta) and as flash_mx_quantize_t (data_t, scale_t). T % 64 == 0.
+void flash_mx_quantize_dout(
+      const void* dout, const void* out, void* data, uint32_t* scale, void* data_t, uint8_t* scale_t, float* delta,
+      int B, int64_t T, int heads, cudaStream_t stream);
 
 struct FlashBwdMxInputs {
   const void *q, *k, *v, *dout;                             // flash_mx_quantize_rows
