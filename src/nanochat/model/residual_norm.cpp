@@ -34,7 +34,8 @@ class ResidualNorm : public torch::autograd::Function<ResidualNorm> {
 public:
   static variable_list forward(
         AutogradContext* ctx, const torch::Tensor& x, const Optional& r_in, const Optional& x0_in,
-        const Optional& lr_in, const Optional& l0_in, int64_t layer, const c10::intrusive_ptr<X0Grad>& x0_grad) {
+        const Optional& lr_in, const Optional& l0_in, int64_t layer, const c10::intrusive_ptr<X0Grad>& x0_grad, bool mx,
+        int64_t gate_cols) {
     const auto r = r_in.value_or(torch::Tensor()), x0 = x0_in.value_or(torch::Tensor());
     const auto lr = lr_in.value_or(torch::Tensor()), l0 = l0_in.value_or(torch::Tensor());
     check_bf16(x, x);
@@ -49,23 +50,33 @@ public:
       TORCH_CHECK(
             layer >= 0 && layer < lr.numel() && lr.numel() == l0.numel() && lr.is_contiguous() && l0.is_contiguous());
     }
-    auto res = torch::empty_like(x), n = torch::empty_like(x);
+    auto res = torch::empty_like(x), n = torch::empty_like(x); // mx: n's columns [0, gate_cols) only
     auto rstd = torch::empty({rows}, x.options().dtype(torch::kFloat32));
     const auto s = add && blend ? torch::empty_like(x) : torch::Tensor();
-    kernels::residual_norm_fwd(
-          {.x = x.data_ptr(),
-           .r = ptr(r),
-           .x0 = ptr(x0),
-           .lr = blend ? lr.data_ptr<float>() + layer : nullptr,
-           .l0 = blend ? l0.data_ptr<float>() + layer : nullptr,
-           .s = s.defined() ? s.data_ptr() : nullptr,
-           .res = res.data_ptr(),
-           .n = n.data_ptr(),
-           .rstd = rstd.data_ptr<float>(),
-           .rows = rows,
-           .cols = static_cast<int>(cols),
-           .eps = std::numeric_limits<float>::epsilon()}, // F.rms_norm's default eps (opmath float epsilon)
-          at::cuda::getCurrentCUDAStream().stream());
+    const kernels::ResidualNormFwd args{
+          .x = x.data_ptr(),
+          .r = ptr(r),
+          .x0 = ptr(x0),
+          .lr = blend ? lr.data_ptr<float>() + layer : nullptr,
+          .l0 = blend ? l0.data_ptr<float>() + layer : nullptr,
+          .s = s.defined() ? s.data_ptr() : nullptr,
+          .res = res.data_ptr(),
+          .n = n.data_ptr(),
+          .rstd = rstd.data_ptr<float>(),
+          .rows = rows,
+          .cols = static_cast<int>(cols),
+          .eps = std::numeric_limits<float>::epsilon()}; // F.rms_norm's default eps (opmath float epsilon)
+    const auto stream = at::cuda::getCurrentCUDAStream().stream();
+    Fp8Tensor n_mx;
+    if (mx) {
+      TORCH_CHECK(residual_norm_mx_fits(rows, cols) && gate_cols >= 0 && gate_cols <= cols, "residual_norm_mx: shape");
+      n_mx = empty_mx(rows, cols, x.options());
+      const auto [out, out_t] = mx_outs(n_mx);
+      kernels::residual_norm_mx_fwd(
+            {.base = args, .out = out, .out_t = out_t, .n_cols = static_cast<int>(gate_cols)}, stream);
+    }
+    else
+      kernels::residual_norm_fwd(args, stream);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
     ctx->set_materialize_grads(false);
     ctx->save_for_backward({blend ? (add ? s : x) : torch::Tensor(), x0, lr, l0, res, rstd});
@@ -78,7 +89,10 @@ public:
       ctx->saved_data["x_is_x0"] = x.is_same(x0);
       x0_grad->claimed = true;
     }
-    return {res, n};
+    if (!mx)
+      return {res, n};
+    ctx->mark_non_differentiable({n_mx.data, n_mx.inv_scale, n_mx.data_t, n_mx.inv_scale_t});
+    return {res, n, n_mx.data, n_mx.inv_scale, n_mx.data_t, n_mx.inv_scale_t};
   }
 
   static variable_list backward(AutogradContext* ctx, variable_list grads) {
@@ -141,10 +155,10 @@ public:
       else
         x0_grad->sum = torch::Tensor(); // a retained graph's next backward starts over
       if (fold_x)
-        return {dx0, add ? ds : torch::Tensor(), torch::Tensor(), dlr, dl0, torch::Tensor(), torch::Tensor()};
+        return {dx0, add ? ds : torch::Tensor(), {}, dlr, dl0, {}, {}, {}, {}};
     }
     // the add passes ds to both of its inputs
-    return {ds, add ? ds : torch::Tensor(), dx0, dlr, dl0, torch::Tensor(), torch::Tensor()};
+    return {ds, add ? ds : torch::Tensor(), dx0, dlr, dl0, {}, {}, {}, {}};
   }
 };
 
@@ -154,8 +168,27 @@ std::pair<torch::Tensor, torch::Tensor> residual_norm(
       const torch::Tensor& x, const torch::Tensor& r, const torch::Tensor& x0, const torch::Tensor& resid_lambdas,
       const torch::Tensor& x0_lambdas, int64_t layer, const c10::intrusive_ptr<X0Grad>& x0_grad) {
   const auto out = ResidualNorm::apply(
-        x, optional(r), optional(x0), optional(resid_lambdas), optional(x0_lambdas), layer, x0_grad);
+        x, optional(r), optional(x0), optional(resid_lambdas), optional(x0_lambdas), layer, x0_grad, false, 0);
   return {out[0], out[1]};
+}
+
+ResidualNormMx residual_norm_mx(
+      const torch::Tensor& x, const torch::Tensor& r, const torch::Tensor& x0, const torch::Tensor& resid_lambdas,
+      const torch::Tensor& x0_lambdas, int64_t layer, const c10::intrusive_ptr<X0Grad>& x0_grad, int64_t gate_cols) {
+  const auto out = ResidualNorm::apply(
+        x, optional(r), optional(x0), optional(resid_lambdas), optional(x0_lambdas), layer, x0_grad, true, gate_cols);
+  return {out[0], out[1], {out[2], out[4], out[3], out[5]}};
+}
+
+bool residual_norm_mx_fits(int64_t rows, int64_t cols) {
+  static const int max_smem = [] {
+    int device = 0, n = 0;
+    cudaGetDevice(&device);
+    cudaDeviceGetAttribute(&n, cudaDevAttrMaxSharedMemoryPerBlockOptin, device);
+    return n;
+  }();
+  return mx_fits(rows, cols) && cols <= kernels::kResidualNormMxMaxCols &&
+         kernels::residual_norm_mx_smem(static_cast<int>(cols)) <= max_smem;
 }
 
 } // namespace nanochat

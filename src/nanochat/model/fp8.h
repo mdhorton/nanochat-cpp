@@ -43,12 +43,19 @@ torch::Tensor fp8_matmul(
       const torch::Tensor& input_2d, const torch::Tensor& weight, Fp8WeightCache* cache = nullptr,
       Fp8Recipe recipe = Fp8Recipe::Tensorwise);
 
+struct Fp8Tensor;
+
 // The MLP's c_proj(relu(c_fc(x)).square()) with both matmuls as fp8_matmul, bit for bit. x_2d (N, in) bf16 (N % 16
-// == 0), w_fc (hidden, in), w_proj (out, hidden) -> (N, out).
+// == 0), w_fc (hidden, in), w_proj (out, hidden) -> (N, out). x_mx (Mx only, see relu_square_mlp_mx): x_2d already
+// quantized (residual_norm_mx); x_2d then only carries autograd.
 torch::Tensor fp8_relu_square_mlp(
       const torch::Tensor& x_2d, const torch::Tensor& w_fc, const torch::Tensor& w_proj,
       Fp8WeightCache* fc_cache = nullptr, Fp8WeightCache* proj_cache = nullptr,
-      Fp8Recipe recipe = Fp8Recipe::Tensorwise);
+      Fp8Recipe recipe = Fp8Recipe::Tensorwise, const Fp8Tensor* x_mx = nullptr);
+
+// Whether fp8_relu_square_mlp of an (N, in) input runs under Mx (else tensorwise).
+bool relu_square_mlp_mx(
+      int64_t N, int64_t in, const torch::Tensor& w_fc, const torch::Tensor& w_proj, Fp8Recipe recipe);
 
 // Attention's c_q, c_k, c_v as fp8_matmuls of the same x_2d (N, in) bf16, merged: x quantized once, one GEMM for the
 // forward and one for the weight gradients (both bit-identical); the input gradient is summed in fp32 (Mx: one GEMM).

@@ -26,7 +26,8 @@ public:
   static variable_list forward(
         AutogradContext* ctx, const torch::Tensor& x, const torch::Tensor& wq, const torch::Tensor& wk,
         const torch::Tensor& wv, const torch::Tensor& cos, const torch::Tensor& sin, double scale,
-        const Optional& ve_in, const Optional& w_gate_in, int64_t head_dim, Fp8WeightCache* cache) {
+        const Optional& ve_in, const Optional& w_gate_in, int64_t head_dim, Fp8WeightCache* cache,
+        const Fp8Tensor* x_mx) {
     const auto ve = ve_in.value_or(torch::Tensor()), w_gate = w_gate_in.value_or(torch::Tensor());
     const int64_t N = x.size(0), T = cos.size(1), nq = wq.size(0), nkv = wk.size(0), n = nq + 2 * nkv;
     TORCH_CHECK(mx_attention_fits(N, x.size(1), nq, nkv, head_dim) && wv.size(0) == nkv && N % T == 0);
@@ -38,7 +39,8 @@ public:
     const int heads = static_cast<int>(nq / head_dim), kv_heads = static_cast<int>(nkv / head_dim);
     const auto stream = at::cuda::getCurrentCUDAStream().stream();
 
-    const auto xq = quantize_mx(x);
+    TORCH_CHECK(x_mx == nullptr || (x_mx->data.defined() && x_mx->data_t.defined()), "x_mx: both layouts");
+    const auto xq = x_mx != nullptr ? *x_mx : quantize_mx(x);
     const auto wf = mx_qkv_weights(wq, wk, wv, cache);
     const auto qkv = at::_scaled_mm(xq.data, wf[0].t(), xq.inv_scale, wf[2], {}, {}, x.scalar_type(), false);
 
@@ -137,7 +139,7 @@ public:
       dx.narrow(1, 0, gate_in.size(1)).add_(at::mm(dz, w_gate_bf16));
       dw_gate = at::mm(dz.t(), gate_in).to(static_cast<torch::ScalarType>(ctx->saved_data["w_gate_dtype"].toInt()));
     }
-    return {dx, rows(0, nq), rows(nq, nkv), rows(nq + nkv, nkv), {}, {}, {}, dve, dw_gate, {}, {}};
+    return {dx, rows(0, nq), rows(nq, nkv), rows(nq + nkv, nkv), {}, {}, {}, dve, dw_gate, {}, {}, {}};
   }
 };
 
@@ -150,12 +152,12 @@ bool mx_attention_fits(int64_t N, int64_t C, int64_t n_q, int64_t n_kv, int64_t 
 variable_list mx_attention_inputs(
       const torch::Tensor& x_2d, const torch::Tensor& wq, const torch::Tensor& wk, const torch::Tensor& wv,
       const torch::Tensor& cos, const torch::Tensor& sin, double scale, const torch::Tensor& ve,
-      const torch::Tensor& w_gate, int64_t head_dim, Fp8WeightCache* cache) {
+      const torch::Tensor& w_gate, int64_t head_dim, Fp8WeightCache* cache, const Fp8Tensor* x_mx) {
   const auto opt = [](const torch::Tensor& t) {
     return t.defined() ? Optional(t) : std::nullopt;
   };
   return MxAttentionInputs::apply(
-        x_2d.contiguous(), wq, wk, wv, cos, sin, scale, opt(ve), opt(w_gate), head_dim, cache);
+        x_2d.contiguous(), wq, wk, wv, cos, sin, scale, opt(ve), opt(w_gate), head_dim, cache, x_mx);
 }
 
 } // namespace nanochat

@@ -40,7 +40,7 @@ normally be done by inductor and triton.
 |  21 |  247,254 | 4.802301 | 1.435336 |   8.5g |  3.52m | fused smear/backout, dW into .grad             |
 |  22 |  249,284 | 4.802814 | 1.435525 |   8.5g |  3.50m | NCCL_PROTO = "Simple" NCCL_MIN_NCHANNELS = "8" |
 |  23 |  250,734 | 4.803105 | 1.435576 |   8.5g |  3.48m | fused AdamW kernel, Muon grad stacks           |
-|  24 |          |          |          |        |        |                                                |
+|  24 |  252,656 | 4.800344 | 1.434727 |   8.5g |  3.45m | fused MX quantize into residual_norm           |
 |  25 |          |          |          |        |        |                                                |
 
 Run 4: sm120 can't use fa3. however, fa2 works pretty good. `--nproc=2 --fp8 --attention=fa2` enabled by default going

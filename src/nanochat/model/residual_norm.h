@@ -4,6 +4,8 @@
 
 #include <torch/torch.h>
 
+#include "nanochat/model/fp8.h"
+
 namespace nanochat {
 
 // Shared by the residual_norm calls blending one x0: they sum x0's gradient in one buffer, in autograd's order
@@ -22,5 +24,21 @@ std::pair<torch::Tensor, torch::Tensor> residual_norm(
       const torch::Tensor& x, const torch::Tensor& r, const torch::Tensor& x0 = {},
       const torch::Tensor& resid_lambdas = {}, const torch::Tensor& x0_lambdas = {}, int64_t layer = 0,
       const c10::intrusive_ptr<X0Grad>& x0_grad = {});
+
+// residual_norm for an MX consumer: the norm's output is written as its MXFP8 quantization (quantize_mx of n, bit
+// for bit, both layouts) instead of in bf16. n is the autograd handle to pass along with n_mx (fp8_relu_square_mlp,
+// mx_attention_inputs); only its first gate_cols columns hold values (the value-embedding gate's input).
+struct ResidualNormMx {
+  torch::Tensor res, n;
+  Fp8Tensor n_mx;
+};
+
+ResidualNormMx residual_norm_mx(
+      const torch::Tensor& x, const torch::Tensor& r, const torch::Tensor& x0 = {},
+      const torch::Tensor& resid_lambdas = {}, const torch::Tensor& x0_lambdas = {}, int64_t layer = 0,
+      const c10::intrusive_ptr<X0Grad>& x0_grad = {}, int64_t gate_cols = 0);
+
+// Whether residual_norm_mx handles (rows, cols): MX dims (% 128), cols within the kernel's shared memory.
+bool residual_norm_mx_fits(int64_t rows, int64_t cols);
 
 } // namespace nanochat

@@ -150,6 +150,47 @@ TEST(ResidualNorm, NormMatchesReference) {
   EXPECT_LE(lambda_err_f, lambda_err_o * 1.5);
 }
 
+// residual_norm_mx: quantize_mx(n) bit for bit (both layouts), n's gate columns, the same res and gradients.
+TEST(ResidualNorm, MxMatchesQuantize) {
+  torch::manual_seed(0);
+  const auto u8 = [](const torch::Tensor& t) {
+    return t.view(torch::kUInt8);
+  };
+  const auto leaf = [](const torch::Tensor& t) {
+    return t.defined() ? t.clone().requires_grad_() : torch::Tensor();
+  };
+  for (const auto& shape : std::vector<std::vector<int64_t>>{{256, 768}, {2, 128, 1536}, {384, 256}})
+    for (const auto& [add, blend] : {std::pair{false, false}, {true, false}, {true, true}})
+      for (const int64_t gate_cols : {0, 12}) {
+        const auto in = make_inputs(shape, add, blend, true, true);
+        const int64_t C = shape.back(), N = in.x.numel() / C;
+        ASSERT_TRUE(residual_norm_mx_fits(N, C));
+        const auto what = name(shape, add, blend) + " gate " + std::to_string(gate_cols);
+        auto x = leaf(in.x), r = leaf(in.r), x0 = leaf(in.x0), lr = leaf(in.lr), l0 = leaf(in.l0);
+        auto [res, n] = residual_norm(x, r, x0, lr, l0, in.layer);
+        const auto q = quantize_mx(n.detach().reshape({N, C}));
+        auto xm = leaf(in.x), rm = leaf(in.r), x0m = leaf(in.x0), lrm = leaf(in.lr), l0m = leaf(in.l0);
+        const auto o = residual_norm_mx(xm, rm, x0m, lrm, l0m, in.layer, {}, gate_cols);
+        EXPECT_TRUE(torch::equal(o.res, res)) << what;
+        EXPECT_TRUE(torch::equal(u8(o.n_mx.data), u8(q.data))) << what;
+        EXPECT_TRUE(torch::equal(u8(o.n_mx.inv_scale), u8(q.inv_scale))) << what;
+        EXPECT_TRUE(torch::equal(u8(o.n_mx.data_t), u8(q.data_t))) << what;
+        EXPECT_TRUE(torch::equal(u8(o.n_mx.inv_scale_t), u8(q.inv_scale_t))) << what;
+        if (gate_cols > 0)
+          EXPECT_TRUE(torch::equal(o.n.narrow(-1, 0, gate_cols), n.narrow(-1, 0, gate_cols))) << what;
+        const auto g_res = in.g_res.to(torch::kBFloat16), g_n = in.g_n.to(torch::kBFloat16);
+        torch::autograd::backward({res, n}, {g_res, g_n});
+        torch::autograd::backward({o.res, o.n}, {g_res, g_n});
+        EXPECT_TRUE(torch::equal(xm.grad(), x.grad())) << what;
+        if (add)
+          EXPECT_TRUE(torch::equal(rm.grad(), r.grad())) << what;
+        if (blend) {
+          EXPECT_TRUE(torch::equal(x0m.grad(), x0.grad())) << what;
+          EXPECT_TRUE(torch::equal(lrm.grad(), lr.grad()) && torch::equal(l0m.grad(), l0.grad())) << what;
+        }
+      }
+}
+
 TEST(ResidualNorm, ModelMatchesOpByOp) {
   torch::manual_seed(0);
   GPT model(

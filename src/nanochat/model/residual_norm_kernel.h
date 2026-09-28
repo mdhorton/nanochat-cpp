@@ -7,9 +7,12 @@
 
 #include <cuda_runtime_api.h>
 
+#include "nanochat/model/fp8_kernel.h"
+
 namespace nanochat::kernels {
 
 inline constexpr int kResidualNormMaxCols = 2048;
+inline constexpr int kResidualNormMxMaxCols = 1536; // the MX variant's 32-row bf16 tile must fit in shared memory
 
 // All tensors contiguous, 16-byte aligned; cols % 8 == 0, cols <= kResidualNormMaxCols.
 struct ResidualNormFwd {
@@ -24,6 +27,19 @@ struct ResidualNormFwd {
 };
 
 void residual_norm_fwd(const ResidualNormFwd& a, cudaStream_t stream);
+
+// residual_norm_fwd with n MX-quantized both ways (quantize_mx of the bf16 n, bit for bit) instead of written, except
+// its first n_cols columns (0: base.n unused). rows % 32 == 0, cols % 64 == 0, cols <= kResidualNormMxMaxCols.
+struct ResidualNormMxFwd {
+  ResidualNormFwd base;
+  MxOut out, out_t; // (rows, cols) and its transpose
+  int n_cols;
+};
+
+// Shared memory the MX variant needs for cols (must be within the device's opt-in limit).
+int residual_norm_mx_smem(int cols);
+
+void residual_norm_mx_fwd(const ResidualNormMxFwd& a, cudaStream_t stream);
 
 // Blocks the backward uses (its partial sums buffer holds 2 floats per block).
 int residual_norm_bwd_blocks(int64_t rows);

@@ -261,8 +261,10 @@ class Fp8ReluSquareMlp : public torch::autograd::Function<Fp8ReluSquareMlp> {
 public:
   static torch::Tensor forward(
         AutogradContext* ctx, const torch::Tensor& x, const torch::Tensor& w_fc, const torch::Tensor& w_proj,
-        Fp8WeightCache* fc_cache, Fp8WeightCache* proj_cache, bool mx) {
-    const auto xq = quantize_input(x, mx), fcq = quantize_fp8_weight(w_fc, fc_cache, recipe_of(mx));
+        Fp8WeightCache* fc_cache, Fp8WeightCache* proj_cache, bool mx, const Fp8Tensor* x_mx) {
+    TORCH_CHECK(x_mx == nullptr || (mx && x_mx->data.defined() && x_mx->data_t.defined()), "x_mx needs Mx");
+    const auto xq = x_mx != nullptr ? *x_mx : quantize_input(x, mx);
+    const auto fcq = quantize_fp8_weight(w_fc, fc_cache, recipe_of(mx));
     const auto h = mm_forward(xq, fcq, x.scalar_type());
     const auto aq = mx ? quantize_mx(h, true, true, true) : to_fp8_relu_square(h);
     const auto projq = quantize_fp8_weight(w_proj, proj_cache, recipe_of(mx));
@@ -301,7 +303,7 @@ public:
       dhq = quantize(dh, torch::kFloat8_e5m2, scalars, true);
     }
     const auto grad_x = mm_grad_input(dhq, s[2], s[3], dtype);
-    return {grad_x, mm_grad_weight(dhq, s[0], s[1], dtype, grad_params(ctx, "w_fc")), grad_proj, {}, {}, {}};
+    return {grad_x, mm_grad_weight(dhq, s[0], s[1], dtype, grad_params(ctx, "w_fc")), grad_proj, {}, {}, {}, {}};
   }
 };
 
@@ -538,12 +540,17 @@ torch::Tensor fp8_matmul(
   return Float8Matmul::apply(input_2d, weight, cache, mx);
 }
 
+bool relu_square_mlp_mx(
+      int64_t N, int64_t in, const torch::Tensor& w_fc, const torch::Tensor& w_proj, Fp8Recipe recipe) {
+  return recipe == Fp8Recipe::Mx && mx_fits(N, in) && mx_fits(w_fc.size(0), w_fc.size(1)) &&
+         mx_fits(w_proj.size(0), w_proj.size(1));
+}
+
 torch::Tensor fp8_relu_square_mlp(
       const torch::Tensor& x_2d, const torch::Tensor& w_fc, const torch::Tensor& w_proj, Fp8WeightCache* fc_cache,
-      Fp8WeightCache* proj_cache, Fp8Recipe recipe) {
-  const bool mx = recipe == Fp8Recipe::Mx && mx_fits(x_2d.size(0), x_2d.size(1)) &&
-                  mx_fits(w_fc.size(0), w_fc.size(1)) && mx_fits(w_proj.size(0), w_proj.size(1));
-  return Fp8ReluSquareMlp::apply(x_2d, w_fc, w_proj, fc_cache, proj_cache, mx);
+      Fp8WeightCache* proj_cache, Fp8Recipe recipe, const Fp8Tensor* x_mx) {
+  const bool mx = relu_square_mlp_mx(x_2d.size(0), x_2d.size(1), w_fc, w_proj, recipe);
+  return Fp8ReluSquareMlp::apply(x_2d, w_fc, w_proj, fc_cache, proj_cache, mx, x_mx);
 }
 
 torch::autograd::variable_list fp8_qkv(

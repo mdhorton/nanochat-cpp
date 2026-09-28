@@ -77,10 +77,13 @@ TORCH_MODULE(Embedding);
 class CausalSelfAttentionImpl : public torch::nn::Module {
 public:
   CausalSelfAttentionImpl(const GPTConfig& config, int64_t layer_idx, const torch::TensorOptions& options);
-  // ve: value embedding (B, T, n_kv_head * head_dim) or undefined; cos/sin: (1, T, 1, head_dim / 2).
+  // ve: value embedding (B, T, n_kv_head * head_dim) or undefined; cos/sin: (1, T, 1, head_dim / 2). x_mx (with
+  // mx_inputs): x already quantized (residual_norm_mx).
   torch::Tensor forward(
         const torch::Tensor& x, const torch::Tensor& ve, const torch::Tensor& cos, const torch::Tensor& sin,
-        int64_t window);
+        int64_t window, const Fp8Tensor* x_mx = nullptr);
+  // Whether an (N, C) input goes through mx_attention_inputs.
+  bool mx_inputs(int64_t N, int64_t C) const;
 
   static constexpr int64_t kVeGateChannels = 12;
   int64_t n_head, n_kv_head, head_dim;
@@ -100,7 +103,10 @@ TORCH_MODULE(CausalSelfAttention);
 class MLPImpl : public torch::nn::Module {
 public:
   MLPImpl(const GPTConfig& config, const torch::TensorOptions& options);
-  torch::Tensor forward(const torch::Tensor& x);
+  // x_mx (with mx_inputs): x already quantized (residual_norm_mx)
+  torch::Tensor forward(const torch::Tensor& x, const Fp8Tensor* x_mx = nullptr);
+  // Whether an (N, C) input goes through the Mx fp8_relu_square_mlp.
+  bool mx_inputs(int64_t N, int64_t C) const;
   bool fused = false; // relu^2 in one kernel; with FP8, also folded into the quantization (relu_square.h, fp8.h)
   Linear c_fc{nullptr}, c_proj{nullptr};
 };
@@ -114,10 +120,10 @@ public:
         const torch::Tensor& x, const torch::Tensor& ve, const torch::Tensor& cos, const torch::Tensor& sin,
         int64_t window);
   // Fused path (residual_norm.h): from x and x_norm = rms_norm(x), returns {y, m}, the block output y + m unsummed
-  // so the next residual_norm adds it.
+  // so the next residual_norm adds it. x_norm_mx: x_norm's quantization when attn->mx_inputs (residual_norm_mx).
   std::pair<torch::Tensor, torch::Tensor> forward_split(
         const torch::Tensor& x, const torch::Tensor& x_norm, const torch::Tensor& ve, const torch::Tensor& cos,
-        const torch::Tensor& sin, int64_t window);
+        const torch::Tensor& sin, int64_t window, const Fp8Tensor* x_norm_mx = nullptr);
   CausalSelfAttention attn{nullptr};
   MLP mlp{nullptr};
 };

@@ -150,17 +150,22 @@ CausalSelfAttentionImpl::CausalSelfAttentionImpl(
     ve_gate = register_module("ve_gate", Linear(kVeGateChannels, n_kv_head, options));
 }
 
+bool CausalSelfAttentionImpl::mx_inputs(int64_t N, int64_t C) const {
+  return fused && c_q->fp8 && c_k->fp8 && c_v->fp8 && c_q->fp8_recipe == Fp8Recipe::Mx &&
+         mx_attention_fits(N, C, c_q->weight.size(0), c_k->weight.size(0), head_dim);
+}
+
 torch::Tensor CausalSelfAttentionImpl::forward(
       const torch::Tensor& x, const torch::Tensor& ve, const torch::Tensor& cos, const torch::Tensor& sin,
-      int64_t window) {
+      int64_t window, const Fp8Tensor* x_mx) {
   const int64_t B = x.size(0), T = x.size(1);
-  const bool mx = fused && c_q->fp8 && c_k->fp8 && c_v->fp8 && c_q->fp8_recipe == Fp8Recipe::Mx &&
-                  mx_attention_fits(B * T, x.size(-1), c_q->weight.size(0), c_k->weight.size(0), head_dim);
+  const bool mx = mx_inputs(B * T, x.size(-1));
+  TORCH_CHECK(x_mx == nullptr || mx, "x_mx needs mx_inputs");
   if (mx) { // q/k/v, rotary + QK norm and the value embedding in one autograd function
     const auto out = mx_attention_inputs(
           x.to(kComputeDtype).reshape({B * T, -1}), c_q->weight, c_k->weight, c_v->weight, cos, sin, 1.2,
           ve.defined() ? ve.reshape({B * T, -1}) : torch::Tensor(), ve.defined() ? ve_gate->weight : torch::Tensor(),
-          head_dim, &qkv_cache);
+          head_dim, &qkv_cache, x_mx);
     const auto y = attend(
           out[0].view({B, T, n_head, head_dim}), out[1].view({B, T, n_kv_head, head_dim}),
           out[2].view({B, T, n_kv_head, head_dim}), window);
@@ -227,7 +232,12 @@ MLPImpl::MLPImpl(const GPTConfig& config, const torch::TensorOptions& options) {
   c_proj = register_module("c_proj", Linear(4 * config.n_embd, config.n_embd, options));
 }
 
-torch::Tensor MLPImpl::forward(const torch::Tensor& x) {
+bool MLPImpl::mx_inputs(int64_t N, int64_t C) const {
+  return fused && c_fc->fp8 && c_proj->fp8 && relu_square_mlp_mx(N, C, c_fc->weight, c_proj->weight, c_fc->fp8_recipe);
+}
+
+torch::Tensor MLPImpl::forward(const torch::Tensor& x, const Fp8Tensor* x_mx) {
+  TORCH_CHECK(x_mx == nullptr || mx_inputs(x.numel() / x.size(-1), x.size(-1)), "x_mx needs mx_inputs");
   if (!fused)
     return c_proj(torch::relu(c_fc(x)).square());
   if (!c_fc->fp8 || !c_proj->fp8)
@@ -237,7 +247,7 @@ torch::Tensor MLPImpl::forward(const torch::Tensor& x) {
   out_shape.back() = c_proj->weight.size(0);
   return fp8_relu_square_mlp(
                input.reshape({-1, input.size(-1)}), c_fc->weight, c_proj->weight, &c_fc->fp8_cache, &c_proj->fp8_cache,
-               c_fc->fp8_recipe)
+               c_fc->fp8_recipe, x_mx)
         .reshape(out_shape);
 }
 
@@ -255,8 +265,14 @@ torch::Tensor BlockImpl::forward(
 
 std::pair<torch::Tensor, torch::Tensor> BlockImpl::forward_split(
       const torch::Tensor& x, const torch::Tensor& x_norm, const torch::Tensor& ve, const torch::Tensor& cos,
-      const torch::Tensor& sin, int64_t window) {
-  auto [y, y_norm] = residual_norm(x, attn(x_norm, ve, cos, sin, window));
+      const torch::Tensor& sin, int64_t window, const Fp8Tensor* x_norm_mx) {
+  const auto a = attn(x_norm, ve, cos, sin, window, x_norm_mx);
+  const int64_t C = x.size(-1), N = x.numel() / C;
+  if (mlp->mx_inputs(N, C) && residual_norm_mx_fits(N, C)) { // the norm writes the MLP's quantized input
+    const auto o = residual_norm_mx(x, a);
+    return {o.res, mlp(o.n, &o.n_mx)};
+  }
+  auto [y, y_norm] = residual_norm(x, a);
   return {y, mlp(y_norm)};
 }
 
@@ -400,8 +416,19 @@ torch::Tensor GPTImpl::forward(
       ve = value_embeds[key]->as<EmbeddingImpl>()->forward(idx).to(x.scalar_type());
     const auto& block = transformer->h[i]->as<BlockImpl>();
     if (fused_) {
-      auto [res, res_norm] = residual_norm(x, pending, x0, resid_lambdas, x0_lambdas, i, x0_grad);
-      auto [y, m] = block->forward_split(res, res_norm, ve, cos, sin, windows_[i]);
+      const int64_t C = x.size(-1), N = x.numel() / C;
+      torch::Tensor res, res_norm;
+      Fp8Tensor res_mx;
+      if (block->attn->mx_inputs(N, C) && residual_norm_mx_fits(N, C)) { // the norm writes attention's quantized input
+        auto o = residual_norm_mx(
+              x, pending, x0, resid_lambdas, x0_lambdas, i, x0_grad,
+              ve.defined() ? CausalSelfAttentionImpl::kVeGateChannels : 0);
+        res = o.res, res_norm = o.n, res_mx = o.n_mx;
+      }
+      else
+        std::tie(res, res_norm) = residual_norm(x, pending, x0, resid_lambdas, x0_lambdas, i, x0_grad);
+      auto [y, m] = block->forward_split(
+            res, res_norm, ve, cos, sin, windows_[i], res_mx.data.defined() ? &res_mx : nullptr);
       // the backout and the final layer need the block output itself
       if (i == backout_layer || i == config_.n_layer - 1) {
         x = y + m;

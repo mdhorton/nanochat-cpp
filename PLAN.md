@@ -142,11 +142,15 @@ steps:
     Notes: nsys names every NCCL kernel `..._LL` whatever protocol runs; NCCL_PROTO=Simple (pixi.toml) is in effect
     (`NCCL_DEBUG=INFO`). The tail is NCCL-bound now (67 of 72 ms): NCCL_MIN_NCHANNELS=8 measured another -15 ms per
     step; the rest is issuing the reduce_scatters during the last backward and gathering into stacked params.
-    todo (later; d12, % of a 150 ms micro-step): MX in the remaining producers (24 quantizes of 16384x768 each per
+    done: residual_norm fwd writes its norm output MX-quantized (`residual_norm_mx`, `nanochat_residual_norm_mx_fwd_*`):
+    rows from the warp's registers, columns through a 32-row bf16 tile in shared memory (cols <= 1536), bit-identical
+    to quantize_mx of the bf16 n (`ResidualNorm.MxMatchesQuantize`). The bf16 n stays as the autograd handle (only
+    the gate's 12 columns written); `mx_attention_inputs` and `fp8_relu_square_mlp` take the quantized input by
+    pointer. d12: the 24 quantizes per micro-step (67 us each) are gone, the norm kernel 192 -> 212 us (85% of the
+    DRAM roofline, same bytes as before): net ~-1.1 ms per micro-step, ~-17 ms (0.8%) per step; 7-step dt 2048-2076
+    vs 2070-2118 ms before.
+    todo (later; d12, % of a 150 ms micro-step): MX in the remaining producer (12 quantizes of 16384x768 per
     micro-step, 76 us each), and the fp32 .grad adds:
-    - residual_norm fwd (attn/MLP inputs), ~0.5%: bf16 n is still needed (autograd output, gate input). 32-row
-      CTAs (1024 threads) for the transposed copy; MX returned as non-differentiable outputs, passed explicitly
-      through forward_split to fp8_qkv / the MLP.
     - residual_norm bwd (c_proj output grads), ~0.5%: bf16 ds is still needed (residual stream). c_proj's backward
       can't receive extra tensors through autograd: needs a handoff (MX copy keyed on data_ptr, numel, version,
       picked up by quantize_grad).
