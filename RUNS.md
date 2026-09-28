@@ -17,8 +17,8 @@ normally be done by inductor and triton.
 |----:|---------:|---------:|---------:|-------:|-------:|------------------------------------------------|
 |   1 |   36,192 | 4.854269 | 1.439428 |  17.0g | 24.11m | --nproc=1                                      |
 |   2 |   72,305 | 4.800026 | 1.434599 |  16.4g | 12.08m | --nproc=2 (ZeRO-2, MuonAdamW)                  |
-|   3 |   80,129 | 4.820226 | 1.441378 |  16.0g | 10.91m | --nproc=2 --fp8                                |
-|   4 |  107,091 | 4.820269 | 1.441330 |  16.0g |  8.15m | --nproc=2 --fp8 --attention=fa2                |
+|   3 |   80,129 | 4.820226 | 1.441378 |  16.0g | 10.91m | --nproc=2 --fp8=true                           |
+|   4 |  107,091 | 4.820269 | 1.441330 |  16.0g |  8.15m | --nproc=2 --fp8=true --attention=fa2           |
 |   5 |  138,679 | 4.804933 | 1.436173 |   8.2g |  6.29m | --loss-chunk-rows=4096                         |
 |   6 |  155,024 | 4.808020 | 1.437057 |   8.2g |  5.63m | fused rotary + QK-norm                         |
 |   7 |  158,808 | 4.807032 | 1.436761 |   8.2g |  5.49m | fused resid/x0 + λ-blend                       |
@@ -43,7 +43,8 @@ normally be done by inductor and triton.
 |  26 |          |          |          |        |        |                                                |
 |  27 |          |          |          |        |        |                                                |
 
-Run 4: sm120 can't use fa3. however, fa2 works pretty good. `--nproc=2 --fp8 --attention=fa2` enabled by default going
+Run 4: sm120 can't use fa3. however, fa2 works pretty good. `--nproc=2 --fp8=true --attention=fa2` enabled by default
+going
 forward.
 
 Run 5: python nanochat keeps several GB of logits alive at once. this triggers OOM at `--depth=24` on my setup. chunked
@@ -57,6 +58,8 @@ Runs 14-18: mxfp8 support. this reduced memory traffic around quantisation. this
 memory bound. `--fp8-recipe=mxfp8` enabled by default going forward.
 
 Runs 22: NCCL optimisations. `NCCL_PROTO = "Simple" NCCL_MIN_NCHANNELS = "8"` enabled by default going forward.
+
+Run 25: custom bf16 fwd FA. `--attention=bf16` enabled by default going forward.
 
 # medium runs @ d24
 

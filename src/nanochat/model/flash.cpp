@@ -55,6 +55,17 @@ public:
 
 } // namespace
 
+bool flash_supported(const torch::Tensor& q, const torch::Tensor& k, const torch::Tensor& v) {
+  const auto ok = [](const torch::Tensor& x) {
+    return x.is_cuda() && x.scalar_type() == torch::kBFloat16 && x.dim() == 4 && x.size(3) == kD &&
+           x.size(1) % kernels::kFlashSeqMultiple == 0 && x.stride(3) == 1 && x.stride(2) == kD &&
+           x.stride(0) == x.size(1) * x.stride(1) && x.stride(1) % 8 == 0 && x.stride(0) % 8 == 0 &&
+           reinterpret_cast<uintptr_t>(x.data_ptr()) % 16 == 0;
+  };
+  return ok(q) && ok(k) && ok(v) && k.sizes() == v.sizes() && k.size(0) == q.size(0) && k.size(1) == q.size(1) &&
+         q.size(2) % k.size(2) == 0;
+}
+
 std::pair<torch::Tensor, torch::Tensor> flash_forward(
       const torch::Tensor& q, const torch::Tensor& k, const torch::Tensor& v, int64_t window, int variant) {
   const int64_t q_ld = check_input(q, "q"), k_ld = check_input(k, "k"), v_ld = check_input(v, "v");

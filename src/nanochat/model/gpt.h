@@ -19,7 +19,7 @@ inline constexpr auto kComputeDtype = torch::kBFloat16;
 
 // FA2: PyTorch's built-in FlashAttention-2, with native sliding windows (fast).
 // SDPA: nanochat's fallback (explicit mask for sliding windows); bit-identical to Python nanochat on sm_120.
-// BF16: our bf16 flash-attention forward for sm_120 (flash.h), FA2's backward.
+// BF16: our bf16 flash-attention forward for sm_120 (flash.h), FA2's backward; FA2 for shapes it does not take.
 enum class Attention { FA2, SDPA, BF16 };
 Attention attention_from_string(const std::string& name); // "fa2", "sdpa" or "bf16"
 
@@ -88,7 +88,7 @@ public:
 
   static constexpr int64_t kVeGateChannels = 12;
   int64_t n_head, n_kv_head, head_dim;
-  Attention attention = Attention::FA2;
+  Attention attention = Attention::BF16;
   // merged q/k/v (fp8.h's fp8_qkv), rotary + QK norm in one kernel (rotary_norm.h); MXFP8: mx_attention.h
   bool fused = false;
   Linear c_q{nullptr}, c_k{nullptr}, c_v{nullptr}, c_proj{nullptr}, ve_gate{nullptr};

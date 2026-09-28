@@ -53,7 +53,7 @@ steps:
 8. `base_train` app: flags, scaling, schedules, grad accumulation, eval, logging. check tiny loss curve vs python,
    d6 sanity run. **stop for review before d12.**
 9. memory/throughput for d24 on 1 GPU (chunked cross-entropy, activation recompute if needed).
-   done: `--attention fa2` (default), PyTorch's built-in FlashAttention-2 with native sliding windows. parity tests
+   done: `--attention fa2`, PyTorch's built-in FlashAttention-2 with native sliding windows. parity tests
    use `--attention sdpa`, which is bit-identical to python on sm120.
    done: `--loss-chunk-rows N` (default 4096) chunked lm_head + fused softcap/cross-entropy CUDA kernel
    (`model/softcap_ce_kernel.cu`); gradients are computed in forward, so nothing is recomputed. d12 batch 8: 59.5k vs 46.1k

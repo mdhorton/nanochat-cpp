@@ -225,10 +225,10 @@ torch::Tensor CausalSelfAttentionImpl::forward(
 
 torch::Tensor CausalSelfAttentionImpl::attend(
       const torch::Tensor& q, const torch::Tensor& k, const torch::Tensor& v, int64_t window) const {
-  if (attention == Attention::FA2)
-    return fa2_attention(q, k, v, window);
-  if (attention == Attention::BF16)
+  if (attention == Attention::BF16 && flash_supported(q, k, v))
     return flash_attention(q, k, v, window);
+  if (attention != Attention::SDPA)
+    return fa2_attention(q, k, v, window);
   return sdpa_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), window).transpose(1, 2);
 }
 
