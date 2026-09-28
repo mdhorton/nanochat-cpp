@@ -41,6 +41,7 @@ Runs based on the sm120 customizations and tuning.
 |  20 |  242,702 | 4.805256 | 1.436230 |   8.7g | 3.60m | cuBLASLt workspace 32 MB (split-K)            |
 |  21 |  247,254 | 4.802301 | 1.435336 |   8.5g | 3.52m | fused smear/backout, dW into .grad            |
 |  22 |          |          |          |        |       |                                               |
+|  23 |          |          |          |        |       |                                               |
 
 Run 4: sm120 can't use fa3. however, fa2 works pretty good. --attention=fa2 enabled by default going forward.
 
