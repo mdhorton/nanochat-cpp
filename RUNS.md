@@ -6,9 +6,7 @@ Most of the sm120 tuning was done using `--depth=12`. This helped speedup develo
 
 These runs are designed to finish in under 5 minutes. It's easier to spot bpb regressions than quick runs.
 
-```bash
---depth=12 --device-batch-size=8 --num-iterations=100 --eval-tokens=4194304 --eval-every=-1 --save=false
-```
+`--depth=12 --device-batch-size=8 --num-iterations=100 --eval-tokens=4194304 --eval-every=-1 --save=false`
 
 Runs 1-3 are from the original nanochat port (python → c++). No tuning yet.
 
@@ -42,6 +40,7 @@ normally be done by inductor and triton.
 |  23 |  250,734 | 4.803105 | 1.435576 |   8.5g |  3.48m | fused AdamW kernel, Muon grad stacks           |
 |  24 |  252,656 | 4.800344 | 1.434727 |   8.5g |  3.45m | fused MX quantize into residual_norm           |
 |  25 |          |          |          |        |        |                                                |
+|  26 |          |          |          |        |        |                                                |
 
 Run 4: sm120 can't use fa3. however, fa2 works pretty good. `--nproc=2 --fp8 --attention=fa2` enabled by default going
 forward.
@@ -62,9 +61,7 @@ Runs 22: NCCL optimisations. `NCCL_PROTO = "Simple" NCCL_MIN_NCHANNELS = "8"` en
 
 These runs started at d12 run 5 because otherwise it would OOM.
 
-```bash
---depth=24 --device-batch-size=2 --num-iterations=30 --eval-tokens=4194304 --eval-every=-1 --save=false
-```
+`--depth=24 --device-batch-size=2 --num-iterations=30 --eval-tokens=4194304 --eval-every=-1 --save=false`
 
 | toks/sec |     loss |      bpb | memory |   time | git tag and flags (if any) |
 |---------:|---------:|---------:|-------:|-------:|----------------------------|
@@ -74,9 +71,7 @@ These runs started at d12 run 5 because otherwise it would OOM.
 
 # full run @d12
 
-```bash
---fp8 --nproc=2 --depth=12 --device-batch-size=8
-```
+`--depth=12 --device-batch-size=8`
 
 | steps | loss     | bpb      | time    |
 |-------|----------|----------|---------|

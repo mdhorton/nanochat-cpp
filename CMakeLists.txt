@@ -98,6 +98,10 @@ target_link_libraries(base_train PRIVATE nanochat_train)
 add_executable(bench_gemm apps/bench_gemm.cpp)
 target_link_libraries(bench_gemm PRIVATE nanochat_train)
 
+# attention backends (FA2, cuDNN, memory-efficient) at a micro-step's shapes
+add_executable(bench_attention apps/bench_attention.cpp)
+target_link_libraries(bench_attention PRIVATE nanochat_train)
+
 enable_testing()
 find_package(GTest REQUIRED)
 include(GoogleTest)

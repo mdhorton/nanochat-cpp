@@ -154,3 +154,9 @@ steps:
     - residual_norm bwd (c_proj output grads), ~0.5%: bf16 ds is still needed (residual stream). c_proj's backward
       can't receive extra tensors through autograd: needs a handoff (MX copy keyed on data_ptr, numel, version,
       picked up by quantize_grad).
+    dead end: attention backends (`apps/bench_attention.cpp`, d12 shapes B 8, T 2048, 6 heads of 128, GPU at its 145 W
+    cap). FA2 (`_flash_attention_forward`, native windows) fwd + bwd: 1.43 ms windowed (512), 2.58 ms full causal,
+    55-76 TFLOPs of the measured 122 bf16 peak. cuDNN 9.24 via SDPA: full causal fwd 12% faster (0.60 vs 0.68 ms) but
+    bwd 9% slower, so fwd + bwd 2.68 ms; the window as an explicit mask is 3.7x slower (5.35 ms, no block skipping).
+    Memory-efficient: 2.7-5x slower. A native cuDNN sliding window needs the cudnn_frontend headers (not shipped
+    with libtorch) and, judging by the full-causal numbers, would at best match FA2. Keep FA2.
