@@ -89,7 +89,8 @@ __device__ __forceinline__ void value_mix_mx_body(
 #pragma unroll
       for (int k = 0; k < 8; ++k)
         o[k] = __float2bfloat16(a[k] + round_bf16(gate * e[k]));
-      *reinterpret_cast<uint4*>(out + token * width + col) = *reinterpret_cast<const uint4*>(o);
+      if (out != nullptr)
+        *reinterpret_cast<uint4*>(out + token * width + col) = *reinterpret_cast<const uint4*>(o);
     }
     else {
 #pragma unroll

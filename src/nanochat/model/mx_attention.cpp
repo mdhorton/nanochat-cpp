@@ -4,7 +4,6 @@
 
 #include <ATen/cuda/CUDAContext.h>
 
-#include "nanochat/model/flash_kernel.h"
 #include "nanochat/model/mx_attention_kernel.h"
 #include "nanochat/model/mx_flash_kernel.h"
 #include "nanochat/model/rotary_norm_kernel.h"
@@ -72,21 +71,20 @@ public:
     auto q = torch::empty({N, nq}, x.options()), k = torch::empty({N, nkv}, x.options());
     auto rstd_q = torch::empty({N * heads}, x.options().dtype(torch::kFloat32));
     auto rstd_k = torch::empty({N * kv_heads}, rstd_q.options());
-    kernels::rotary_norm_fwd(
-          qkv.data_ptr(), cos.data_ptr(), sin.data_ptr(), q.data_ptr(), rstd_q.data_ptr<float>(), rstd_q.numel(), heads,
-          T, static_cast<int>(head_dim), n, static_cast<float>(scale), eps, stream, mx_ptr(0), words(1));
-    C10_CUDA_KERNEL_LAUNCH_CHECK();
-    kernels::rotary_norm_fwd(
-          offset(qkv, nq), cos.data_ptr(), sin.data_ptr(), k.data_ptr(), rstd_k.data_ptr<float>(), rstd_k.numel(),
-          kv_heads, T, static_cast<int>(head_dim), n, static_cast<float>(scale), eps, stream, mx_ptr(2), words(3));
-    C10_CUDA_KERNEL_LAUNCH_CHECK();
-    if (quantize_attention) // qt, kt
-      for (const auto& [y, h, i] : {std::tuple{q, heads, 6}, std::tuple{k, kv_heads, 8}}) {
-        kernels::flash_mx_quantize_t(
-              y.data_ptr(), y.size(1), mx_ptr(i), static_cast<uint8_t*>(mx_ptr(i + 1)), static_cast<int>(B), T, h,
-              stream);
-        C10_CUDA_KERNEL_LAUNCH_CHECK();
-      }
+    // (with quantize_attention, q and k only as their MX copies: q, k stay unwritten placeholders)
+    for (const auto& [y, rstd, h, col, i] :
+         {std::tuple{q, rstd_q, heads, int64_t{0}, 0}, std::tuple{k, rstd_k, kv_heads, nq, 2}}) {
+      if (quantize_attention)
+        kernels::rotary_norm_mx_fwd(
+              offset(qkv, col), cos.data_ptr(), sin.data_ptr(), rstd.data_ptr<float>(), static_cast<int>(B), T, h, n,
+              static_cast<float>(scale), eps, mx_ptr(i), words(i + 1), mx_ptr(i + 6),
+              static_cast<uint8_t*>(mx_ptr(i + 7)), stream);
+      else
+        kernels::rotary_norm_fwd(
+              offset(qkv, col), cos.data_ptr(), sin.data_ptr(), y.data_ptr(), rstd.data_ptr<float>(), rstd.numel(), h,
+              T, static_cast<int>(head_dim), n, static_cast<float>(scale), eps, stream);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+    }
 
     // value embedding mix, the gate as gpt.py's bf16 Linear
     torch::Tensor v, gate_in, w_gate_bf16, z;
@@ -104,10 +102,10 @@ public:
     }
     else
       v = qkv.narrow(1, nq + nkv, nkv);
-    if (quantize_attention) // the mix (with ve) and v's quantization in one pass
+    if (quantize_attention) // the mix (with ve; v unwritten) and v's quantization in one pass
       kernels::value_mix_mx(
-            offset(qkv, nq + nkv), n, ptr(z), ptr(ve), ve.defined() ? v.data_ptr() : nullptr, mx_ptr(4), words(5),
-            mx_ptr(10), static_cast<uint8_t*>(mx_ptr(11)), static_cast<int>(B), T, kv_heads, stream);
+            offset(qkv, nq + nkv), n, ptr(z), ptr(ve), nullptr, mx_ptr(4), words(5), mx_ptr(10),
+            static_cast<uint8_t*>(mx_ptr(11)), static_cast<int>(B), T, kv_heads, stream);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 
     ctx->save_for_backward(

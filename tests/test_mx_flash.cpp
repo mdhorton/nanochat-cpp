@@ -212,8 +212,8 @@ TEST(MxFlash, GradientsMatchReference) {
   }
 }
 
-// mx_attention_inputs' quantize_attention: q, k, v unchanged; the MX inputs as the standalone quantizers write them;
-// the attention on them identical to quantizing inside mx_flash_attention; backward runs.
+// mx_attention_inputs' quantize_attention: the MX inputs as the standalone quantizers write them from the plain path's
+// q, k, v; the attention and x's gradient identical to quantizing inside mx_flash_attention.
 TEST(MxFlash, FusedQuantizationMatchesStandalone) {
   torch::manual_seed(0);
   const int64_t B = 2, T = 256, N = B * T, C = 256, D = 128, H = 4, Hkv = 2, gate_cols = 12;
@@ -236,21 +236,28 @@ TEST(MxFlash, FusedQuantizationMatchesStandalone) {
     };
     const auto plain = inputs(false), fused = inputs(true);
     ASSERT_EQ(fused.size(), 15u);
-    for (int i = 0; i < 3; ++i)
-      EXPECT_TRUE(torch::equal(fused[i], plain[i])) << i << (with_ve ? " ve" : "");
-    const auto q = fused[0].view({B, T, H, D}), k = fused[1].view({B, T, Hkv, D}), v = fused[2].view({B, T, Hkv, D});
+    const auto view = [&](const torch::autograd::variable_list& o) {
+      return std::tuple{o[0].view({B, T, H, D}), o[1].view({B, T, Hkv, D}), o[2].view({B, T, Hkv, D})};
+    };
+    const auto [q, k, v] = view(plain);
     const auto want = mx_flash_quantize(q, k, v);
     const std::vector<torch::Tensor> w{want.q,  want.q_scale,  want.k,  want.k_scale,  want.v,  want.v_scale,
                                        want.qt, want.qt_scale, want.kt, want.kt_scale, want.vt, want.vt_scale};
     for (int i = 0; i < 12; ++i)
       EXPECT_TRUE(torch::equal(fused[3 + i], w[i])) << names[i] << (with_ve ? " ve" : "");
 
+    // the attention and x's gradient: fused (q, k, v placeholders) as quantizing the plain q, k, v
+    const auto [fq, fk, fv] = view(fused);
     const MxFlashInputs pre{fused[3], fused[4],  fused[5],  fused[6],  fused[7],  fused[8],
                             fused[9], fused[10], fused[11], fused[12], fused[13], fused[14]};
-    const auto y = mx_flash_attention(q, k, v, 128, &pre);
-    EXPECT_TRUE(torch::equal(y, mx_flash_forward(q, k, v, 128).first));
+    const auto y = mx_flash_attention(fq, fk, fv, 128, &pre), y_plain = mx_flash_attention(q, k, v, 128);
+    EXPECT_TRUE(torch::equal(y, y_plain));
     y.to(torch::kFloat32).square().sum().backward();
-    EXPECT_TRUE(x.grad().defined() && x.grad().isfinite().all().item<bool>());
+    const auto gx = x.grad().clone();
+    x.mutable_grad().reset();
+    y_plain.to(torch::kFloat32).square().sum().backward();
+    EXPECT_TRUE(gx.isfinite().all().item<bool>());
+    EXPECT_TRUE(torch::equal(gx, x.grad())) << (with_ve ? "ve" : "");
     x.mutable_grad().reset();
   }
 }

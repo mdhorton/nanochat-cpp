@@ -24,9 +24,9 @@ void value_mix_fwd(
       const void* v, int64_t v_stride, const void* z, const void* ve, void* out, int64_t tokens, int heads,
       cudaStream_t stream);
 
-// v (with ve: value_mix_fwd's out, also written to out) MX-quantized along head_dim (v8, v8_scale) and tokens (vt,
-// vt_scale), as flash_kernel.h's flash_mx_quantize_rows / _t. v's tokens v_stride apart, B * seq_len of them;
-// seq_len % 64 == 0. Without ve, z and out are unused.
+// v (with ve: value_mix_fwd's out, also written to out unless null) MX-quantized along head_dim (v8, v8_scale) and
+// tokens (vt, vt_scale), as flash_kernel.h's flash_mx_quantize_rows / _t. v's tokens v_stride apart, B * seq_len of
+// them; seq_len % 64 == 0. Without ve, z and out are unused.
 void value_mix_mx(
       const void* v, int64_t v_stride, const void* z, const void* ve, void* out, void* v8, uint32_t* v8_scale, void* vt,
       uint8_t* vt_scale, int B, int64_t seq_len, int heads, cudaStream_t stream);
