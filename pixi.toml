@@ -41,15 +41,18 @@ torch = { version = "==2.14.*", index = "https://download.pytorch.org/whl/cu132"
 [activation.env]
 NANOCHAT_BASE_DIR = "$PIXI_PROJECT_ROOT/cache"
 PYTHONDONTWRITEBYTECODE = "1"  # keep the original nanochat tree untouched
-NCCL_PROTO = "Simple" # doesn't seem to help much, but doesn't hurt either.
-# used as task variables.
+NCCL_PROTO = "Simple"
+NCCL_MIN_NCHANNELS = "8"
+
+# the following env vars are used as task variables.
 TRAIN_BASE = "--nproc=2"
 D12_BASE = "$TRAIN_BASE --depth=12 --device-batch-size=8"
 D24_BASE = "$TRAIN_BASE --depth=24 --device-batch-size=2"
 QUICK_BASE = "--eval-tokens=4194304 --eval-every=-1 --save=false"
 
 [tasks]
-# empty CMAKE_CXX_FLAGS drops conda's packaging CXXFLAGS (-O2, -march=nocona); the build type sets optimization
+# empty CMAKE_CXX_FLAGS drops conda's packaging CXXFLAGS (-O2, -march=nocona)
+# the build type sets optimisation
 configure = "cmake -S . -B cmake-build-pixi -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH=$CONDA_PREFIX -DCMAKE_CXX_FLAGS="
 build = { cmd = "cmake --build cmake-build-pixi", depends-on = ["configure"] }
 
