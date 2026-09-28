@@ -13,6 +13,7 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <nvtx3/nvToolsExt.h>
 
+#include "nanochat/model/mx_gemm.h"
 #include "nanochat/tokenizer/tokenizer.h"
 #include "nanochat/train/checkpoint.h"
 #include "nanochat/train/dataloader.h"
@@ -177,6 +178,7 @@ nlohmann::json options_to_json(const TrainOptions& o) {
         {"loss_chunk_rows", o.loss_chunk_rows},
         {"fp8", o.fp8},
         {"fp8_recipe", o.fp8_recipe},
+        {"gemm", o.gemm},
         {"fused", o.fused},
         {"num_iterations", o.num_iterations},
         {"target_flops", o.target_flops},
@@ -326,10 +328,13 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
     if (o.fp8_recipe != "tensorwise" && o.fp8_recipe != "mxfp8")
       throw std::invalid_argument("unknown fp8 recipe: " + o.fp8_recipe + " (use tensorwise or mxfp8)");
     model->set_fp8_recipe(o.fp8_recipe == "mxfp8" ? Fp8Recipe::Mx : Fp8Recipe::Tensorwise);
+    if (o.gemm != "cublas" && o.gemm != "cutlass")
+      throw std::invalid_argument("unknown gemm: " + o.gemm + " (use cublas or cutlass)");
+    set_mx_gemm_backend(o.gemm == "cutlass" ? MxGemmBackend::Cutlass : MxGemmBackend::Cublas);
     const int num_linear = model->num_linears(), num_fp8 = model->set_fp8(true);
     print(std::format(
-          "FP8 training enabled ({} scaling) - converted {}/{} linear layers, skipped {} (too small)", o.fp8_recipe,
-          num_fp8, num_linear, num_linear - num_fp8));
+          "FP8 training enabled ({} scaling{}) - converted {}/{} linear layers, skipped {} (too small)", o.fp8_recipe,
+          o.fp8_recipe == "mxfp8" ? ", " + o.gemm + " GEMMs" : "", num_fp8, num_linear, num_linear - num_fp8));
   }
 
   const auto checkpoint_dir = o.base_dir / "base_checkpoints" /

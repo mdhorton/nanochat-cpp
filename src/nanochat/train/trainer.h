@@ -22,6 +22,7 @@ struct TrainOptions {
   int64_t loss_chunk_rows = 4096;     // > 0: fused chunked lm_head + loss (never all logits at once); 0: as Python
   bool fp8 = true;                    // FP8 matmuls for training (eval stays bf16)
   std::string fp8_recipe = "mxfp8";   // mxfp8 or tensorwise (as Python)
+  std::string gemm = "cutlass";       // MXFP8 GEMMs: cutlass or cublas (cuBLASLt)
   bool fused = true;                  // fused elementwise kernels; false: Python's op-by-op path
   int64_t cublaslt_workspace_mb = 32; // cuBLASLt workspace per stream; its split-K GEMMs need a few MB (torch: 1)
   // training horizon: the first one set wins

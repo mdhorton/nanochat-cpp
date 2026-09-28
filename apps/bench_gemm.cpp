@@ -1,7 +1,9 @@
-// Times cuBLASLt's algorithms for the MXFP8 GEMM shapes of a training micro-step against at::_scaled_mm's choice.
+// Times cuBLASLt's algorithms for the MXFP8 GEMM shapes of a training micro-step against at::_scaled_mm's choice and
+// CUTLASS (mx_gemm_kernel.h).
 // Usage: bench_gemm [--tokens T] [--embd C] [--algos N] [--f32] [--shape M,N,K] [--torch-ws-mb MB]
 // Also reports whether each algorithm gives the same bits twice (split-K with in-place reduction does not).
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -12,6 +14,7 @@
 #include <torch/torch.h>
 
 #include "nanochat/model/fp8.h"
+#include "nanochat/model/mx_gemm.h"
 
 using nanochat::quantize_mx;
 
@@ -63,6 +66,18 @@ Timing time_calls(F&& f, int64_t flops, int warmup = 5, int iters = 20) {
   return {med, static_cast<double>(flops) / med / 1e9};
 }
 
+// host time per call: 200 calls enqueued without syncing
+template <class F>
+double host_us(F&& f) {
+  cudaDeviceSynchronize();
+  const auto t0 = std::chrono::steady_clock::now();
+  for (int i = 0; i < 200; ++i)
+    f();
+  const auto t1 = std::chrono::steady_clock::now();
+  cudaDeviceSynchronize();
+  return std::chrono::duration<double, std::micro>(t1 - t0).count() / 200;
+}
+
 struct AlgoInfo {
   int id = -1;
   uint32_t tile = 0, stages = 0, cluster = 0, swizzle = 0, custom = 0, reduction = 0;
@@ -111,12 +126,23 @@ void bench_shape(const Shape& s, int max_algos) {
 
   // torch's choice
   auto ref = at::_scaled_mm(qa.data, qb.data.t(), qa.inv_scale, qb.inv_scale, {}, {}, out_dtype, false);
-  const auto t_torch = time_calls(
-        [&] {
-          at::_scaled_mm_out(ref, qa.data, qb.data.t(), qa.inv_scale, qb.inv_scale, {}, {}, out_dtype, false);
-        },
-        flops);
+  const auto torch_call = [&] {
+    at::_scaled_mm_out(ref, qa.data, qb.data.t(), qa.inv_scale, qb.inv_scale, {}, {}, out_dtype, false);
+  };
+  const auto t_torch = time_calls(torch_call, flops);
+  const double host_torch = host_us(torch_call);
   const auto ref32 = ref.to(torch::kFloat32);
+
+  // CUTLASS (mx_gemm_kernel.h)
+  auto out_cutlass = torch::empty_like(ref);
+  nanochat::set_mx_gemm_backend(nanochat::MxGemmBackend::Cutlass);
+  const auto cutlass_call = [&] {
+    nanochat::mx_gemm_out(out_cutlass, qa.data, qa.inv_scale, qb.data, qb.inv_scale);
+  };
+  const auto t_cutlass = time_calls(cutlass_call, flops);
+  const double host_cutlass = host_us(cutlass_call);
+  nanochat::set_mx_gemm_backend(nanochat::MxGemmBackend::Cublas);
+  const double cutlass_err = (out_cutlass.to(torch::kFloat32) - ref32).abs().max().item<double>();
 
   // the same GEMM through cublasLt: D^T (N, M) col-major = B (K-major, op T) . A^T (K-major, op N)
   const auto handle = at::cuda::getCurrentCUDABlasLtHandle();
@@ -216,8 +242,10 @@ void bench_shape(const Shape& s, int max_algos) {
     return x.t.ms < y.t.ms;
   });
   std::printf(
-        "\n== %s: M %ld N %ld K %ld %s | torch: %.1f us, %.0f TFLOP/s | %d heuristics\n", s.what.c_str(), s.M, s.N, s.K,
-        s.f32_out ? "f32" : "bf16", t_torch.ms * 1e3, t_torch.tflops, n_heur);
+        "\n== %s: M %ld N %ld K %ld %s | torch: %.1f us, %.0f TFLOP/s (host %.1f us) | cutlass: %.1f us, %.0f "
+        "TFLOP/s (host %.1f us), err %.3g | %d heuristics\n",
+        s.what.c_str(), s.M, s.N, s.K, s.f32_out ? "f32" : "bf16", t_torch.ms * 1e3, t_torch.tflops, host_torch,
+        t_cutlass.ms * 1e3, t_cutlass.tflops, host_cutlass, cutlass_err, n_heur);
   const size_t show = std::min<size_t>(results.size(), 12);
   for (size_t i = 0; i < show; ++i)
     std::printf(

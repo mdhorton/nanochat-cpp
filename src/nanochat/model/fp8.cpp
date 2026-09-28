@@ -197,12 +197,16 @@ torch::Tensor part(const torch::Tensor& dw, int64_t row, int64_t size) {
 // _scaled_mm wants A row-major and B column-major: B = t.t() for a row-major t. Fast accumulation in forward only
 // (tensorwise).
 torch::Tensor mm_forward(const Fp8Tensor& in, const Fp8Tensor& w, torch::ScalarType out_dtype) {
-  return at::_scaled_mm(in.data, w.data.t(), in.inv_scale, w.inv_scale, {}, {}, out_dtype, !is_mx(in));
+  if (is_mx(in))
+    return mx_gemm(in.data, in.inv_scale, w.data, w.inv_scale, out_dtype);
+  return at::_scaled_mm(in.data, w.data.t(), in.inv_scale, w.inv_scale, {}, {}, out_dtype, true);
 }
 
 // grad_input = grad_output @ weight; w_t: forward's transpose
 torch::Tensor mm_grad_input(
       const Fp8Tensor& go, const torch::Tensor& w_t, const torch::Tensor& w_inv, torch::ScalarType out_dtype) {
+  if (is_mx(go))
+    return mx_gemm(go.data, go.inv_scale, w_t, w_inv, out_dtype);
   return at::_scaled_mm(go.data, w_t.t(), go.inv_scale, w_inv, {}, {}, out_dtype, false);
 }
 
@@ -213,7 +217,8 @@ torch::Tensor mm_grad_weight(
       const Fp8Tensor& go, const torch::Tensor& in_t, const torch::Tensor& in_inv, torch::ScalarType out_dtype,
       const std::vector<torch::Tensor>& params) {
   if (params.empty())
-    return at::_scaled_mm(go.data_t, in_t.t(), go.inv_t(), in_inv, {}, {}, out_dtype, false);
+    return is_mx(go) ? mx_gemm(go.data_t, go.inv_t(), in_t, in_inv, out_dtype)
+                     : at::_scaled_mm(go.data_t, in_t.t(), go.inv_t(), in_inv, {}, {}, out_dtype, false);
   mx_grad_weights(go.data_t, go.inv_t(), in_t, in_inv, params);
   return {};
 }
@@ -404,7 +409,7 @@ public:
     const std::array<int64_t, 3> sizes{wq.size(0), wk.size(0), wv.size(0)};
     const auto xq = quantize_mx(x);
     const auto wf = mx_qkv_weights(wq, wk, wv, cache);
-    const auto qkv = at::_scaled_mm(xq.data, wf[0].t(), xq.inv_scale, wf[2], {}, {}, x.scalar_type(), false);
+    const auto qkv = mx_gemm(xq.data, xq.inv_scale, wf[0], wf[2], x.scalar_type());
     ctx->save_for_backward({xq.data_t, xq.inv_scale_t, wf[1], wf[3]});
     ctx->saved_data["gate_cols"] = gate_cols;
     save_grad_params(ctx, "weights", true, {wq, wk, wv});
@@ -428,7 +433,7 @@ public:
     auto g_scale = empty_mx_scale(N, n, grads[0].options()), g_scale_t = empty_mx_scale(n, N, grads[0].options());
     for (int64_t i = 0, row = 0; i < 3; row += sizes[i++])
       quantize_mx_into(grads[i].contiguous(), false, mx_out(g, g_scale, 0, row), mx_out(g_t, g_scale_t, row, 0));
-    auto dx = at::_scaled_mm(g, w_t.t(), g_scale, w_scale_t, {}, {}, dtype, false);
+    auto dx = mx_gemm(g, g_scale, w_t, w_scale_t, dtype);
     if (gate_cols > 0)
       dx.narrow(1, 0, gate_cols).add_(grads[3]);
     const auto dw = mm_grad_weight({g, g_t, g_scale, g_scale_t}, x_t, x_scale_t, dtype, grad_params(ctx, "weights"));

@@ -6,6 +6,7 @@
 
 #include "nanochat/model/mx_attention_kernel.h"
 #include "nanochat/model/mx_flash_kernel.h"
+#include "nanochat/model/mx_gemm.h"
 #include "nanochat/model/rotary_norm_kernel.h"
 
 namespace nanochat {
@@ -43,7 +44,7 @@ public:
     TORCH_CHECK(x_mx == nullptr || (x_mx->data.defined() && x_mx->data_t.defined()), "x_mx: both layouts");
     const auto xq = x_mx != nullptr ? *x_mx : quantize_mx(x);
     const auto wf = mx_qkv_weights(wq, wk, wv, cache);
-    const auto qkv = at::_scaled_mm(xq.data, wf[0].t(), xq.inv_scale, wf[2], {}, {}, x.scalar_type(), false);
+    const auto qkv = mx_gemm(xq.data, xq.inv_scale, wf[0], wf[2], x.scalar_type());
 
     // mx_flash_attention's inputs (MxFlashInputs' order and layouts)
     const int64_t B = N / T;
@@ -165,12 +166,12 @@ public:
     else
       quantize_mx_into(dv, false, v_out, v_out_t);
 
-    auto dx = at::_scaled_mm(g, w_t.t(), g_scale, w_scale_t, {}, {}, dtype, false);
+    auto dx = mx_gemm(g, g_scale, w_t, w_scale_t, dtype);
     torch::Tensor dw;
     if (ctx->saved_data.count("weights") != 0)
       mx_grad_weights(g_t, g_scale_t, x_t, x_scale_t, ctx->saved_data["weights"].toTensorVector());
     else
-      dw = at::_scaled_mm(g_t, x_t.t(), g_scale_t, x_scale_t, {}, {}, dtype, false);
+      dw = mx_gemm(g_t, g_scale_t, x_t, x_scale_t, dtype);
     const auto rows = [&](int64_t row, int64_t size) {
       return dw.defined() ? dw.narrow(0, row, size) : torch::Tensor();
     };

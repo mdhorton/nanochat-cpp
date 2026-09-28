@@ -66,6 +66,7 @@ add_library(nanochat_train
         src/nanochat/model/mx_flash.cpp
         src/nanochat/model/mx_flash_kernel.cu
         src/nanochat/model/mx_gemm.cpp
+        src/nanochat/model/mx_gemm_kernel.cu
         src/nanochat/model/qkv_kernel.cu
         src/nanochat/model/relu_square.cpp
         src/nanochat/model/relu_square_kernel.cu
@@ -89,6 +90,9 @@ target_link_libraries(nanochat_train PUBLIC nanochat ${TORCH_LIBRARIES} "${TORCH
 # ATen/cuda headers need the CUDA library headers (cuBLAS, cuSPARSE, ...), which come with the NVIDIA wheels
 target_include_directories(nanochat_train SYSTEM PUBLIC "${TORCH_DIR}/../nvidia/cu13/include")
 target_include_directories(nanochat_train SYSTEM PRIVATE "${TORCH_DIR}/../nvidia/nccl/include") # ProcessGroupNCCL
+# CUTLASS (headers only) for mx_gemm_kernel.cu
+target_include_directories(nanochat_train SYSTEM PRIVATE
+        "${PROJECT_SOURCE_DIR}/external/cutlass/include" "${PROJECT_SOURCE_DIR}/external/cutlass/tools/util/include")
 # warn on register spills; -lineinfo: source lines in ncu (no codegen change)
 target_compile_options(nanochat_train PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Xptxas=-warn-spills -lineinfo>)
 

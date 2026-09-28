@@ -5,6 +5,7 @@
 #include <ATen/cuda/CUDAContext.h>
 
 #include "nanochat/model/fp8.h"
+#include "nanochat/model/mx_gemm.h"
 #include "nanochat/model/softcap_ce_kernel.h"
 
 namespace nanochat {
@@ -46,13 +47,15 @@ void run_chunks(
     const int64_t end = std::min(N, begin + chunk_rows);
     const auto xc = x.slice(0, begin, end);
     auto buf = logits.slice(0, 0, end - begin);
-    if (fp8) {                               // tensorwise: fast accumulation in forward only
+    if (mx) {
       const int64_t blocks = x.size(1) / 32; // MX scales of a row, rows in whole tiles (begin % 128 == 0)
-      at::_scaled_mm_out(
-            buf, xq.data.slice(0, begin, end), wq.data.t(),
-            mx ? xq.inv_scale.slice(0, begin * blocks, end * blocks) : xq.inv_scale, wq.inv_scale, {}, {},
-            x.scalar_type(), !mx);
+      mx_gemm_out(
+            buf, xq.data.slice(0, begin, end), xq.inv_scale.slice(0, begin * blocks, end * blocks), wq.data,
+            wq.inv_scale);
     }
+    else if (fp8) // tensorwise: fast accumulation in forward only
+      at::_scaled_mm_out(
+            buf, xq.data.slice(0, begin, end), wq.data.t(), xq.inv_scale, wq.inv_scale, {}, {}, x.scalar_type(), true);
     else
       at::mm_out(buf, xc, w.t());
     const int64_t scale_stride = grad_scale.defined() && grad_scale.dim() == 1 ? 1 : 0;
@@ -82,7 +85,7 @@ void run_chunks(
             static_cast<int>(padded), static_cast<float>(softcap), chunk_scale, scale_stride, valid,
             mx_out(gq.data, gq.inv_scale, 0, 0), mx_out(g_all.data_t, g_all.inv_scale_t, 0, begin), stream);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
-      at::_scaled_mm_out(gx, gq.data, wq.data_t.t(), gq.inv_scale, wq.inv_t(), {}, {}, x.scalar_type(), false);
+      mx_gemm_out(gx, gq.data, gq.inv_scale, wq.data_t, wq.inv_t());
       continue;
     }
     const auto gq = quantize_fp8_amax_ready(buf, torch::kFloat8_e5m2, scalars);
@@ -103,9 +106,7 @@ void run_chunks(
     *deferred_g = g_all;
   }
   else
-    at::_scaled_mm_out(
-          const_cast<torch::Tensor&>(grad_w), g_all.data_t, xq.data_t.t(), g_all.inv_scale_t, xq.inv_scale_t, {}, {},
-          torch::kFloat32, false);
+    mx_gemm_out(grad_w, g_all.data_t, g_all.inv_scale_t, xq.data_t, xq.inv_scale_t);
 }
 
 // fp8 writes grad_w; bf16 accumulates into it

@@ -1,9 +1,12 @@
 // FP8 quantization kernels vs fp8.py's torch ops (the model-level checks against Python are in test_gpt/test_train).
 #include <gtest/gtest.h>
 
+#include <ATen/cuda/CUDAContext.h>
+
 #include "nanochat/model/fp8.h"
 #include "nanochat/model/gpt.h"
 #include "nanochat/model/mx_gemm.h"
+#include "nanochat/model/mx_gemm_kernel.h"
 
 using namespace nanochat;
 
@@ -303,4 +306,95 @@ TEST(Fp8, MxGradAccumulatesIntoGrad) {
     EXPECT_TRUE(ws[i].grad().is_alias_of(ws[0].grad())) << i;
     EXPECT_LT(rel_norm_diff(ws[i].grad(), dw_all.narrow(0, row, ws[i].size(0))), 4e-3) << i;
   }
+}
+
+namespace {
+
+// the MX GEMM backend for a scope
+struct GemmBackend {
+  explicit GemmBackend(MxGemmBackend backend) {
+    set_mx_gemm_backend(backend);
+  }
+
+  ~GemmBackend() {
+    set_mx_gemm_backend(MxGemmBackend::Cublas);
+  }
+};
+
+} // namespace
+
+// CUTLASS vs cuBLASLt on the same MX operands: only the fp32 summation order differs.
+TEST(Fp8, CutlassGemmMatchesCublas) {
+  torch::manual_seed(0);
+  const auto opts = torch::TensorOptions().device(torch::kCUDA);
+  for (const auto& [M, N, K] :
+       {std::tuple<int64_t, int64_t, int64_t>{128, 128, 128}, {256, 384, 512}, {640, 256, 1536}}) {
+    const auto what = std::to_string(M) + "x" + std::to_string(N) + "x" + std::to_string(K);
+    const auto a = (torch::randn({M, K}, opts) * torch::logspace(-2, 2, K, 10.0, opts)).to(torch::kBFloat16);
+    const auto b = torch::randn({N, K}, opts).to(torch::kBFloat16);
+    const auto qa = quantize_mx(a, true, false), qb = quantize_mx(b, true, false);
+    const auto gemm = [&](MxGemmBackend backend, torch::ScalarType dtype) {
+      const GemmBackend scope(backend);
+      return mx_gemm(qa.data, qa.inv_scale, qb.data, qb.inv_scale, dtype);
+    };
+    for (const auto dtype : {torch::kBFloat16, torch::kFloat32}) {
+      const auto want = gemm(MxGemmBackend::Cublas, dtype), got = gemm(MxGemmBackend::Cutlass, dtype);
+      EXPECT_LT(rel_norm_diff(got, want), dtype == torch::kBFloat16 ? 2e-3 : 1e-5) << what;
+      std::cout << what << (dtype == torch::kBFloat16 ? " bf16" : " fp32") << ": rel diff " << rel_norm_diff(got, want)
+                << ", identical " << torch::eq(got, want).to(torch::kFloat32).mean().item<float>() << "\n";
+    }
+    // fp32 accumulate with a device alpha (the weight gradients), the kernel itself: mx_gemm_f32 may keep a shape
+    // on cuBLASLt (split-K)
+    const auto alpha = torch::full({1}, 0.5f, opts);
+    auto want = torch::randn({M, N}, opts), got = want.clone();
+    ASSERT_EQ(
+          kernels::cutlass_mx_gemm_f32(
+                qa.data.data_ptr(), qa.inv_scale.data_ptr(), qb.data.data_ptr(), qb.inv_scale.data_ptr(),
+                got.data_ptr<float>(), M, N, K, alpha.data_ptr<float>(), true,
+                at::cuda::getCurrentCUDAStream().stream()),
+          nullptr);
+    mx_gemm_f32(qa.data, qa.inv_scale, qb.data, qb.inv_scale, want, true, alpha);
+    EXPECT_LT(rel_norm_diff(got, want), 1e-5) << what;
+  }
+}
+
+// The fused MX model (merged q/k/v, relu^2 MLP, MX attention, chunked lm_head + loss) with CUTLASS vs cuBLASLt GEMMs.
+TEST(Fp8, CutlassModelMatchesCublas) {
+  const auto opts = torch::TensorOptions().device(torch::kCUDA).dtype(torch::kInt64);
+  const GPTConfig
+        config{.sequence_len = 256, .vocab_size = 1000, .n_layer = 2, .n_head = 2, .n_kv_head = 2, .n_embd = 256};
+  torch::manual_seed(0);
+  const auto ids = torch::randint(0, config.vocab_size, {2, 257}, opts);
+  auto run = [&](MxGemmBackend backend) {
+    const GemmBackend scope(backend);
+    torch::manual_seed(0);
+    GPT model(config);
+    model->init_weights();
+    {
+      torch::NoGradGuard no_grad;
+      for (auto& p : model->parameters())
+        if (p.dim() == 2 && p.size(0) >= 128)
+          p.normal_(0, 0.05);
+    }
+    model->set_fused(true);
+    model->set_loss_chunk_rows(128);
+    model->set_fp8(true);
+    model->set_fp8_recipe(Fp8Recipe::Mx);
+    model->set_attention(Attention::MX);
+    auto loss = model->forward(ids.slice(1, 0, -1).contiguous(), ids.slice(1, 1).contiguous());
+    loss.backward();
+    std::vector<torch::Tensor> out{loss.detach()};
+    for (const auto& p : model->parameters())
+      if (p.dim() == 2 && p.size(0) >= 128)
+        out.push_back(p.grad().clone());
+    return out;
+  };
+  const auto got = run(MxGemmBackend::Cutlass), want = run(MxGemmBackend::Cublas);
+  EXPECT_NEAR(got[0].item<double>(), want[0].item<double>(), 1e-3);
+  double err = 0;
+  for (size_t i = 1; i < want.size(); ++i)
+    err = std::max(err, rel_norm_diff(got[i], want[i]));
+  EXPECT_LT(err, 1e-2);
+  std::cout << "loss " << got[0].item<double>() << " vs " << want[0].item<double>() << ", max grad rel diff " << err
+            << "\n";
 }
