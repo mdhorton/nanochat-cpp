@@ -1,6 +1,7 @@
 // Times the attention backends at a training micro-step's shapes: the FA2 path the model uses (fa2_attention in
 // gpt.cpp) against SDPA's cuDNN and memory-efficient kernels, forward and forward + backward, full causal and
-// sliding window (SDPA takes the window as an explicit mask; FA2 natively). Checks each against FA2.
+// sliding window (SDPA takes the window as an explicit mask; FA2 natively). Checks each against FA2. bf16: our flash
+// attention forward (flash.h, default tiles) with FA2's backward; bf16[...]: its tile configurations, forward only.
 // Usage: bench_attention [--batch B] [--seq T] [--heads H] [--kv-heads Hkv] [--head-dim D] [--window W]
 //                        [--depth L] [--pattern SSSL] [--iters N]
 #include <algorithm>
@@ -12,6 +13,9 @@
 
 #include <ATen/cuda/CUDAContext.h>
 #include <torch/torch.h>
+
+#include "nanochat/model/flash.h"
+#include "nanochat/model/flash_kernel.h"
 
 namespace {
 
@@ -153,6 +157,23 @@ Result bench(
   return r;
 }
 
+// our forward with one tile configuration, forward only
+Result bench_flash_variant(
+      int variant, const torch::Tensor& q, const torch::Tensor& k, const torch::Tensor& v, int64_t window,
+      const torch::Tensor& ref_out, int iters) {
+  Result r{std::string("bf16[") + nanochat::kernels::flash_variant_name(variant) + "]"};
+  torch::NoGradGuard no_grad;
+  torch::Tensor out;
+  const auto run = [&] {
+    out = nanochat::flash_forward(q, k, v, window, variant).first;
+  };
+  run();
+  r.fwd_ms = time_ms(run, iters);
+  r.err_out = max_diff(out, ref_out);
+  r.why = "fwd only";
+  return r;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -210,7 +231,7 @@ int main(int argc, char** argv) {
           window < 0 ? "full causal" : std::to_string(window).c_str(), fwd_flops(a, window) / 1e9,
           3.5 * fwd_flops(a, window) / 1e9);
     std::printf(
-          "%-12s %9s %8s %9s %8s   %-9s %-9s %-9s %-9s\n", "backend", "fwd ms", "TFLOPs", "f+b ms", "TFLOPs", "|d out|",
+          "%-20s %9s %8s %9s %8s   %-9s %-9s %-9s %-9s\n", "backend", "fwd ms", "TFLOPs", "f+b ms", "TFLOPs", "|d out|",
           "|d dq|", "|d dk|", "|d dv|");
     std::vector<Result> results;
     std::vector<torch::Tensor> ref;
@@ -242,14 +263,28 @@ int main(int argc, char** argv) {
       }
       results.push_back(std::move(r));
     }
+    results.push_back(bench(
+          "bf16",
+          [&](const auto& q, const auto& k, const auto& v) {
+            return nanochat::flash_attention(q, k, v, window);
+          },
+          q, k, v, g, ref, a.iters));
+    for (int variant = 0; variant < nanochat::kernels::kFlashVariants; ++variant)
+      results.push_back(bench_flash_variant(variant, q, k, v, window, ref[0], a.iters));
     for (const auto& r : results) {
       if (!r.ok) {
-        std::printf("%-12s failed: %s\n", r.name.c_str(), r.why.c_str());
+        std::printf("%-20s failed: %s\n", r.name.c_str(), r.why.c_str());
         continue;
       }
       const double f = fwd_flops(a, window);
+      if (r.fwd_bwd_ms == 0) {
+        std::printf(
+              "%-20s %9.3f %8.1f %9s %8s   %-9.3g %s\n", r.name.c_str(), r.fwd_ms, f / r.fwd_ms / 1e9, "-", "-",
+              r.err_out, r.why.c_str());
+        continue;
+      }
       std::printf(
-            "%-12s %9.3f %8.1f %9.3f %8.1f   %-9.3g %-9.3g %-9.3g %-9.3g %s\n", r.name.c_str(), r.fwd_ms,
+            "%-20s %9.3f %8.1f %9.3f %8.1f   %-9.3g %-9.3g %-9.3g %-9.3g %s\n", r.name.c_str(), r.fwd_ms,
             f / r.fwd_ms / 1e9, r.fwd_bwd_ms, 3.5 * f / r.fwd_bwd_ms / 1e9, r.err_out, r.err_dq, r.err_dk, r.err_dv,
             r.why.c_str());
     }
@@ -261,10 +296,10 @@ int main(int argc, char** argv) {
     double best_mix = 0;
     std::string mix;
     for (const auto& s : all[0]) {
-      if (!s.ok)
+      if (!s.ok || s.fwd_bwd_ms == 0)
         continue;
       for (const auto& l : all[1]) {
-        if (!l.ok)
+        if (!l.ok || l.fwd_bwd_ms == 0)
           continue;
         const double ms = n_short * s.fwd_bwd_ms + (a.depth - n_short) * l.fwd_bwd_ms;
         if (s.name == l.name)

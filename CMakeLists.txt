@@ -55,6 +55,8 @@ add_library(nanochat_train
         src/nanochat/model/embedding.cpp
         src/nanochat/model/embedding_kernel.cu
         src/nanochat/model/fp8.cpp
+        src/nanochat/model/flash.cpp
+        src/nanochat/model/flash_kernel.cu
         src/nanochat/model/fp8_kernel.cu
         src/nanochat/model/gpt.cpp
         src/nanochat/model/mx_attention.cpp
@@ -98,7 +100,7 @@ target_link_libraries(base_train PRIVATE nanochat_train)
 add_executable(bench_gemm apps/bench_gemm.cpp)
 target_link_libraries(bench_gemm PRIVATE nanochat_train)
 
-# attention backends (FA2, cuDNN, memory-efficient) at a micro-step's shapes
+# attention backends (FA2, ours, cuDNN, memory-efficient) at a micro-step's shapes
 add_executable(bench_attention apps/bench_attention.cpp)
 target_link_libraries(bench_attention PRIVATE nanochat_train)
 
@@ -122,6 +124,7 @@ add_executable(train_tests
         tests/test_dataloader.cpp
         tests/test_dist.cpp
         tests/test_embedding.cpp
+        tests/test_flash.cpp
         tests/test_fp8.cpp
         tests/test_gpt.cpp
         tests/test_loss_eval.cpp

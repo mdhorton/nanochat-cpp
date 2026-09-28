@@ -2,6 +2,7 @@
 
 #include "nanochat/model/backout.h"
 #include "nanochat/model/embedding.h"
+#include "nanochat/model/flash.h"
 #include "nanochat/model/fp8.h"
 #include "nanochat/model/mx_attention.h"
 #include "nanochat/model/relu_square.h"
@@ -109,7 +110,9 @@ Attention attention_from_string(const std::string& name) {
     return Attention::FA2;
   if (name == "sdpa")
     return Attention::SDPA;
-  throw std::invalid_argument("unknown attention: " + name + " (use fa2 or sdpa)");
+  if (name == "bf16")
+    return Attention::BF16;
+  throw std::invalid_argument("unknown attention: " + name + " (use fa2, sdpa or bf16)");
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -222,9 +225,11 @@ torch::Tensor CausalSelfAttentionImpl::forward(
 
 torch::Tensor CausalSelfAttentionImpl::attend(
       const torch::Tensor& q, const torch::Tensor& k, const torch::Tensor& v, int64_t window) const {
-  return attention == Attention::FA2
-               ? fa2_attention(q, k, v, window)
-               : sdpa_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), window).transpose(1, 2);
+  if (attention == Attention::FA2)
+    return fa2_attention(q, k, v, window);
+  if (attention == Attention::BF16)
+    return flash_attention(q, k, v, window);
+  return sdpa_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), window).transpose(1, 2);
 }
 
 MLPImpl::MLPImpl(const GPTConfig& config, const torch::TensorOptions& options) {
