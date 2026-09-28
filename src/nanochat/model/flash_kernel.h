@@ -21,4 +21,16 @@ void flash_fwd(
 // "warps x rows per warp, key tile" of a variant
 const char* flash_variant_name(int variant);
 
+inline constexpr int kFlashBwdDqVariants = 2, kFlashBwdDkvVariants = 4; // tile configurations (< 0: the default)
+
+// flash_fwd's backward from dout (B, T, H, 128) bf16, contiguous, and the forward's inputs, out (contiguous) and lse.
+// dq: (B, T, H, 128), dk, dv: (B, T, Hkv, 128) bf16, contiguous. delta: (B, H, T) fp32 scratch.
+void flash_bwd(
+      const void* dout, const void* q, const void* k, const void* v, const void* out, const float* lse, float* delta,
+      void* dq, void* dk, void* dv, int B, int64_t T, int H, int Hkv, int64_t q_ld, int64_t k_ld, int64_t v_ld,
+      int64_t window, cudaStream_t stream, int dq_variant = -1, int dkv_variant = -1);
+
+const char* flash_bwd_dq_variant_name(int variant);
+const char* flash_bwd_dkv_variant_name(int variant);
+
 } // namespace nanochat::kernels

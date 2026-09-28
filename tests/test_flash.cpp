@@ -77,7 +77,50 @@ TEST(Flash, ForwardMatchesReference) {
   }
 }
 
-// flash forward + FA2 backward vs FA2 forward + backward
+// the backward (every tile configuration) vs fp64 autograd of the reference, next to FA2's error
+TEST(Flash, BackwardMatchesReference) {
+  torch::manual_seed(0);
+  for (const auto& c :
+       {Case{2, 256, 2, 2, -1}, Case{2, 256, 2, 2, 128}, Case{1, 512, 4, 2, -1}, Case{1, 512, 4, 2, 200},
+        Case{1, 2048, 2, 2, -1}, Case{1, 2048, 2, 2, 512}}) {
+    const auto q = (1.2 * torch::randn({c.B, c.T, c.H, 128}, kCuda)).to(torch::kBFloat16);
+    const auto k = (1.2 * torch::randn({c.B, c.T, c.Hkv, 128}, kCuda)).to(torch::kBFloat16);
+    const auto v = torch::randn({c.B, c.T, c.Hkv, 128}, kCuda).to(torch::kBFloat16);
+    const auto g = torch::randn({c.B, c.T, c.H, 128}, kCuda).to(torch::kBFloat16);
+    std::vector<torch::Tensor> want;
+    {
+      auto q64 = q.to(torch::kFloat64).requires_grad_(), k64 = k.to(torch::kFloat64).requires_grad_();
+      auto v64 = v.to(torch::kFloat64).requires_grad_();
+      attention_ref(q64, k64, v64, c.window).first.backward(g.to(torch::kFloat64));
+      want = {q64.grad(), k64.grad(), v64.grad()};
+    }
+    std::vector<double> fa2_err;
+    {
+      auto qf = q.clone().requires_grad_(), kf = k.clone().requires_grad_(), vf = v.clone().requires_grad_();
+      fa2(qf, kf, vf, c.window).backward(g);
+      fa2_err = {rel_norm(qf.grad(), want[0]), rel_norm(kf.grad(), want[1]), rel_norm(vf.grad(), want[2])};
+    }
+    const auto [out, lse] = flash_forward(q, k, v, c.window);
+    for (int dqv = 0; dqv < kernels::kFlashBwdDqVariants; ++dqv) {
+      for (int dkvv = 0; dkvv < kernels::kFlashBwdDkvVariants; ++dkvv) {
+        const auto [dq, dk, dv] = flash_backward(g, q, k, v, out, lse, c.window, dqv, dkvv);
+        const std::vector<torch::Tensor> got{dq, dk, dv};
+        std::cout << "B " << c.B << " T " << c.T << " H " << c.H << "/" << c.Hkv << " window " << c.window << " ["
+                  << kernels::flash_bwd_dq_variant_name(dqv) << "; " << kernels::flash_bwd_dkv_variant_name(dkvv)
+                  << "]:";
+        const char* names[] = {"dq", "dk", "dv"};
+        for (int i = 0; i < 3; ++i) {
+          const double err = rel_norm(got[i], want[i]);
+          std::cout << " " << names[i] << " " << err << " (fa2 " << fa2_err[i] << ")";
+          EXPECT_LT(err, 2 * fa2_err[i] + 1e-3) << names[i];
+        }
+        std::cout << "\n";
+      }
+    }
+  }
+}
+
+// flash forward + backward vs FA2 forward + backward
 TEST(Flash, GradientsMatchFa2) {
   torch::manual_seed(0);
   for (const int64_t window : {int64_t{-1}, int64_t{512}}) {

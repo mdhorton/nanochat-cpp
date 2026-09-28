@@ -174,6 +174,41 @@ Result bench_flash_variant(
   return r;
 }
 
+// backward alone (ms): FA2's (at::_flash_attention_backward on its forward) vs ours for each tile configuration pair
+void bench_backward(
+      const Args& a, const torch::Tensor& q, const torch::Tensor& k, const torch::Tensor& v, const torch::Tensor& g,
+      int64_t window) {
+  torch::NoGradGuard no_grad;
+  const int64_t T = q.size(1);
+  std::optional<int64_t> left, right;
+  if (window >= 0 && window < T)
+    left = window, right = 0;
+  const auto f = at::_flash_attention_forward(
+        q, k, v, std::nullopt, std::nullopt, T, T, 0.0, true, false, std::nullopt, left, right);
+  const double fa2_ms = time_ms(
+        [&] {
+          at::_flash_attention_backward(
+                g, q, k, v, std::get<0>(f), std::get<1>(f), {}, {}, T, T, 0.0, true, std::get<2>(f), std::get<3>(f),
+                std::nullopt, left, right);
+        },
+        a.iters);
+  const double bwd_flops = 2.5 * fwd_flops(a, window);
+  std::printf("  %-32s %8.3f ms %6.1f TFLOPs\n", "fa2", fa2_ms, bwd_flops / fa2_ms / 1e9);
+  const auto [out, lse] = nanochat::flash_forward(q, k, v, window);
+  for (int dqv = 0; dqv < nanochat::kernels::kFlashBwdDqVariants; ++dqv) {
+    for (int dkvv = 0; dkvv < nanochat::kernels::kFlashBwdDkvVariants; ++dkvv) {
+      const double ms = time_ms(
+            [&] {
+              nanochat::flash_backward(g, q, k, v, out, lse, window, dqv, dkvv);
+            },
+            a.iters);
+      const auto name = std::string(nanochat::kernels::flash_bwd_dq_variant_name(dqv)) + "; " +
+                        nanochat::kernels::flash_bwd_dkv_variant_name(dkvv);
+      std::printf("  %-32s %8.3f ms %6.1f TFLOPs (FA2-equivalent)\n", name.c_str(), ms, bwd_flops / ms / 1e9);
+    }
+  }
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -289,6 +324,8 @@ int main(int argc, char** argv) {
             r.why.c_str());
     }
     all.push_back(std::move(results));
+    std::printf("backward only:\n");
+    bench_backward(a, q, k, v, g, window);
   }
 
   if (windows.size() == 2) {
