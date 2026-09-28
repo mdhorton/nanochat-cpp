@@ -1,9 +1,12 @@
 #include "nanochat/model/mx_gemm.h"
 
+#include <algorithm>
 #include <atomic>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <tuple>
+#include <vector>
 
 #include <ATen/cuda/CUDAContext.h>
 #include <cublasLt.h>
@@ -43,10 +46,38 @@ struct Descriptors {
 struct Algo {
   cublasLtMatmulAlgo_t algo;
   bool split_k;
+  std::optional<bool> cutlass; // with split_k, under Cutlass: CUTLASS timed faster
 };
 
 std::mutex algo_mutex;
-std::map<std::tuple<int64_t, int64_t, int64_t, bool, bool, size_t>, Algo> algos;
+using AlgoKey = std::tuple<int64_t, int64_t, int64_t, bool, bool, size_t>;
+std::map<AlgoKey, Algo> algos;
+
+// CUTLASS over cuBLASLt's split-K only when this much faster: near ties keep cuBLASLt, so the choice rarely flips
+constexpr float kCutlassMargin = 0.98f;
+
+// median of 5 timed calls after 2 warm-ups, in us (synchronizes the stream)
+template <class F>
+float time_us(F&& f, cudaStream_t stream) {
+  cudaEvent_t e0, e1;
+  C10_CUDA_CHECK(cudaEventCreate(&e0));
+  C10_CUDA_CHECK(cudaEventCreate(&e1));
+  std::vector<float> ts;
+  for (int i = 0; i < 7; ++i) {
+    C10_CUDA_CHECK(cudaEventRecord(e0, stream));
+    f();
+    C10_CUDA_CHECK(cudaEventRecord(e1, stream));
+    C10_CUDA_CHECK(cudaEventSynchronize(e1));
+    float ms = 0;
+    C10_CUDA_CHECK(cudaEventElapsedTime(&ms, e0, e1));
+    if (i >= 2)
+      ts.push_back(ms);
+  }
+  C10_CUDA_CHECK(cudaEventDestroy(e0));
+  C10_CUDA_CHECK(cudaEventDestroy(e1));
+  std::sort(ts.begin(), ts.end());
+  return ts[ts.size() / 2] * 1e3f;
+}
 
 // device beta pointers, {0, 1} per device: alpha and beta share one pointer mode
 const float* device_beta(bool one, const torch::Device& device) {
@@ -201,9 +232,9 @@ void mx_gemm_f32(
   check(cublasLtMatrixLayoutCreate(&d.lc, CUDA_R_32F, N, M, N), "cublasLtMatrixLayoutCreate");
 
   Algo algo;
+  const AlgoKey key{M, N, K, accumulate, device_scalars, ws};
   {
     const std::lock_guard lock(algo_mutex);
-    const auto key = std::tuple{M, N, K, accumulate, device_scalars, ws};
     auto it = algos.find(key);
     if (it == algos.end()) {
       check(cublasLtMatmulPreferenceCreate(&d.pref), "cublasLtMatmulPreferenceCreate");
@@ -220,26 +251,51 @@ void mx_gemm_f32(
       check(cublasLtMatmulAlgoConfigGetAttribute(
                   &heur.algo, CUBLASLT_ALGO_CONFIG_SPLITK_NUM, &split_k, sizeof(split_k), &written),
             "cublasLtMatmulAlgoConfigGetAttribute");
-      it = algos.emplace(key, Algo{heur.algo, split_k != 1}).first;
+      it = algos.emplace(key, Algo{heur.algo, split_k != 1, {}}).first;
     }
     algo = it->second;
   }
-  // CUTLASS has no split-K: few output tiles over a long K (weight gradients of small matrices) stay with cuBLASLt,
-  // which is then also bit-identical (only split-K sums in another order)
-  if (backend == MxGemmBackend::Cutlass && !algo.split_k) {
+  const auto run_cutlass = [&](const torch::Tensor& o) {
     check_cutlass(
           kernels::cutlass_mx_gemm_f32(
-                a.data_ptr(), a_scale.data_ptr(), b.data_ptr(), b_scale.data_ptr(), out.data_ptr<float>(), M, N, K,
+                a.data_ptr(), a_scale.data_ptr(), b.data_ptr(), b_scale.data_ptr(), o.data_ptr<float>(), M, N, K,
                 device_scalars ? alpha.data_ptr<float>() : nullptr, accumulate, stream.stream()));
-    return;
-  }
+  };
   const float one = 1.f, host_beta = accumulate ? 1.f : 0.f;
   const float* alpha_ptr = device_scalars ? alpha.data_ptr<float>() : &one;
   const float* beta_ptr = device_scalars ? device_beta(accumulate, out.device()) : &host_beta;
-  check(cublasLtMatmul(
-              handle, d.desc, alpha_ptr, b.data_ptr(), d.la, a.data_ptr(), d.lb, beta_ptr, out.data_ptr(), d.lc,
-              out.data_ptr(), d.lc, &algo.algo, workspace, ws, stream),
-        "cublasLtMatmul");
+  const auto run_cublas = [&](const torch::Tensor& o) {
+    check(cublasLtMatmul(
+                handle, d.desc, alpha_ptr, b.data_ptr(), d.la, a.data_ptr(), d.lb, beta_ptr, o.data_ptr(), d.lc,
+                o.data_ptr(), d.lc, &algo.algo, workspace, ws, stream),
+          "cublasLtMatmul");
+  };
+  // CUTLASS has no split-K, which cuBLASLt picks for few output tiles over a long K (weight gradients): there, time
+  // both once (into scratch) and keep the faster. cuBLASLt without split-K is bit-identical to CUTLASS.
+  bool cutlass = backend == MxGemmBackend::Cutlass;
+  if (cutlass && algo.split_k) {
+    if (!algo.cutlass) {
+      const auto scratch = torch::zeros_like(out);
+      const float t_cutlass = time_us(
+            [&] {
+              run_cutlass(scratch);
+            },
+            stream.stream());
+      const float t_cublas = time_us(
+            [&] {
+              run_cublas(scratch);
+            },
+            stream.stream());
+      algo.cutlass = t_cutlass < kCutlassMargin * t_cublas;
+      const std::lock_guard lock(algo_mutex);
+      algos[key].cutlass = algo.cutlass;
+    }
+    cutlass = *algo.cutlass;
+  }
+  if (cutlass)
+    run_cutlass(out);
+  else
+    run_cublas(out);
 }
 
 } // namespace nanochat

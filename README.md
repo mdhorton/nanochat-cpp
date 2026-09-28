@@ -58,4 +58,14 @@ achieve.
 
 # RTX Pro 4000 == 145 watts
 
+The workload is heavily power-bound on these cards. They remain power capped most of a training.
+
+These cards hit their power cap almost immediately and remain capped during training. Throughput is limited by
+energy.
+
+All GPUs have a power limit but the RTX Pro 4000 is especially affected due to its very low cap. Its boost clock is 3000
+Ghz, but most kernels operate under 2000 Ghz due to the power cap.
+
+Improved efficiency 
+
 Ths makes tuning precarious because what looks like overhead can sometimes hit the power cap. 
