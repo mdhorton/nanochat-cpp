@@ -41,6 +41,8 @@ torch = { version = "==2.14.*", index = "https://download.pytorch.org/whl/cu132"
 [activation.env]
 NANOCHAT_BASE_DIR = "$PIXI_PROJECT_ROOT/cache"
 PYTHONDONTWRITEBYTECODE = "1"  # keep the original nanochat tree untouched
+
+# these had a small improvement.
 NCCL_PROTO = "Simple"
 NCCL_MIN_NCHANNELS = "8"
 
