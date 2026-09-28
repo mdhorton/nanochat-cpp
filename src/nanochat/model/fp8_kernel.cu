@@ -204,9 +204,13 @@ NANOCHAT_MX(nanochat_mx_quantize_bf16, __nv_bfloat16, nanochat::Identity)
 NANOCHAT_MX(nanochat_mx_quantize_f32, float, nanochat::Identity)
 NANOCHAT_MX(nanochat_mx_quantize_relu_square_bf16, __nv_bfloat16, nanochat::ReluSquare)
 
+// with a_t: also relu(h)^2's out_t as the forward wrote it (h's tile is in cache)
 __global__ void __launch_bounds__(nanochat::kMxThreads) nanochat_mx_quantize_relu_square_bwd_bf16(
-      const __nv_bfloat16* g, const __nv_bfloat16* h, int64_t cols, nanochat::MxOutDev out, nanochat::MxOutDev out_t) {
+      const __nv_bfloat16* g, const __nv_bfloat16* h, int64_t cols, nanochat::MxOutDev out, nanochat::MxOutDev out_t,
+      nanochat::MxOutDev a_t) {
   nanochat::mx_body(nanochat::MxLoadReluSquareGrad{g, h, cols}, out, out_t);
+  if (a_t.data != nullptr)
+    nanochat::mx_body(nanochat::MxLoad<__nv_bfloat16, nanochat::ReluSquare>{h, cols}, {}, a_t);
 }
 
 namespace nanochat::kernels {
@@ -286,9 +290,11 @@ void quantize_mx(
 }
 
 void quantize_mx_relu_square_bwd(
-      const void* g, const void* h, int64_t rows, int64_t cols, MxOut out, MxOut out_t, cudaStream_t stream) {
+      const void* g, const void* h, int64_t rows, int64_t cols, MxOut out, MxOut out_t, cudaStream_t stream,
+      MxOut a_t) {
   nanochat_mx_quantize_relu_square_bwd_bf16<<<mx_grid(rows, cols), kMxThreads, 0, stream>>>(
-        static_cast<const __nv_bfloat16*>(g), static_cast<const __nv_bfloat16*>(h), cols, mx_dev(out), mx_dev(out_t));
+        static_cast<const __nv_bfloat16*>(g), static_cast<const __nv_bfloat16*>(h), cols, mx_dev(out), mx_dev(out_t),
+        mx_dev(a_t));
 }
 
 } // namespace nanochat::kernels

@@ -256,7 +256,7 @@ public:
 
 // c_proj(relu(c_fc(x)).square()) as two Float8Matmuls, with relu^2 folded into the quantize kernels: forward
 // quantizes it straight from h, backward computes dh with its amax (tensorwise) or quantizes it without writing it
-// (MX). Saves h instead of relu(h).
+// (MX). Saves h instead of relu(h); under MX not relu(h)^2's transpose either, which backward recomputes from h.
 class Fp8ReluSquareMlp : public torch::autograd::Function<Fp8ReluSquareMlp> {
 public:
   static torch::Tensor forward(
@@ -266,10 +266,11 @@ public:
     const auto xq = x_mx != nullptr ? *x_mx : quantize_input(x, mx);
     const auto fcq = quantize_fp8_weight(w_fc, fc_cache, recipe_of(mx));
     const auto h = mm_forward(xq, fcq, x.scalar_type());
-    const auto aq = mx ? quantize_mx(h, true, true, true) : to_fp8_relu_square(h);
+    const auto aq = mx ? quantize_mx(h, true, false, true) : to_fp8_relu_square(h);
     const auto projq = quantize_fp8_weight(w_proj, proj_cache, recipe_of(mx));
     ctx->save_for_backward(
-          {xq.data_t, xq.inv_t(), fcq.data_t, fcq.inv_t(), h, aq.data_t, aq.inv_t(), projq.data_t, projq.inv_t()});
+          {xq.data_t, xq.inv_t(), fcq.data_t, fcq.inv_t(), h, mx ? torch::Tensor() : aq.data_t,
+           mx ? torch::Tensor() : aq.inv_t(), projq.data_t, projq.inv_t()});
     ctx->saved_data["mx"] = mx;
     save_grad_params(ctx, "w_fc", mx, {w_fc});
     save_grad_params(ctx, "w_proj", mx, {w_proj});
@@ -284,17 +285,21 @@ public:
     const auto dtype = grad_output.scalar_type();
     const auto go = quantize_grad(grad_output, mx);
     const auto ga = mm_grad_input(go, s[7], s[8], dtype);
-    const auto grad_proj = mm_grad_weight(go, s[5], s[6], dtype, grad_params(ctx, "w_proj"));
     TORCH_CHECK(ga.scalar_type() == torch::kBFloat16 && ga.is_contiguous() && h.is_contiguous());
     const auto stream = at::cuda::getCurrentCUDAStream().stream();
     Fp8Tensor dhq;
+    torch::Tensor grad_proj;
     if (mx) {
       dhq = empty_mx(h.size(0), h.size(1), h.options());
+      const auto aq = empty_mx(h.size(0), h.size(1), h.options(), false, true);
       const auto [out, out_t] = mx_outs(dhq);
-      kernels::quantize_mx_relu_square_bwd(ga.data_ptr(), h.data_ptr(), h.size(0), h.size(1), out, out_t, stream);
+      kernels::quantize_mx_relu_square_bwd(
+            ga.data_ptr(), h.data_ptr(), h.size(0), h.size(1), out, out_t, stream, mx_outs(aq).second);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
+      grad_proj = mm_grad_weight(go, aq.data_t, aq.inv_t(), dtype, grad_params(ctx, "w_proj"));
     }
     else {
+      grad_proj = mm_grad_weight(go, s[5], s[6], dtype, grad_params(ctx, "w_proj"));
       auto dh = torch::empty_like(h);
       const auto scalars = empty_scalars(h);
       kernels::relu_square_bwd(
