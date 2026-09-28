@@ -24,6 +24,7 @@ struct TrainOptions {
   std::string fp8_recipe = "mxfp8";   // mxfp8 or tensorwise (as Python)
   bool fused = true;                  // fused elementwise kernels; false: Python's op-by-op path
   int64_t cublaslt_workspace_mb = 32; // cuBLASLt workspace per stream; its split-K GEMMs need a few MB (torch: 1)
+  bool reduce_in_backward = true;     // multi-GPU: sync grads during the last backward, not after it
   // training horizon: the first one set wins
   int64_t num_iterations = -1;
   double target_flops = -1, target_param_data_ratio = 8; // Python: 12; speedrun.sh uses 8

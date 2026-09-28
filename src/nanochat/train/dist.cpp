@@ -68,6 +68,16 @@ Dist::Work Dist::all_reduce(torch::Tensor& t, Op op) {
   return pg_->allreduce(tensors, opts);
 }
 
+Dist::Work Dist::reduce(torch::Tensor& t, int root, Op op) {
+  if (!pg_)
+    return {};
+  std::vector<torch::Tensor> tensors{t};
+  c10d::ReduceOptions opts;
+  opts.reduceOp = reduce_op(op);
+  opts.rootRank = root;
+  return pg_->reduce(tensors, opts);
+}
+
 Dist::Work Dist::reduce_scatter(torch::Tensor& out, torch::Tensor& in, Op op) {
   if (!pg_) {
     out.copy_(in);

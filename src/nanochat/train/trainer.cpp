@@ -178,6 +178,7 @@ nlohmann::json options_to_json(const TrainOptions& o) {
         {"fp8", o.fp8},
         {"fp8_recipe", o.fp8_recipe},
         {"fused", o.fused},
+        {"reduce_in_backward", o.reduce_in_backward},
         {"num_iterations", o.num_iterations},
         {"target_flops", o.target_flops},
         {"target_param_data_ratio", o.target_param_data_ratio},
@@ -497,6 +498,8 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
         loss = model->forward(x, y);
       }
       train_loss = loss.detach();
+      if (o.reduce_in_backward && micro_step + 1 == plan.grad_accum_steps)
+        optimizer.reduce_in_backward();
       {
         NvtxRange range("backward");
         (loss / plan.grad_accum_steps).backward(); // each backward sums grads, so normalize here

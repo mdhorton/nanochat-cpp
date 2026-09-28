@@ -5,9 +5,12 @@
 // - Muon groups: the K grads are the rows of one stacked buffer (zero_grad installs them as .grad views, so backward
 //   accumulates straight into the reduce_scatter input), each rank owns ceil(K / world) of them (zero padded),
 //   reduce_scatter, update the owned params, all_gather the stack.
-// AdamW is one fused kernel per param on CUDA (train/adamw_kernel.cu), the op path elsewhere; both round as Python.
+// reduce_in_backward() instead syncs each grad from its post-accumulate hook (Muon rows: reduce to the owner),
+// overlapping the last backward. AdamW is one fused kernel per param on CUDA (train/adamw_kernel.cu), the op path
+// elsewhere; both round as Python.
 #pragma once
 
+#include <atomic>
 #include <string>
 #include <vector>
 
@@ -36,11 +39,17 @@ class MuonAdamW {
 public:
   // dist: null (or world size 1) = one GPU. Must outlive the optimizer.
   explicit MuonAdamW(std::vector<OptimGroup> groups, Dist* dist = nullptr);
+  ~MuonAdamW(); // drops the params' grad hooks (which point here; the class doesn't move)
 
   void step();
 
   // Instead of Module::zero_grad(true): AdamW grads to none, Muon grads the zeroed rows of their group's stack.
   void zero_grad();
+
+  // Sync the grads of the next backward as each becomes final (post-accumulate hooks; Muon rows are reduced to
+  // their owner, sharded AdamW grads reduce_scattered), overlapping the rest of that backward, instead of at
+  // step(). Call right before the last micro-step's backward; step() waits for what was launched.
+  void reduce_in_backward();
 
   std::vector<OptimGroup>& groups() {
     return groups_;
@@ -81,7 +90,15 @@ private:
     const std::vector<torch::Tensor>* params = nullptr;
   };
 
-  Pending reduce_adamw(const OptimGroup& group);
+  // a param's reduce launched by reduce_in_backward's hook: AdamW the grad slice, Muon the stack row
+  struct Sync {
+    Dist::Work work;
+    torch::Tensor out;
+  };
+  struct GradHook;
+  void on_grad(size_t group_index, size_t param_index); // the hook (autograd thread)
+
+  Pending reduce_adamw(size_t group_index);
   Pending reduce_muon(size_t group_index);
   void compute_adamw(
         const OptimGroup& group, Pending& pending, std::vector<AdamWState>& states, std::vector<Gather>& gathers);
@@ -100,6 +117,8 @@ private:
   std::vector<std::vector<AdamWState>> adamw_states_; // per group, per param
   std::vector<MuonState> muon_states_;                // per group
   std::vector<torch::Tensor> muon_grads_;             // per Muon group: (ceil(K / world) * world, m, n) grad stack
+  std::atomic<bool> in_backward_ = false;             // hooks launch reduces
+  std::vector<std::vector<Sync>> synced_;             // per group, per param
 };
 
 // GPT.setup_optimizer: AdamW groups (lm_head, wte, value_embeds, resid, x0, smear/backout), then one Muon group

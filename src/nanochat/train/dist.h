@@ -33,6 +33,7 @@ public:
 
   // Async, as Python's async_op=True.
   Work all_reduce(torch::Tensor& t, Op op);
+  Work reduce(torch::Tensor& t, int root, Op op);                    // in place on root; the others send
   Work reduce_scatter(torch::Tensor& out, torch::Tensor& in, Op op); // out = in's rank-th slice of dim 0
   Work all_gather(torch::Tensor& out, torch::Tensor& in);            // in may be out's rank-th slice (in place)
   void barrier();

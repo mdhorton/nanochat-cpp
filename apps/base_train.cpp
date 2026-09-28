@@ -31,6 +31,8 @@ static int run(int argc, char** argv) {
   o.cublaslt_workspace_mb = flags.i64(
         "cublaslt-workspace-mb", o.cublaslt_workspace_mb,
         "cuBLASLt workspace in MB; split-K GEMMs need a few (<= 0 = torch's 1 MB default)");
+  o.reduce_in_backward = flags.boolean(
+        "reduce-in-backward", o.reduce_in_backward, "multi-GPU: sync grads during the last backward, not after it");
   // horizon
   o.num_iterations = flags.i64("num-iterations", o.num_iterations, "explicit number of steps (-1 = disable)");
   o.target_flops = flags.f64("target-flops", o.target_flops, "steps to reach target FLOPs (-1 = disable)");

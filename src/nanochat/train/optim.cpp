@@ -4,10 +4,14 @@
 
 #include "nanochat/train/adamw_kernel.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <map>
 #include <stdexcept>
+
+#include <torch/csrc/autograd/function_hook.h>
+#include <torch/csrc/autograd/variable.h>
 
 #include <nlohmann/json.hpp>
 
@@ -142,17 +146,36 @@ void muon_update(
 
 } // namespace
 
+struct MuonAdamW::GradHook : torch::autograd::PostAccumulateGradHook {
+  MuonAdamW* optimizer;
+  size_t group, param;
+
+  GradHook(MuonAdamW* optimizer, size_t group, size_t param)
+      : optimizer(optimizer)
+      , group(group)
+      , param(param) {}
+
+  void operator()(const torch::Tensor&) override {
+    optimizer->on_grad(group, param);
+  }
+};
+
 MuonAdamW::MuonAdamW(std::vector<OptimGroup> groups, Dist* dist)
     : dist_(dist)
     , groups_(std::move(groups)) {
   adamw_states_.resize(groups_.size());
   muon_states_.resize(groups_.size());
   muon_grads_.resize(groups_.size());
+  synced_.resize(groups_.size());
   const int world = world_size();
   for (size_t i = 0; i < groups_.size(); ++i) {
     const auto& group = groups_[i];
     if (group.params.empty())
       throw std::invalid_argument("empty optimizer group " + group.name);
+    synced_[i].resize(group.params.size());
+    if (world > 1)
+      for (size_t j = 0; j < group.params.size(); ++j)
+        torch::autograd::impl::set_post_acc_grad_hooks(group.params[j], std::make_unique<GradHook>(this, i, j));
     if (group.kind == OptimGroup::Kind::AdamW) {
       adamw_states_[i].resize(group.params.size());
       continue;
@@ -164,6 +187,13 @@ MuonAdamW::MuonAdamW(std::vector<OptimGroup> groups, Dist* dist)
     const auto k = static_cast<int64_t>(group.params.size());
     muon_grads_[i] = torch::zeros({(k + world - 1) / world * world, p.size(0), p.size(1)}, p.options());
   }
+}
+
+MuonAdamW::~MuonAdamW() {
+  if (world_size() > 1)
+    for (const auto& group : groups_)
+      for (const auto& p : group.params)
+        torch::autograd::impl::set_post_acc_grad_hooks(p, nullptr);
 }
 
 void MuonAdamW::zero_grad() {
@@ -181,13 +211,45 @@ void MuonAdamW::zero_grad() {
   }
 }
 
+void MuonAdamW::reduce_in_backward() {
+  in_backward_ = world_size() > 1;
+}
+
+void MuonAdamW::on_grad(size_t group_index, size_t param_index) {
+  if (!in_backward_)
+    return;
+  const auto& group = groups_[group_index];
+  const auto& p = group.params[param_index];
+  auto& sync = synced_[group_index][param_index];
+  auto grad = p.grad();
+  if (group.kind == OptimGroup::Kind::AdamW) {
+    if (p.numel() < 1024) // all_reduced at step()
+      return;
+    if (grad.size(0) % world_size() != 0)
+      throw std::invalid_argument(group.name + ": dim 0 must be divisible by the world size");
+    sync.out = torch::empty_like(grad.slice(0, 0, grad.size(0) / world_size()));
+    sync.work = dist_->reduce_scatter(sync.out, grad, Dist::Op::Avg);
+    return;
+  }
+  auto row = muon_grads_[group_index][static_cast<int64_t>(param_index)];
+  if (grad.data_ptr() != row.data_ptr() || !grad.is_contiguous())
+    row.copy_(grad);
+  const auto chunk = muon_grads_[group_index].size(0) / world_size();
+  sync.work = dist_->reduce(row, static_cast<int>(static_cast<int64_t>(param_index) / chunk), Dist::Op::Avg);
+  sync.out = row;
+}
+
 // As Python: launch every group's reduce, then per group wait, update and launch the gathers, then finish them.
 void MuonAdamW::step() {
   torch::NoGradGuard no_grad;
+  in_backward_ = false;
   std::vector<Pending> pending;
   pending.reserve(groups_.size());
   for (size_t i = 0; i < groups_.size(); ++i)
-    pending.push_back(groups_[i].kind == OptimGroup::Kind::AdamW ? reduce_adamw(groups_[i]) : reduce_muon(i));
+    pending.push_back(groups_[i].kind == OptimGroup::Kind::AdamW ? reduce_adamw(i) : reduce_muon(i));
+  for (auto& group : synced_)
+    for (auto& s : group)
+      s = {};
   std::vector<Gather> gathers;
   for (size_t i = 0; i < groups_.size(); ++i)
     if (groups_[i].kind == OptimGroup::Kind::AdamW)
@@ -202,12 +264,19 @@ void MuonAdamW::step() {
   }
 }
 
-MuonAdamW::Pending MuonAdamW::reduce_adamw(const OptimGroup& group) {
+MuonAdamW::Pending MuonAdamW::reduce_adamw(size_t group_index) {
+  const auto& group = groups_[group_index];
   Pending pending;
   const int world = world_size();
-  for (const auto& p : group.params) {
+  for (size_t j = 0; j < group.params.size(); ++j) {
+    const auto& p = group.params[j];
     auto grad = p.grad();
-    if (world == 1) {
+    if (auto& sync = synced_[group_index][j]; sync.out.defined()) { // launched during backward
+      pending.works.push_back(std::move(sync.work));
+      pending.grads.push_back(std::move(sync.out));
+      pending.sharded.push_back(true);
+    }
+    else if (world == 1) {
       pending.works.emplace_back();
       pending.grads.push_back(grad);
       pending.sharded.push_back(false);
@@ -233,6 +302,18 @@ MuonAdamW::Pending MuonAdamW::reduce_muon(size_t group_index) {
   const auto& params = groups_[group_index].params;
   const auto k = static_cast<int64_t>(params.size());
   auto& stacked = muon_grads_[group_index];
+  Pending pending;
+  pending.chunk_size = stacked.size(0) / world_size();
+  auto& synced = synced_[group_index];
+  if (std::ranges::all_of(synced, [](const Sync& s) {
+        return s.out.defined();
+      })) { // reduced during backward
+    for (auto& s : synced)
+      pending.works.push_back(std::move(s.work));
+    pending.grads.push_back(stacked.slice(0, rank() * pending.chunk_size, (rank() + 1) * pending.chunk_size));
+    pending.stacked = stacked;
+    return pending;
+  }
   // grads set up elsewhere (not zero_grad's views): copy them in
   for (int64_t j = 0; j < k; ++j) {
     const auto& g = params[j].grad();
@@ -243,8 +324,6 @@ MuonAdamW::Pending MuonAdamW::reduce_muon(size_t group_index) {
   }
   if (k < stacked.size(0))
     stacked.slice(0, k).zero_();
-  Pending pending;
-  pending.chunk_size = stacked.size(0) / world_size();
   if (world_size() == 1) { // this rank owns every param: the stack is the chunk
     pending.works.emplace_back();
     pending.grads.push_back(stacked);
@@ -285,7 +364,8 @@ void MuonAdamW::compute_adamw(
 
 void MuonAdamW::compute_muon(
       const OptimGroup& group, Pending& pending, MuonState& state, std::vector<Gather>& gathers) {
-  Dist::wait(pending.works[0]);
+  for (const auto& work : pending.works)
+    Dist::wait(work);
   const auto& params = group.params;
   const int64_t m = params[0].size(0), n = params[0].size(1), k = static_cast<int64_t>(params.size());
   const int64_t chunk = pending.chunk_size;
