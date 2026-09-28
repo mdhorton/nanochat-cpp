@@ -71,6 +71,7 @@ add_library(nanochat_train
         src/nanochat/model/smear_kernel.cu
         src/nanochat/model/softcap_ce.cpp
         src/nanochat/model/softcap_ce_kernel.cu
+        src/nanochat/train/adamw_kernel.cu
         src/nanochat/train/checkpoint.cpp
         src/nanochat/train/dataloader.cpp
         src/nanochat/train/dist.cpp

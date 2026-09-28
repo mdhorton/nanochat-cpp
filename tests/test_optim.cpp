@@ -67,6 +67,18 @@ TEST(Optim, AdamWMatchesTorch) {
   EXPECT_TRUE(torch::allclose(p, ref, 1e-5, 1e-6)) << max_abs_diff(p, ref);
 }
 
+// The AdamW kernel writes params in place: their version counters must still advance (the FP8 weight cache keys
+// on them), also through a ZeRO-style slice.
+TEST(Optim, AdamWStepBumpsVersion) {
+  auto opts = torch::TensorOptions().device(torch::kCUDA);
+  auto p = torch::randn({64, 32}, opts).requires_grad_();
+  MuonAdamW opt({{.kind = OptimGroup::Kind::AdamW, .name = "p", .params = {p}, .lr = 0.01, .initial_lr = 0.01}});
+  p.mutable_grad() = torch::randn({64, 32}, opts);
+  const auto before = p._version();
+  opt.step();
+  EXPECT_GT(p._version(), before);
+}
+
 TEST(Optim, Groups) {
   GPT model(
         GPTConfig{.sequence_len = 256, .vocab_size = 1000, .n_layer = 4, .n_head = 4, .n_kv_head = 4, .n_embd = 256});

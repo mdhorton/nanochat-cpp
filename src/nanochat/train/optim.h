@@ -2,8 +2,10 @@
 // With several ranks it syncs the gradients itself (no DDP) and shards the optimizer state ZeRO-2 style:
 // - AdamW params < 1024 elements: all_reduce the grad, update the whole param on every rank.
 // - other AdamW params: reduce_scatter the grad along dim 0, update this rank's slice, all_gather the param.
-// - Muon groups: stack the K grads, each rank owns ceil(K / world) of them (zero padded), reduce_scatter, update the
-//   owned params, all_gather the stack.
+// - Muon groups: the K grads are the rows of one stacked buffer (zero_grad installs them as .grad views, so backward
+//   accumulates straight into the reduce_scatter input), each rank owns ceil(K / world) of them (zero padded),
+//   reduce_scatter, update the owned params, all_gather the stack.
+// AdamW is one fused kernel per param on CUDA (train/adamw_kernel.cu), the op path elsewhere; both round as Python.
 #pragma once
 
 #include <string>
@@ -37,6 +39,9 @@ public:
 
   void step();
 
+  // Instead of Module::zero_grad(true): AdamW grads to none, Muon grads the zeroed rows of their group's stack.
+  void zero_grad();
+
   std::vector<OptimGroup>& groups() {
     return groups_;
   }
@@ -66,7 +71,7 @@ private:
     std::vector<Dist::Work> works;    // AdamW: per param; Muon: one
     std::vector<torch::Tensor> grads; // AdamW: this rank's grad (slice); Muon: the owned chunk
     std::vector<bool> sharded;        // AdamW: reduce_scattered (else all_reduced)
-    torch::Tensor stacked;            // Muon: padded stack, reduce_scatter input and all_gather output
+    torch::Tensor stacked;            // Muon: the group's grad stack, reduce_scatter input and all_gather output
     int64_t chunk_size = 0;
   };
 
@@ -77,7 +82,7 @@ private:
   };
 
   Pending reduce_adamw(const OptimGroup& group);
-  Pending reduce_muon(const OptimGroup& group);
+  Pending reduce_muon(size_t group_index);
   void compute_adamw(
         const OptimGroup& group, Pending& pending, std::vector<AdamWState>& states, std::vector<Gather>& gathers);
   void compute_muon(const OptimGroup& group, Pending& pending, MuonState& state, std::vector<Gather>& gathers);
@@ -94,6 +99,7 @@ private:
   std::vector<OptimGroup> groups_;
   std::vector<std::vector<AdamWState>> adamw_states_; // per group, per param
   std::vector<MuonState> muon_states_;                // per group
+  std::vector<torch::Tensor> muon_grads_;             // per Muon group: (ceil(K / world) * world, m, n) grad stack
 };
 
 // GPT.setup_optimizer: AdamW groups (lm_head, wte, value_embeds, resid, x0, smear/backout), then one Muon group

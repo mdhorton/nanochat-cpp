@@ -1,6 +1,6 @@
 # run history
 
-Most of the sm120 tuning work was done using `--depth=12` to help speedup development iterations.
+Most of the sm120 tuning was done using `--depth=12`. This helped speedup development iterations.
 
 # medium runs @ d12
 
@@ -12,7 +12,7 @@ These runs are designed to finish in under 5 minutes. It's easier to spot bpb re
 
 Runs 1-3 are from the original nanochat port (python → c++). No tuning yet.
 
-Runs 4+ are our tuning and customisation for sm120. Much of the tuning is fusing and other optimisations that would
+Runs 4+ are our tuning and customisation for sm120. Most of the tuning is fusing and other optimisations that would
 normally be done by inductor and triton.
 
 | run | toks/sec |     loss |      bpb | memory |   time | notes                                          |
@@ -39,7 +39,9 @@ normally be done by inductor and triton.
 |  20 |  242,702 | 4.805256 | 1.436230 |   8.7g |  3.60m | cuBLASLt workspace 32 MB (split-K)             |
 |  21 |  247,254 | 4.802301 | 1.435336 |   8.5g |  3.52m | fused smear/backout, dW into .grad             |
 |  22 |  249,284 | 4.802814 | 1.435525 |   8.5g |  3.50m | NCCL_PROTO = "Simple" NCCL_MIN_NCHANNELS = "8" |
-|  23 |          |          |          |        |        |                                                |
+|  23 |  250,734 | 4.803105 | 1.435576 |   8.5g |  3.48m | fused AdamW kernel, Muon grad stacks           |
+|  24 |          |          |          |        |        |                                                |
+|  25 |          |          |          |        |        |                                                |
 
 Run 4: sm120 can't use fa3. however, fa2 works pretty good. `--nproc=2 --fp8 --attention=fa2` enabled by default going
 forward.
@@ -51,7 +53,7 @@ Runs 6-9: sm120 have lower memory bandwidth than datacenter GPUs. for example, R
 bandwidth vs H100. fusing memory bound kernels is usually worth it. this is also the area normally covered by pytorch
 inductor.
 
-Runs 14-18: mxfp8 support. this reduced memory traffic around quantization. this worked because several kernels are
+Runs 14-18: mxfp8 support. this reduced memory traffic around quantisation. this worked because several kernels are
 memory bound. `--fp8-recipe=mxfp8` enabled by default going forward.
 
 Runs 22: NCCL optimisations. `NCCL_PROTO = "Simple" NCCL_MIN_NCHANNELS = "8"` enabled by default going forward.
@@ -61,7 +63,7 @@ Runs 22: NCCL optimisations. `NCCL_PROTO = "Simple" NCCL_MIN_NCHANNELS = "8"` en
 These runs started at d12 run 5 because otherwise it would OOM.
 
 ```bash
---fp8 --nproc=2 --depth=24 --device-batch-size=2 --num-iterations=30 --eval-tokens=4194304 --eval-every=-1 --save=false
+--depth=24 --device-batch-size=2 --num-iterations=30 --eval-tokens=4194304 --eval-every=-1 --save=false
 ```
 
 | toks/sec |     loss |      bpb | memory |   time | git tag and flags (if any) |

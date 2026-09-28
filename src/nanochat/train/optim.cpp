@@ -1,5 +1,9 @@
 #include "nanochat/train/optim.h"
 
+#include <ATen/cuda/CUDAContext.h>
+
+#include "nanochat/train/adamw_kernel.h"
+
 #include <array>
 #include <cmath>
 #include <map>
@@ -29,11 +33,37 @@ torch::Tensor frobenius(const torch::Tensor& x) {
   return at::linalg_vector_norm(x, 2, {-2, -1}, true);
 }
 
-// AdamW, as adamw_step_fused: math in fp32, written back to the (possibly bf16) param and state.
+// AdamW, as adamw_step_fused: math in fp32, written back to the (possibly bf16) param and state. The CUDA kernel
+// replays these ops with the same rounding; this path serves other devices.
 void adamw_update(
       const torch::Tensor& p, const torch::Tensor& grad, const torch::Tensor& exp_avg, const torch::Tensor& exp_avg_sq,
       const torch::Tensor& step_t, const torch::Tensor& lr_t, const torch::Tensor& beta1_t,
       const torch::Tensor& beta2_t, const torch::Tensor& eps_t, const torch::Tensor& wd_t) {
+  const auto bias1 = 1 - beta1_t.pow(step_t), bias2 = 1 - beta2_t.pow(step_t);
+  const auto step_size = lr_t / bias1;
+  if (p.is_cuda()) {
+    const kernels::AdamWScalars s{
+          .decay = (1 - lr_t * wd_t).item<float>(),
+          .w1 = (1 - beta1_t).item<float>(),
+          .w2 = (1 - beta2_t).item<float>(),
+          .inv_bias2 = 1.f / bias2.item<float>(),
+          .eps = eps_t.item<float>(),
+          .neg_step_size = (-step_size).item<float>()};
+    TORCH_CHECK(
+          p.is_contiguous() && grad.is_contiguous() && exp_avg.is_contiguous() && exp_avg_sq.is_contiguous() &&
+                exp_avg.scalar_type() == p.scalar_type() && exp_avg_sq.scalar_type() == p.scalar_type() &&
+                (p.scalar_type() == torch::kFloat32 || p.scalar_type() == torch::kBFloat16) &&
+                (grad.scalar_type() == torch::kFloat32 || grad.scalar_type() == torch::kBFloat16),
+          "adamw_update: expected contiguous fp32 or bf16 tensors");
+    kernels::adamw_step(
+          p.data_ptr(), grad.data_ptr(), exp_avg.data_ptr(), exp_avg_sq.data_ptr(), p.numel(),
+          p.scalar_type() == torch::kBFloat16, grad.scalar_type() == torch::kBFloat16, s,
+          at::cuda::getCurrentCUDAStream());
+    // the kernel bypasses autograd's version counters, which the FP8 weight cache keys on
+    for (const auto& t : {p, exp_avg, exp_avg_sq})
+      t.unsafeGetTensorImpl()->bump_version();
+    return;
+  }
   auto p32 = p.to(torch::kFloat32);
   auto exp_avg32 = exp_avg.to(torch::kFloat32);
   auto exp_avg_sq32 = exp_avg_sq.to(torch::kFloat32);
@@ -41,10 +71,7 @@ void adamw_update(
   p32.mul_(1 - lr_t * wd_t); // decoupled weight decay
   exp_avg32.lerp_(grad32, 1 - beta1_t);
   exp_avg_sq32.lerp_(grad32.square(), 1 - beta2_t);
-  auto bias1 = 1 - beta1_t.pow(step_t);
-  auto bias2 = 1 - beta2_t.pow(step_t);
   auto denom = (exp_avg_sq32 / bias2).sqrt() + eps_t;
-  auto step_size = lr_t / bias1;
   p32.add_(exp_avg32 / denom, (-step_size).item());
   p.copy_(p32); // no-ops when already fp32 (to() returned the same tensor)
   exp_avg.copy_(exp_avg32);
@@ -120,16 +147,37 @@ MuonAdamW::MuonAdamW(std::vector<OptimGroup> groups, Dist* dist)
     , groups_(std::move(groups)) {
   adamw_states_.resize(groups_.size());
   muon_states_.resize(groups_.size());
+  muon_grads_.resize(groups_.size());
+  const int world = world_size();
   for (size_t i = 0; i < groups_.size(); ++i) {
     const auto& group = groups_[i];
     if (group.params.empty())
       throw std::invalid_argument("empty optimizer group " + group.name);
-    if (group.kind == OptimGroup::Kind::AdamW)
+    if (group.kind == OptimGroup::Kind::AdamW) {
       adamw_states_[i].resize(group.params.size());
-    else
-      for (const auto& p : group.params)
-        if (p.dim() != 2 || p.sizes() != group.params[0].sizes())
-          throw std::invalid_argument("Muon group " + group.name + " needs 2D params of one shape");
+      continue;
+    }
+    const auto& p = group.params[0];
+    for (const auto& q : group.params)
+      if (q.dim() != 2 || q.sizes() != p.sizes())
+        throw std::invalid_argument("Muon group " + group.name + " needs 2D params of one shape");
+    const auto k = static_cast<int64_t>(group.params.size());
+    muon_grads_[i] = torch::zeros({(k + world - 1) / world * world, p.size(0), p.size(1)}, p.options());
+  }
+}
+
+void MuonAdamW::zero_grad() {
+  torch::NoGradGuard no_grad;
+  for (size_t i = 0; i < groups_.size(); ++i) {
+    const auto& params = groups_[i].params;
+    if (groups_[i].kind == OptimGroup::Kind::AdamW) {
+      for (const auto& p : params)
+        p.mutable_grad().reset();
+      continue;
+    }
+    muon_grads_[i].zero_();
+    for (size_t j = 0; j < params.size(); ++j)
+      params[j].mutable_grad() = muon_grads_[i][static_cast<int64_t>(j)];
   }
 }
 
@@ -138,8 +186,8 @@ void MuonAdamW::step() {
   torch::NoGradGuard no_grad;
   std::vector<Pending> pending;
   pending.reserve(groups_.size());
-  for (const auto& group : groups_)
-    pending.push_back(group.kind == OptimGroup::Kind::AdamW ? reduce_adamw(group) : reduce_muon(group));
+  for (size_t i = 0; i < groups_.size(); ++i)
+    pending.push_back(groups_[i].kind == OptimGroup::Kind::AdamW ? reduce_adamw(groups_[i]) : reduce_muon(i));
   std::vector<Gather> gathers;
   for (size_t i = 0; i < groups_.size(); ++i)
     if (groups_[i].kind == OptimGroup::Kind::AdamW)
@@ -181,30 +229,31 @@ MuonAdamW::Pending MuonAdamW::reduce_adamw(const OptimGroup& group) {
   return pending;
 }
 
-MuonAdamW::Pending MuonAdamW::reduce_muon(const OptimGroup& group) {
+MuonAdamW::Pending MuonAdamW::reduce_muon(size_t group_index) {
+  const auto& params = groups_[group_index].params;
+  const auto k = static_cast<int64_t>(params.size());
+  auto& stacked = muon_grads_[group_index];
+  // grads set up elsewhere (not zero_grad's views): copy them in
+  for (int64_t j = 0; j < k; ++j) {
+    const auto& g = params[j].grad();
+    if (!g.defined())
+      throw std::invalid_argument(groups_[group_index].name + ": param " + std::to_string(j) + " has no gradient");
+    if (g.data_ptr() != stacked[j].data_ptr() || !g.is_contiguous())
+      stacked[j].copy_(g);
+  }
+  if (k < stacked.size(0))
+    stacked.slice(0, k).zero_();
   Pending pending;
-  std::vector<torch::Tensor> grads;
-  for (const auto& p : group.params)
-    grads.push_back(p.grad());
-  const int world = world_size();
-  const auto k = static_cast<int64_t>(grads.size());
-  if (world == 1) { // this rank owns every param: the stacked grads are the chunk
+  pending.chunk_size = stacked.size(0) / world_size();
+  if (world_size() == 1) { // this rank owns every param: the stack is the chunk
     pending.works.emplace_back();
-    pending.grads.push_back(torch::stack(grads));
-    pending.chunk_size = k;
+    pending.grads.push_back(stacked);
     return pending;
   }
-  const int64_t chunk = (k + world - 1) / world;
-  const auto& p = group.params[0];
-  auto stacked = torch::empty({chunk * world, p.size(0), p.size(1)}, p.options());
-  stacked.slice(0, 0, k).copy_(torch::stack(grads));
-  if (k < chunk * world)
-    stacked.slice(0, k).zero_();
-  auto grad_chunk = torch::empty({chunk, p.size(0), p.size(1)}, p.options());
+  auto grad_chunk = torch::empty({pending.chunk_size, stacked.size(1), stacked.size(2)}, stacked.options());
   pending.works.push_back(dist_->reduce_scatter(grad_chunk, stacked, Dist::Op::Avg));
   pending.grads.push_back(grad_chunk);
   pending.stacked = stacked;
-  pending.chunk_size = chunk;
   return pending;
 }
 

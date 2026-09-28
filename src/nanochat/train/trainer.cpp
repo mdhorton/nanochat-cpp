@@ -423,6 +423,7 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
   const int64_t N = plan.num_iterations;
   double total_dt = 0; // every step of this run, incl. the first 11 that total_training_time skips
   std::optional<NvtxProcessRange> profile_range; // nsys --nvtx-capture=profile, ncu --nvtx-include profile
+  optimizer.zero_grad();                         // the Muon grads are views of the optimizer's stacks
   while (true) {
     const bool last_step = step == N;
     const double flops_so_far = static_cast<double>(flops_per_token * plan.total_batch_size) *
@@ -516,7 +517,7 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
       NvtxRange range("optimizer");
       optimizer.step();
     }
-    model->zero_grad(true);
+    optimizer.zero_grad();
     const double train_loss_f = train_loss.item<double>(); // CPU-GPU sync
     torch::cuda::synchronize();
     const double dt = seconds_since(t0);

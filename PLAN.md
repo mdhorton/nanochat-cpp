@@ -131,6 +131,17 @@ steps:
     only: 2145/2155 -> 2114/2118 ms/step (-1.5%); the fused lm_head gradient and backout are unmeasured. Note: SDPA's
     flash and memory-efficient backward sum dq with atomics (198/200 runs differ); fp32 .grads expose that, so the
     bit-identity test (`Fp8.WeightCacheMatchesUncachedModel`) forces the math backend.
+    done: optimizer tail (`train/adamw_kernel.cu`, `train/optim.cpp`): AdamW as one kernel per param replaying
+    adamw_step_fused's ops with torch's rounding (bit-identical to Python for bf16 and fp32 params; the op path
+    serves other devices), and each Muon group's grads as the rows of one persistent stack (`MuonAdamW::zero_grad`
+    installs the zeroed views before backward, replacing `Module::zero_grad`), so reduce_scatter reads them in
+    place: no stack copy, no fresh grad buffers per step. d12 2 GPUs: tail 88 -> 72.5 ms per step (the bf16
+    reduce_scatters 3.9 -> 1.7 ms once ~350 AdamW passes stop sharing DRAM with them); 7-step timings are within
+    their +-1.5% drift. The kernel writes params through raw pointers, so it bumps their version counters itself:
+    without that the FP8 weight cache kept serving the initial lm_head (loss stuck near 10.39; `Optim.AdamWStepBumpsVersion`).
+    Notes: nsys names every NCCL kernel `..._LL` whatever protocol runs; NCCL_PROTO=Simple (pixi.toml) is in effect
+    (`NCCL_DEBUG=INFO`). The tail is NCCL-bound now (67 of 72 ms): NCCL_MIN_NCHANNELS=8 measured another -15 ms per
+    step; the rest is issuing the reduce_scatters during the last backward and gathering into stacked params.
     todo (later; d12, % of a 150 ms micro-step): MX in the remaining producers (24 quantizes of 16384x768 each per
     micro-step, 76 us each), and the fp32 .grad adds:
     - residual_norm fwd (attn/MLP inputs), ~0.5%: bf16 n is still needed (autograd output, gate input). 32-row
