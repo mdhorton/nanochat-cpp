@@ -42,8 +42,6 @@ would normally be handled by inductor and triton.
 |  25 |  257,917 | 4.799418 | 1.434437 |   8.5g |  3.38m | --attention=bf16 (FA bf16 forward)             |
 |  26 |  267,715 | 4.803928 | 1.435875 |   8.6g |  3.26m | custom FA with mxfp8                           |
 |  27 |  273,814 | 4.804844 | 1.436141 |   8.0g |  3.17m | cutlass mxfp8 gemms                            |
-|  28 |          |          |          |        |        |                                                |
-|  29 |          |          |          |        |        |                                                |
 
 Run 4: sm120 can't use fa3. however, fa2 works pretty good. `--nproc=2 --fp8=true --attention=fa2` enabled by default
 going forward.
@@ -62,17 +60,16 @@ Run 22: `NCCL_PROTO = "Simple" NCCL_MIN_NCHANNELS = "8"` enabled by default goin
 
 Run 26: `--attention=mx` enabled by default going forward.
 
-# medium runs @ d24
+# quick runs @ d24
 
 These runs started at d12 run 5 because otherwise it would OOM.
 
-`--depth=24 --device-batch-size=2 --num-iterations=30 --eval-tokens=4194304 --eval-every=-1 --save=false`
+`--depth=24 --device-batch-size=2 --num-iterations=10 --eval-tokens=4194304 --eval-every=-1 --save=false`
 
-| toks/sec |     loss |      bpb | memory |   time | git tag and flags (if any) |
-|---------:|---------:|---------:|-------:|-------:|----------------------------|
-|          |          |          |        |        | run5                       |
-|   43,449 | 6.149978 | 1.720151 |  20.3g | 12.05m | run14 --fp8-recipe=mxfp8   |
-|          |          |          |        |        |                            |
+|    | toks/sec |     loss |      bpb | memory |  time | notes                 |
+|----|---------:|---------:|---------:|-------:|------:|-----------------------|
+| 28 |   57,183 | 8.882510 | 2.109818 |  17.7g | 3.04m | faster dgrad epilogue |
+| 29 |          |          |          |        |       |                       |
 
 # full run @d12
 
