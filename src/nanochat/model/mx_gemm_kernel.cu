@@ -91,17 +91,20 @@ struct MxT {
 
 // Epilogue node for relu^2's backward: from the accumulator (ga) and h, returns dh = bf16(h > 0 ? bf16(ga) * 2h : 0)
 // and writes dh^T and relu(h)^2^T quantized along M, as quantize_mx_relu_square_bwd. Each 64x32 subtile is staged in
-// smem; each of the 128 threads then quantizes one 32-row column block of one tensor. Pingpong: one warpgroup per
-// tile, the two warpgroups' epilogues serialized.
+// smem transposed; each of the 128 threads then quantizes one 32-row block of one column of one tensor. Pingpong: one
+// warpgroup per tile, the two warpgroups' epilogues serialized.
 template <int FragmentSize>
 struct ReluSquareGradT {
   static constexpr int kEpiM = size<0>(EpiTile{}), kEpiN = size<1>(EpiTile{}), kThreads = 128;
   static_assert(kEpiM == 64 && kEpiN == 32, "2 tensors x 2 row blocks x 32 columns = 128 threads");
 
-  // [subtile parity][tensor][row][col]: the collective syncs the warpgroup before reduce, so a subtile's stage is
-  // complete there, and its readers are done before the subtile after next writes the buffer again
+  // [subtile parity][tensor][col][row], rows padded to 72: conflict-free fragment writes and 16 B block reads. The
+  // collective syncs the warpgroup before reduce, so a subtile's stage is complete there, and its readers are done
+  // before the subtile after next writes the buffer again.
+  static constexpr int kPitch = kEpiM + 8, kStage = kEpiN * kPitch;
+
   struct SharedStorage {
-    cutlass::array_aligned<cutlass::bfloat16_t, 2 * 2 * kEpiM * kEpiN> stage;
+    cutlass::array_aligned<cutlass::bfloat16_t, 2 * 2 * kStage, 16> stage;
   };
 
   struct Arguments {
@@ -182,7 +185,7 @@ struct ReluSquareGradT {
           const cutlass::Array<ElementAccumulator, FragmentSize>&, int epi_v, int epi_m, int epi_n,
           const cutlass::Array<ElementG, FragmentSize>& frg_g, const cutlass::Array<ElementH, FragmentSize>& frg_h) {
       using Bf16 = cutlass::bfloat16_t;
-      Bf16* buf = stage + (epi_m & 1) * 2 * kEpiM * kEpiN;
+      Bf16* buf = stage + (epi_m & 1) * 2 * kStage;
       auto crd = tCcD(_, _, _, epi_m, epi_n);
       cutlass::Array<float, FragmentSize> dh;
       CUTLASS_PRAGMA_UNROLL
@@ -193,8 +196,8 @@ struct ReluSquareGradT {
         const float r = h <= 0.f ? 0.f : h;
         const auto c = crd(epi_v * FragmentSize + i);
         const int row = (thr_m + get<0>(c)) % kEpiM, col = (thr_n + get<1>(c)) % kEpiN;
-        buf[row * kEpiN + col] = d;
-        buf[(kEpiM + row) * kEpiN + col] = Bf16(r * r);
+        buf[col * kPitch + row] = d;
+        buf[kStage + col * kPitch + row] = Bf16(r * r);
         dh[i] = static_cast<float>(d);
       }
       return dh;
@@ -202,26 +205,42 @@ struct ReluSquareGradT {
 
     template <class STensor, class SyncFn, class VTensor>
     CUTLASS_DEVICE void reduce(STensor&&, const SyncFn&, int epi_m, int epi_n, bool, VTensor) {
-      const auto* buf = stage + (epi_m & 1) * 2 * kEpiM * kEpiN;
-      const int t = thread_idx % kThreads, tensor = t / 64, blk = t / 32 % 2, col = t % 32;
-      const auto* src = buf + (tensor * kEpiM + blk * 32) * kEpiN + col;
-      float v[32], amax = 0.f;
+      // warp: one tensor, 16 columns x 2 row blocks; lanes 2c, 2c + 1 hold blocks 0, 1 of column c
+      const int t = thread_idx % kThreads, lane = t % 32, tensor = t / 64, col = t / 32 % 2 * 16 + lane / 2,
+                blk = lane % 2;
+      const auto* src = reinterpret_cast<const uint4*>(
+            stage + (epi_m & 1) * 2 * kStage + tensor * kStage + col * kPitch + blk * 32);
+      uint4 raw[4];
       CUTLASS_PRAGMA_UNROLL
-      for (int i = 0; i < 32; ++i) {
-        v[i] = static_cast<float>(src[i * kEpiN]);
-        amax = fmaxf(amax, fabsf(v[i]));
-      }
-      const int e = nanochat::mx_exponent(amax);
+      for (int i = 0; i < 4; ++i)
+        raw[i] = src[i];
+      const auto* v = reinterpret_cast<const __nv_bfloat162*>(raw);
+      __nv_bfloat162 amax2 = __habs2(v[0]);
+      CUTLASS_PRAGMA_UNROLL
+      for (int i = 1; i < 16; ++i)
+        amax2 = __hmax2(amax2, __habs2(v[i]));
+      const int e = nanochat::mx_exponent(fmaxf(__low2float(amax2), __high2float(amax2)));
       const float mul = nanochat::mx_multiplier(e);
-      __align__(16) __nv_fp8_storage_t q[32];
+      uint4 q4[2];
+      auto* q = reinterpret_cast<__nv_fp8x2_storage_t*>(q4);
       CUTLASS_PRAGMA_UNROLL
-      for (int i = 0; i < 32; ++i)
-        q[i] = __nv_cvt_float_to_fp8(v[i] * mul, __NV_SATFINITE, __NV_E4M3);
+      for (int i = 0; i < 16; ++i) {
+        const float2 f = __bfloat1622float2(v[i]);
+        q[i] = __nv_cvt_float2_to_fp8x2(make_float2(f.x * mul, f.y * mul), __NV_SATFINITE, __NV_E4M3);
+      }
       const MxT& out = tensor == 0 ? params->dh_t : params->a_t;
       const int64_t n = n0 + epi_n * kEpiN + col, m = m0 + epi_m * kEpiM + blk * 32;
-      auto* dst = reinterpret_cast<uint4*>(out.data + n * M + m);
-      dst[0] = reinterpret_cast<const uint4*>(q)[0];
-      dst[1] = reinterpret_cast<const uint4*>(q)[1];
+      // swap halves across the lane pair so each store writes whole 32 B sectors: of the 64 B row segment, even lanes
+      // store [0, 16) and [32, 48), odd lanes [16, 32) and [48, 64)
+      const uint4 keep = blk == 0 ? q4[0] : q4[1], send = blk == 0 ? q4[1] : q4[0];
+      uint4 recv;
+      recv.x = __shfl_xor_sync(0xffffffff, send.x, 1);
+      recv.y = __shfl_xor_sync(0xffffffff, send.y, 1);
+      recv.z = __shfl_xor_sync(0xffffffff, send.z, 1);
+      recv.w = __shfl_xor_sync(0xffffffff, send.w, 1);
+      auto* seg = reinterpret_cast<uint4*>(out.data + n * M + m0 + epi_m * kEpiM);
+      seg[blk] = blk == 0 ? keep : recv;
+      seg[2 + blk] = blk == 0 ? recv : keep;
       out.scale[nanochat::mx_scale_index(n, m / 32, M / 128)] = static_cast<uint8_t>(e);
     }
   };

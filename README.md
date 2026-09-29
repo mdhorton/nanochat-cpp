@@ -59,11 +59,10 @@ achieve.
 # RTX Pro 4000 Blackwell == 145 watts
 
 The workload is heavily power-bound and these cards have a low power cap. They boost to 3000 GHz, but most kernels run
-below 2000 GHz due to the power cap. A chiller wouldn't help much because they usually don't thermally throttle.
+below 2000 GHz due to the power cap. Water cooling wouldn't help much because they aren't thermally throttling.
 
 Improved kernel efficiency can mean the same work (energy) in less time. This translates to a lower GPU clock because
-power is usually already at the cap. A 2% isolated benchmark will usually be much lower end-to-end. This can be hard to
-measure and look more like run-to-run noise.
+power is already at the cap. A 3% isolated step improvement will be much lower in a real test.
 
 In contrast, fusing is a double win: fewer bytes are transferred (lower energy) in less time. Less energy in less
 time does not tax the clocks like kernel efficiency (same energy in less time).
