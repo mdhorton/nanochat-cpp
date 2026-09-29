@@ -56,16 +56,13 @@ achieve.
 
 ```~5.84B tokens in 1440 minutes = ~68k toks/sec```
 
-# RTX Pro 4000 == 145 watts
+# RTX Pro 4000 Blackwell == 145 watts
 
-The workload is heavily power-bound on these cards. They remain power capped most of a training.
+The workload is heavily power-bound and these cards have a low power cap. They boost to 3000 GHz, but most kernels run
+below 2000 GHz due to the power cap. A chiller wouldn't help much because they usually don't thermally throttle.
 
-These cards hit their power cap almost immediately and remain capped during training. Throughput is limited by
-energy.
+Improved kernel efficiency can mean the same work (energy) in less time. This translates to a lower GPU clock because
+power is usually already at the cap. A 5% isolated benchmark gain might realise an actual 2% gain.
 
-All GPUs have a power limit but the RTX Pro 4000 is especially affected due to its very low cap. Its boost clock is 3000
-Ghz, but most kernels operate under 2000 Ghz due to the power cap.
-
-Improved efficiency 
-
-Ths makes tuning precarious because what looks like overhead can sometimes hit the power cap. 
+In contrast, fusing is a double win: fewer bytes are transferred (lower energy) in less time. Less energy in less
+time does not tax the clocks like kernel efficiency (same energy in less time).

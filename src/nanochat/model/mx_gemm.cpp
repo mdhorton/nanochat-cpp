@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <iostream>
 #include <map>
 #include <mutex>
 #include <optional>
@@ -287,6 +288,9 @@ void mx_gemm_f32(
             },
             stream.stream());
       algo.cutlass = t_cutlass < kCutlassMargin * t_cublas;
+      std::cout << "mx_gemm_f32 " << M << "x" << N << "x" << K << (accumulate ? " +=" : "")
+                << " cuda:" << int(out.device().index()) << ": cutlass " << t_cutlass << " us, cublas split-k "
+                << t_cublas << " us -> " << (*algo.cutlass ? "cutlass" : "cublas") << std::endl;
       const std::lock_guard lock(algo_mutex);
       algos[key].cutlass = algo.cutlass;
     }
