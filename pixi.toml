@@ -55,8 +55,10 @@ QUICK_BASE = "--eval-tokens=4194304 --eval-every=-1 --save=false"
 [tasks]
 # empty CMAKE_CXX_FLAGS drops conda's packaging CXXFLAGS (-O2, -march=nocona)
 # the build type sets optimisation
-configure = "cmake -S . -B cmake-build-pixi -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH=$CONDA_PREFIX -DCMAKE_CXX_FLAGS="
-build = { cmd = "cmake --build cmake-build-pixi", depends-on = ["configure"] }
+# empty NVCC_PREPEND_FLAGS: cuda-nvcc activation adds -ccbin, which CMake already passes
+configure = { cmd = "cmake -S . -B cmake-build-pixi -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH=$CONDA_PREFIX -DCMAKE_CXX_FLAGS=", env = { NVCC_PREPEND_FLAGS = "" } }
+build = { cmd = "cmake --build cmake-build-pixi", depends-on = ["configure"], env = { NVCC_PREPEND_FLAGS = "" } }
+rebuild = "rm -rf cmake-build-pixi && pixi run build"
 
 base-train = { cmd = "cmake-build-pixi/base_train", depends-on = ["build"] }
 
