@@ -371,13 +371,20 @@ TEST(Fp8, CutlassReluSquareGemmMatchesUnfused) {
     const auto b = torch::randn({N, K}, opts).to(torch::kBFloat16);
     const auto qa = quantize_mx(a, true, false), qb = quantize_mx(b, true, false);
     const auto want_h = mx_gemm(qa.data, qa.inv_scale, qb.data, qb.inv_scale, torch::kBFloat16);
-    const auto want = quantize_mx(want_h, true, false, true);
+    const auto want = quantize_mx(want_h, true, true, true);
     const auto h = torch::full_like(want_h, std::nan(""));
     const auto q = torch::zeros_like(want.data), q_scale = torch::zeros_like(want.inv_scale);
-    ASSERT_TRUE(mx_gemm_relu_square(h, q, q_scale, qa.data, qa.inv_scale, qb.data, qb.inv_scale)) << what;
+    const auto q_t = torch::zeros_like(want.data_t), q_t_scale = torch::zeros_like(want.inv_scale_t);
+    ASSERT_TRUE(mx_gemm_relu_square(h, q, q_scale, q_t, q_t_scale, qa.data, qa.inv_scale, qb.data, qb.inv_scale))
+          << what;
     EXPECT_TRUE(torch::equal(h, want_h)) << what;
-    EXPECT_TRUE(torch::equal(q.view(torch::kUInt8), want.data.view(torch::kUInt8))) << what;
-    EXPECT_TRUE(torch::equal(q_scale.view(torch::kUInt8), want.inv_scale.view(torch::kUInt8))) << what;
+    const auto u8 = [](const torch::Tensor& t) {
+      return t.view(torch::kUInt8);
+    };
+    EXPECT_TRUE(torch::equal(u8(q), u8(want.data))) << what;
+    EXPECT_TRUE(torch::equal(u8(q_scale), u8(want.inv_scale))) << what;
+    EXPECT_TRUE(torch::equal(u8(q_t), u8(want.data_t))) << what;
+    EXPECT_TRUE(torch::equal(u8(q_t_scale), u8(want.inv_scale_t))) << what;
   }
 }
 
@@ -399,10 +406,9 @@ TEST(Fp8, CutlassReluSquareBwdGemmMatchesUnfused) {
     const auto scales = [&] {
       return torch::zeros({M * N / 32}, opts.dtype(torch::kUInt8));
     };
-    // [0] dh, [1] dh^T, [2] relu(h)^2^T: data, scales
+    // [0] dh, [1] dh^T: data, scales
     const auto outs = [&] {
-      return std::vector<torch::Tensor>{torch::zeros({M, N}, e4m3), scales(), torch::zeros({N, M}, e4m3), scales(),
-                                        torch::zeros({N, M}, e4m3), scales()};
+      return std::vector<torch::Tensor>{torch::zeros({M, N}, e4m3), scales(), torch::zeros({N, M}, e4m3), scales()};
     };
     const auto want = outs(), got = outs();
     const auto ga = mx_gemm(qa.data, qa.inv_scale, qb.data, qb.inv_scale, torch::kBFloat16);
@@ -410,9 +416,9 @@ TEST(Fp8, CutlassReluSquareBwdGemmMatchesUnfused) {
       return kernels::MxOut{data.data_ptr(), data.size(1), scale.data_ptr(), data.size(1) / 128};
     };
     kernels::quantize_mx_relu_square_bwd(
-          ga.data_ptr(), h.data_ptr(), M, N, mx(want[0], want[1]), mx(want[2], want[3]), stream, mx(want[4], want[5]));
-    ASSERT_TRUE(mx_gemm_relu_square_bwd(
-          qa.data, qa.inv_scale, qb.data, qb.inv_scale, h, got[0], got[1], got[2], got[3], got[4], got[5]))
+          ga.data_ptr(), h.data_ptr(), M, N, mx(want[0], want[1]), mx(want[2], want[3]), stream);
+    ASSERT_TRUE(
+          mx_gemm_relu_square_bwd(qa.data, qa.inv_scale, qb.data, qb.inv_scale, h, got[0], got[1], got[2], got[3]))
           << what;
     for (size_t i = 0; i < want.size(); ++i)
       EXPECT_TRUE(torch::equal(got[i].view(torch::kUInt8), want[i].view(torch::kUInt8))) << what << " output " << i;

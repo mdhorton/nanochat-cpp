@@ -261,8 +261,7 @@ public:
 
 // c_proj(relu(c_fc(x)).square()) as two Float8Matmuls, with relu^2 folded into the quantize kernels: forward
 // quantizes it straight from h (MX + CUTLASS: in c_fc's epilogue), backward computes dh with its amax (tensorwise) or
-// quantizes it without writing it (MX). Saves h instead of relu(h); under MX not relu(h)^2's transpose either, which
-// backward recomputes from h.
+// quantizes it without writing it (MX). Saves h instead of relu(h).
 class Fp8ReluSquareMlp : public torch::autograd::Function<Fp8ReluSquareMlp> {
 public:
   static torch::Tensor forward(
@@ -276,10 +275,12 @@ public:
     if (mx) {
       // CUTLASS: the GEMM's epilogue quantizes too
       h = torch::empty({x.size(0), w_fc.size(0)}, x.options());
-      aq = empty_mx(h.size(0), h.size(1), h.options(), true, false);
-      if (!mx_gemm_relu_square(h, aq.data, aq.inv_scale, xq.data, xq.inv_scale, fcq.data, fcq.inv_scale)) {
+      aq = empty_mx(h.size(0), h.size(1), h.options());
+      if (!mx_gemm_relu_square(
+                h, aq.data, aq.inv_scale, aq.data_t, aq.inv_scale_t, xq.data, xq.inv_scale, fcq.data, fcq.inv_scale)) {
         mx_gemm_out(h, xq.data, xq.inv_scale, fcq.data, fcq.inv_scale);
-        quantize_mx_into(h, true, mx_outs(aq).first, {});
+        const auto [out, out_t] = mx_outs(aq);
+        quantize_mx_into(h, true, out, out_t);
       }
     }
     else {
@@ -288,8 +289,7 @@ public:
     }
     const auto projq = quantize_fp8_weight(w_proj, proj_cache, recipe_of(mx));
     ctx->save_for_backward(
-          {xq.data_t, xq.inv_t(), fcq.data_t, fcq.inv_t(), h, mx ? torch::Tensor() : aq.data_t,
-           mx ? torch::Tensor() : aq.inv_t(), projq.data_t, projq.inv_t()});
+          {xq.data_t, xq.inv_t(), fcq.data_t, fcq.inv_t(), h, aq.data_t, aq.inv_t(), projq.data_t, projq.inv_t()});
     ctx->saved_data["mx"] = mx;
     save_grad_params(ctx, "w_fc", mx, {w_fc});
     save_grad_params(ctx, "w_proj", mx, {w_proj});
@@ -309,26 +309,22 @@ public:
       TORCH_CHECK(ga.scalar_type() == torch::kBFloat16 && ga.is_contiguous() && h.is_contiguous());
       return ga;
     };
+    const auto grad_proj = mm_grad_weight(go, s[5], s[6], dtype, grad_params(ctx, "w_proj"));
     Fp8Tensor dhq;
-    torch::Tensor grad_proj;
     if (mx) {
       dhq = empty_mx(h.size(0), h.size(1), h.options());
-      const auto aq = empty_mx(h.size(0), h.size(1), h.options(), false, true);
       // CUTLASS: the dgrad GEMM's epilogue does it all
-      if (dtype != torch::kBFloat16 || !mx_gemm_relu_square_bwd(
-                                             go.data, go.inv_scale, s[7], s[8], h, dhq.data, dhq.inv_scale, dhq.data_t,
-                                             dhq.inv_scale_t, aq.data_t, aq.inv_scale_t)) {
+      if (dtype != torch::kBFloat16 ||
+          !mx_gemm_relu_square_bwd(
+                go.data, go.inv_scale, s[7], s[8], h, dhq.data, dhq.inv_scale, dhq.data_t, dhq.inv_scale_t)) {
         const auto ga = compute_ga();
         const auto [out, out_t] = mx_outs(dhq);
-        kernels::quantize_mx_relu_square_bwd(
-              ga.data_ptr(), h.data_ptr(), h.size(0), h.size(1), out, out_t, stream, mx_outs(aq).second);
+        kernels::quantize_mx_relu_square_bwd(ga.data_ptr(), h.data_ptr(), h.size(0), h.size(1), out, out_t, stream);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
-      grad_proj = mm_grad_weight(go, aq.data_t, aq.inv_t(), dtype, grad_params(ctx, "w_proj"));
     }
     else {
       const auto ga = compute_ga();
-      grad_proj = mm_grad_weight(go, s[5], s[6], dtype, grad_params(ctx, "w_proj"));
       auto dh = torch::empty_like(h);
       const auto scalars = empty_scalars(h);
       kernels::relu_square_bwd(

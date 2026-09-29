@@ -1,6 +1,6 @@
 # run history
 
-To speedup dev iterations, most of the initial sm120 tuning was done using `--depth=12`.
+To speedup dev iterations, initial sm120 tuning was done at `--depth=12`. Later, fine-tuning was done at `--depth=24`.
 
 # medium runs @ d12
 
