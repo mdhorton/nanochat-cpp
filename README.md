@@ -62,7 +62,8 @@ The workload is heavily power-bound and these cards have a low power cap. They b
 below 2000 GHz due to the power cap. A chiller wouldn't help much because they usually don't thermally throttle.
 
 Improved kernel efficiency can mean the same work (energy) in less time. This translates to a lower GPU clock because
-power is usually already at the cap. A 5% isolated benchmark gain might realise an actual 2% gain.
+power is usually already at the cap. A 2% isolated benchmark will usually be much lower end-to-end. This can be hard to
+measure and look more like run-to-run noise.
 
 In contrast, fusing is a double win: fewer bytes are transferred (lower energy) in less time. Less energy in less
 time does not tax the clocks like kernel efficiency (same energy in less time).

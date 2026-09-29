@@ -10,26 +10,30 @@ find_package(Arrow REQUIRED)
 find_package(Parquet REQUIRED)
 find_package(nlohmann_json REQUIRED)
 find_package(Threads REQUIRED)
-
 pkg_check_modules(PCRE2 REQUIRED IMPORTED_TARGET libpcre2-8)
 
-# libtorch from the pixi env's PyPI torch wheel. Its FindCUDA-based config needs the conda CUDA layout spelled out.
+# libtorch from the pixi env's PyPI torch wheel.
 set(PIXI_ENV "${PROJECT_SOURCE_DIR}/.pixi/envs/default" CACHE PATH "pixi environment prefix")
 file(GLOB TORCH_DIR "${PIXI_ENV}/lib/python3*/site-packages/torch")
 list(GET TORCH_DIR 0 TORCH_DIR) # conda also adds a python3.1 -> python3.12 symlink
 file(REAL_PATH "${TORCH_DIR}" TORCH_DIR)
 list(APPEND CMAKE_PREFIX_PATH ${TORCH_DIR})
+
 set(CUDA_TOOLKIT_ROOT_DIR "${PIXI_ENV}/targets/x86_64-linux")
 set(CMAKE_CUDA_COMPILER "${PIXI_ENV}/bin/nvcc")
 set(CMAKE_CUDA_HOST_COMPILER "${CMAKE_CXX_COMPILER}")
 set(CUDA_nvrtc_LIBRARY "${TORCH_DIR}/../nvidia/cu13/lib/libnvrtc.so.13") # not in the conda env
 set(TORCH_CUDA_ARCH_LIST 12.0a) # torch sets the nvcc -gencode flags from this; a: block-scaled mma.sync
+
 set(CMAKE_CUDA_STANDARD 20)
 set(CMAKE_CUDA_RUNTIME_LIBRARY None) # use torch's libcudart
 enable_language(CUDA)
+
 unset(CMAKE_CUDA_ARCHITECTURES CACHE) # torch warns if set
+set(kineto_LIBRARY "${TORCH_DIR}/lib/libtorch_cpu.so") # kineto is built into libtorch_cpu
 find_package(Torch REQUIRED)
 set(CMAKE_CUDA_ARCHITECTURES OFF) # torch adds the -gencode flags
+
 # link and load torch's libcudart, not the copy nvcc brings in. The rpath goes first: conda's LDFLAGS put the env's
 # lib dir (with a libcudart.so.13 symlink) at the front.
 set_property(TARGET CUDA::cudart PROPERTY IMPORTED_LOCATION "${TORCH_DIR}/../nvidia/cu13/lib/libcudart.so.13")
