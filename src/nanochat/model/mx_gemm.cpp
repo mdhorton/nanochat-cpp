@@ -161,26 +161,28 @@ void mx_gemm_out(
 bool mx_gemm_relu_square(
       const torch::Tensor& h, const torch::Tensor& q, const torch::Tensor& q_scale, const torch::Tensor& q_t,
       const torch::Tensor& q_t_scale, const torch::Tensor& a, const torch::Tensor& a_scale, const torch::Tensor& b,
-      const torch::Tensor& b_scale) {
+      const torch::Tensor& b_scale, const kernels::Nvfp4Out& q_t_fp4) {
   if (!cutlass_fits(a, b, h.scalar_type()) || h.scalar_type() != torch::kBFloat16)
     return false;
   const int64_t M = a.size(0), N = b.size(0), K = a.size(1);
   TORCH_CHECK(
         h.is_contiguous() && h.size(0) == M && h.size(1) == N && b.size(1) == K, "mx_gemm_relu_square: shape mismatch");
   check_mx_out(q, q_scale, M, N, "mx_gemm_relu_square");
-  check_mx_out(q_t, q_t_scale, N, M, "mx_gemm_relu_square");
+  const bool fp4 = q_t_fp4.data != nullptr;
+  if (!fp4)
+    check_mx_out(q_t, q_t_scale, N, M, "mx_gemm_relu_square");
   check_cutlass(
         kernels::cutlass_mx_gemm_relu_square(
               a.data_ptr(), a_scale.data_ptr(), b.data_ptr(), b_scale.data_ptr(), h.data_ptr(), q.data_ptr(),
-              q_scale.data_ptr(), q_t.data_ptr(), q_t_scale.data_ptr(), M, N, K,
-              at::cuda::getCurrentCUDAStream().stream()));
+              q_scale.data_ptr(), fp4 ? nullptr : q_t.data_ptr(), fp4 ? nullptr : q_t_scale.data_ptr(), q_t_fp4, M, N,
+              K, at::cuda::getCurrentCUDAStream().stream()));
   return true;
 }
 
 bool mx_gemm_relu_square_bwd(
       const torch::Tensor& a, const torch::Tensor& a_scale, const torch::Tensor& b, const torch::Tensor& b_scale,
       const torch::Tensor& h, const torch::Tensor& dh, const torch::Tensor& dh_scale, const torch::Tensor& dh_t,
-      const torch::Tensor& dh_t_scale) {
+      const torch::Tensor& dh_t_scale, const kernels::Nvfp4Out& dh_t_fp4) {
   if (!cutlass_fits(a, b, h.scalar_type()) || h.scalar_type() != torch::kBFloat16)
     return false;
   const int64_t M = a.size(0), N = b.size(0), K = a.size(1);
@@ -188,12 +190,14 @@ bool mx_gemm_relu_square_bwd(
         h.is_contiguous() && h.size(0) == M && h.size(1) == N && b.size(1) == K,
         "mx_gemm_relu_square_bwd: shape mismatch");
   check_mx_out(dh, dh_scale, M, N, "mx_gemm_relu_square_bwd");
-  check_mx_out(dh_t, dh_t_scale, N, M, "mx_gemm_relu_square_bwd");
+  const bool fp4 = dh_t_fp4.data != nullptr;
+  if (!fp4)
+    check_mx_out(dh_t, dh_t_scale, N, M, "mx_gemm_relu_square_bwd");
   check_cutlass(
         kernels::cutlass_mx_gemm_relu_square_bwd(
               a.data_ptr(), a_scale.data_ptr(), b.data_ptr(), b_scale.data_ptr(), h.data_ptr(), dh.data_ptr(),
-              dh_scale.data_ptr(), dh_t.data_ptr(), dh_t_scale.data_ptr(), M, N, K,
-              at::cuda::getCurrentCUDAStream().stream()));
+              dh_scale.data_ptr(), fp4 ? nullptr : dh_t.data_ptr(), fp4 ? nullptr : dh_t_scale.data_ptr(), dh_t_fp4, M,
+              N, K, at::cuda::getCurrentCUDAStream().stream()));
   return true;
 }
 

@@ -45,16 +45,17 @@ namespace fusion = cutlass::epilogue::fusion;
 using EpiTile = Shape<_64, _32>;
 using StrideH = cutlass::gemm::TagToStrideC_t<cutlass::layout::RowMajor>;
 
-// e4m3 (N, M) row-major, MX along M: scales in the swizzled layout with M / 128 tiles
+// e4m3 (N, M) row-major, MX along M: scales in the swizzled layout with M / 128 tiles. fp4.data set: NVFP4 instead.
 struct MxT {
   uint8_t* data;
   uint8_t* scale;
+  nanochat::kernels::Nvfp4Out fp4;
 };
 
 // Epilogue node: returns Fn of its children's values per element (bf16) and writes their transpose quantized along M
 // (as quantize_mx's out_t). Each 64x32 subtile is staged in smem transposed; each of the 128 threads then quantizes 16
-// rows of one column, lane pairs sharing a 32-row block's amax. Pingpong: one warpgroup per tile, the two warpgroups'
-// epilogues serialized.
+// rows of one column, lane pairs sharing a 32-row block's amax (NVFP4: one 16-value block each). Pingpong: one
+// warpgroup per tile, the two warpgroups' epilogues serialized.
 template <int FragmentSize, class Fn>
 struct MxStoreT {
   static constexpr int kEpiM = size<0>(EpiTile{}), kEpiN = size<1>(EpiTile{}), kThreads = 128;
@@ -138,6 +139,7 @@ struct MxStoreT {
     int64_t M;
     int m0, n0; // the CTA tile's origin
     int thread_idx;
+    float smax = 0.f; // NVFP4: the tile's max block scale so far
 
     template <class ElementAccumulator, class... ElementIn>
     CUTLASS_DEVICE cutlass::Array<float, FragmentSize> visit(
@@ -164,6 +166,17 @@ struct MxStoreT {
       const auto* src = reinterpret_cast<const uint4*>(stage + (epi_m & 1) * kStage + col * kPitch + quarter * 16);
       uint4 raw[2] = {src[0], src[1]};
       const auto* v = reinterpret_cast<const __nv_bfloat162*>(raw);
+      const int64_t n = n0 + epi_n * kEpiN + col, m = m0 + epi_m * kEpiM + quarter * 16;
+      if (params->fp4.data != nullptr) {
+        float f[16];
+        CUTLASS_PRAGMA_UNROLL
+        for (int i = 0; i < 8; ++i) {
+          const float2 p = __bfloat1622float2(v[i]);
+          f[2 * i] = p.x, f[2 * i + 1] = p.y;
+        }
+        smax = fmaxf(smax, nanochat::nvfp4_store16(f, params->fp4, n, m));
+        return;
+      }
       __nv_bfloat162 amax2 = __habs2(v[0]);
       CUTLASS_PRAGMA_UNROLL
       for (int i = 1; i < 8; ++i)
@@ -179,10 +192,14 @@ struct MxStoreT {
         const float2 f = __bfloat1622float2(v[i]);
         q[i] = __nv_cvt_float2_to_fp8x2(make_float2(f.x * mul, f.y * mul), __NV_SATFINITE, __NV_E4M3);
       }
-      const int64_t n = n0 + epi_n * kEpiN + col, m = m0 + epi_m * kEpiM + quarter * 16;
       *reinterpret_cast<uint4*>(params->data + n * M + m) = q4;
       if (quarter % 2 == 0)
         params->scale[nanochat::mx_scale_index(n, m / 32, M / 128)] = static_cast<uint8_t>(e);
+    }
+
+    CUTLASS_DEVICE void end() {
+      if (params->fp4.data != nullptr)
+        nanochat::nvfp4_smax(params->fp4, smax);
     }
   };
 
@@ -352,7 +369,7 @@ const char* cutlass_mx_gemm_f32(
 
 const char* cutlass_mx_gemm_relu_square(
       const void* a, const void* a_scale, const void* b, const void* b_scale, void* h, void* q, void* q_scale,
-      void* q_t, void* q_t_scale, int64_t M, int64_t N, int64_t K, cudaStream_t stream) {
+      void* q_t, void* q_t_scale, const Nvfp4Out& q_t_fp4, int64_t M, int64_t N, int64_t K, cudaStream_t stream) {
   using G = MxGemmReluSquare;
   if (!fits(M, N, K))
     return "cutlass_mx_gemm_relu_square: M, N, K must be % 128";
@@ -363,14 +380,14 @@ const char* cutlass_mx_gemm_relu_square(
   // {{{{acc}, {h}}, {q^T}}, {scales}}
   args.epilogue.thread = {
         {{{}, {static_cast<cutlass::bfloat16_t*>(h), cutlass::make_cute_packed_stride(StrideH{}, {m, n, 1})}},
-         {static_cast<uint8_t*>(q_t), static_cast<uint8_t*>(q_t_scale)}},
+         {static_cast<uint8_t*>(q_t), static_cast<uint8_t*>(q_t_scale), q_t_fp4}},
         {static_cast<cutlass::float_ue8m0_t*>(q_scale), one(), {}}};
   return launch<G>(args, stream);
 }
 
 const char* cutlass_mx_gemm_relu_square_bwd(
       const void* a, const void* a_scale, const void* b, const void* b_scale, const void* h, void* dh, void* dh_scale,
-      void* dh_t, void* dh_t_scale, int64_t M, int64_t N, int64_t K, cudaStream_t stream) {
+      void* dh_t, void* dh_t_scale, const Nvfp4Out& dh_t_fp4, int64_t M, int64_t N, int64_t K, cudaStream_t stream) {
   using G = MxGemmReluSquareGrad;
   if (!fits(M, N, K))
     return "cutlass_mx_gemm_relu_square_bwd: M, N, K must be % 128";
@@ -383,7 +400,7 @@ const char* cutlass_mx_gemm_relu_square_bwd(
         {{},
          {static_cast<const cutlass::bfloat16_t*>(h), cutlass::bfloat16_t(0),
           cutlass::make_cute_packed_stride(StrideH{}, {m, n, 1})},
-         {static_cast<uint8_t*>(dh_t), static_cast<uint8_t*>(dh_t_scale)}},
+         {static_cast<uint8_t*>(dh_t), static_cast<uint8_t*>(dh_t_scale), dh_t_fp4}},
         {static_cast<cutlass::float_ue8m0_t*>(dh_scale), one(), {}}};
   return launch<G>(args, stream);
 }

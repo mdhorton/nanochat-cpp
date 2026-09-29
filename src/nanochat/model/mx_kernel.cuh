@@ -7,6 +7,7 @@
 #include <cuda_fp8.h>
 
 #include "nanochat/model/fp8_kernel.h"
+#include "nanochat/model/nvfp4.cuh"
 
 namespace nanochat {
 
@@ -38,17 +39,17 @@ __device__ __forceinline__ float mx_multiplier(int e) {
   return __uint_as_float(static_cast<uint32_t>(254 - e) << 23);
 }
 
-// cuBLAS's swizzled scale layout: 128x4 tiles of (row, block), 512 bytes each, row-major over tiles
-__device__ __forceinline__ int64_t mx_scale_index(int64_t row, int64_t block, int64_t tiles) {
-  return ((row >> 7) * tiles + (block >> 2)) * 512 + (row & 31) * 16 + ((row >> 5) & 3) * 4 + (block & 3);
-}
-
 struct MxOutDev {
   __nv_fp8_storage_t* data;
   int64_t ld;
   uint8_t* scale;
   int64_t scale_tiles;
+  kernels::Nvfp4Out fp4; // out_t: NVFP4 when fp4.data is set
 };
+
+__device__ __forceinline__ bool mx_writes(const MxOutDev& o) {
+  return o.data != nullptr || o.fp4.data != nullptr;
+}
 
 __device__ __forceinline__ void mx_store8(
       const float (&v)[8], float amax, const MxOutDev& o, int64_t row, int64_t col, int64_t scale_row,
@@ -62,6 +63,21 @@ __device__ __forceinline__ void mx_store8(
   *reinterpret_cast<uint2*>(o.data + row * o.ld + col) = *reinterpret_cast<const uint2*>(q);
   if (write_scale)
     o.scale[mx_scale_index(scale_row, col / 32, o.scale_tiles)] = static_cast<uint8_t>(e);
+}
+
+// out_t's 8 values of row `row` from col (4 lanes per 32, as mx_store8): MX, or NVFP4 (lane pairs per 16; returns the
+// block scale, 0 for MX)
+__device__ __forceinline__ float mx_store8_t(float (&v)[8], const MxOutDev& o, int64_t row, int64_t col) {
+  if (o.fp4.data != nullptr)
+    return nvfp4_store8(v, o.fp4, row, col);
+  float m = 0.f;
+#pragma unroll
+  for (int k = 0; k < 8; ++k)
+    m = fmaxf(m, fabsf(v[k]));
+  m = fmaxf(m, __shfl_xor_sync(0xffffffff, m, 1));
+  m = fmaxf(m, __shfl_xor_sync(0xffffffff, m, 2));
+  mx_store8(v, m, o, row, col, row, col % 32 == 0);
+  return 0.f;
 }
 
 // 32x64 tiles, 256 threads. Rows: each thread quantizes 8 values, 4 threads per 32-value block. Columns: from the
@@ -90,20 +106,17 @@ __device__ __forceinline__ void mx_body(L load, MxOutDev out, MxOutDev out_t) {
       mx_store8(v, m, out, row0 + r, col0 + c, row0 + r, t % 4 == 0);
     }
   }
-  if (out_t.data == nullptr)
+  if (!mx_writes(out_t))
     return;
   __syncthreads();
   const int c = t / 4, r = t % 4 * 8;
   float v[8];
-  float m = 0.f;
 #pragma unroll
-  for (int k = 0; k < 8; ++k) {
+  for (int k = 0; k < 8; ++k)
     v[k] = tile[r + k][c];
-    m = fmaxf(m, fabsf(v[k]));
-  }
-  m = fmaxf(m, __shfl_xor_sync(0xffffffff, m, 1));
-  m = fmaxf(m, __shfl_xor_sync(0xffffffff, m, 2));
-  mx_store8(v, m, out_t, col0 + c, row0 + r, col0 + c, t % 4 == 0);
+  const float s = mx_store8_t(v, out_t, col0 + c, row0 + r);
+  if (out_t.fp4.data != nullptr)
+    nvfp4_smax_block(out_t.fp4, s);
 }
 
 // Quantizes a kMxRows x kCols tile of shared memory both ways, as mx_body: out from (row0, col0), out_t from (col0,
@@ -125,22 +138,23 @@ __device__ __forceinline__ void mx_store_tile(
     m = fmaxf(m, __shfl_xor_sync(0xffffffff, m, 2));
     mx_store8(v, m, out, row0 + r, col0 + c, row0 + r, q % 4 == 0);
   }
+  if (!mx_writes(out_t))
+    return;
+  float smax = 0.f;
   for (int q = t; q < kCols * kMxRows / 8; q += kMxThreads) {
     const int c = q / 4, r = q % 4 * 8;
-    float v[8], m = 0.f;
+    float v[8];
 #pragma unroll
-    for (int k = 0; k < 8; ++k) {
+    for (int k = 0; k < 8; ++k)
       v[k] = tile[r + k][c];
-      m = fmaxf(m, fabsf(v[k]));
-    }
-    m = fmaxf(m, __shfl_xor_sync(0xffffffff, m, 1));
-    m = fmaxf(m, __shfl_xor_sync(0xffffffff, m, 2));
-    mx_store8(v, m, out_t, col0 + c, row0 + r, col0 + c, q % 4 == 0);
+    smax = fmaxf(smax, mx_store8_t(v, out_t, col0 + c, row0 + r));
   }
+  if (out_t.fp4.data != nullptr)
+    nvfp4_smax_block(out_t.fp4, smax);
 }
 
-inline MxOutDev mx_dev(const kernels::MxOut& o) {
-  return {static_cast<__nv_fp8_storage_t*>(o.data), o.ld, static_cast<uint8_t*>(o.scale), o.scale_tiles};
+__host__ __device__ inline MxOutDev mx_dev(const kernels::MxOut& o) {
+  return {static_cast<__nv_fp8_storage_t*>(o.data), o.ld, static_cast<uint8_t*>(o.scale), o.scale_tiles, o.fp4};
 }
 
 inline dim3 mx_grid(int64_t rows, int64_t cols) {

@@ -70,10 +70,12 @@ public:
     Fp8Tensor n_mx;
     if (mx) {
       TORCH_CHECK(residual_norm_mx_fits(rows, cols) && gate_cols >= 0 && gate_cols <= cols, "residual_norm_mx: shape");
-      n_mx = empty_mx(rows, cols, x.options());
+      n_mx = empty_mx(rows, cols, x.options(), true, true, WgradRole::Input);
       const auto [out, out_t] = mx_outs(n_mx);
       kernels::residual_norm_mx_fwd(
             {.base = args, .out = out, .out_t = out_t, .n_cols = static_cast<int>(gate_cols)}, stream);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+      finish_fp4_t(n_mx);
     }
     else
       kernels::residual_norm_fwd(args, stream);
@@ -91,8 +93,10 @@ public:
     }
     if (!mx)
       return {res, n};
-    ctx->mark_non_differentiable({n_mx.data, n_mx.inv_scale, n_mx.data_t, n_mx.inv_scale_t});
-    return {res, n, n_mx.data, n_mx.inv_scale, n_mx.data_t, n_mx.inv_scale_t};
+    // amax_t: NVFP4 data_t's (else a placeholder)
+    const auto amax_t = n_mx.fp4_t() ? n_mx.amax_t : torch::empty({0}, rstd.options());
+    ctx->mark_non_differentiable({n_mx.data, n_mx.inv_scale, n_mx.data_t, n_mx.inv_scale_t, amax_t});
+    return {res, n, n_mx.data, n_mx.inv_scale, n_mx.data_t, n_mx.inv_scale_t, amax_t};
   }
 
   static variable_list backward(AutogradContext* ctx, variable_list grads) {
@@ -177,7 +181,10 @@ ResidualNormMx residual_norm_mx(
       const torch::Tensor& x0_lambdas, int64_t layer, const c10::intrusive_ptr<X0Grad>& x0_grad, int64_t gate_cols) {
   const auto out = ResidualNorm::apply(
         x, optional(r), optional(x0), optional(resid_lambdas), optional(x0_lambdas), layer, x0_grad, true, gate_cols);
-  return {out[0], out[1], {out[2], out[4], out[3], out[5]}};
+  Fp8Tensor n_mx{out[2], out[4], out[3], out[5]};
+  if (n_mx.fp4_t())
+    n_mx.amax_t = out[6];
+  return {out[0], out[1], n_mx};
 }
 
 bool residual_norm_mx_fits(int64_t rows, int64_t cols) {

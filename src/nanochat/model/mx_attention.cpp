@@ -42,7 +42,10 @@ public:
     const auto stream = at::cuda::getCurrentCUDAStream().stream();
 
     TORCH_CHECK(x_mx == nullptr || (x_mx->data.defined() && x_mx->data_t.defined()), "x_mx: both layouts");
-    const auto xq = x_mx != nullptr ? *x_mx : quantize_mx(x);
+    const bool grads_direct = mx_grad_direct(wq) && mx_grad_direct(wk) && mx_grad_direct(wv);
+    const auto xq = x_mx != nullptr
+                          ? *x_mx
+                          : quantize_mx(x, true, true, false, grads_direct ? WgradRole::Input : WgradRole::None);
     const auto wf = mx_qkv_weights(wq, wk, wv, cache);
     const auto qkv = mx_gemm(xq.data, xq.inv_scale, wf[0], wf[2], x.scalar_type());
 
@@ -110,8 +113,9 @@ public:
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 
     ctx->save_for_backward(
-          {xq.data_t, xq.inv_scale_t, wf[1], wf[3], qkv, rstd_q, rstd_k, cos, sin, gate_in, w_gate_bf16, z, ve});
-    if (mx_grad_direct(wq) && mx_grad_direct(wk) && mx_grad_direct(wv))
+          {xq.data_t, xq.inv_scale_t, wf[1], wf[3], qkv, rstd_q, rstd_k, cos, sin, gate_in, w_gate_bf16, z, ve,
+           xq.amax_t});
+    if (grads_direct)
       ctx->saved_data["weights"] = std::vector{wq, wk, wv}; // backward writes their .grad itself
     ctx->saved_data["scale"] = scale;
     ctx->saved_data["head_dim"] = head_dim;
@@ -129,20 +133,29 @@ public:
     const auto s = ctx->get_saved_variables();
     const auto &x_t = s[0], &x_scale_t = s[1], &w_t = s[2], &w_scale_t = s[3], &qkv = s[4];
     const auto &rstd_q = s[5], &rstd_k = s[6], &cos = s[7], &sin = s[8];
-    const auto &gate_in = s[9], &w_gate_bf16 = s[10], &z = s[11], &ve = s[12];
+    const auto &gate_in = s[9], &w_gate_bf16 = s[10], &z = s[11], &ve = s[12], &x_amax = s[13];
     const auto scale = static_cast<float>(ctx->saved_data["scale"].toDouble());
     const auto head_dim = ctx->saved_data["head_dim"].toInt();
-    const int64_t N = x_t.size(1), T = cos.size(1), n = qkv.size(1), nq = grads[0].size(1), nkv = grads[1].size(1);
+    const int64_t N = qkv.size(0), T = cos.size(1), n = qkv.size(1), nq = grads[0].size(1), nkv = grads[1].size(1);
     const int heads = static_cast<int>(nq / head_dim), kv_heads = static_cast<int>(nkv / head_dim);
     const auto dtype = grads[0].scalar_type();
     const auto stream = at::cuda::getCurrentCUDAStream().stream();
 
-    // dq, dk, dv, MX-quantized into the merged gradient (N, n) and its transpose
+    // dq, dk, dv, MX-quantized into the merged gradient (N, n) and its transpose (NVFP4 for NVFP4 weight gradients)
+    const bool grads_direct = ctx->saved_data.count("weights") != 0;
     const auto e4m3 = qkv.options().dtype(torch::kFloat8_e4m3fn);
-    auto g = torch::empty({N, n}, e4m3), g_t = torch::empty({n, N}, e4m3);
-    auto g_scale = empty_mx_scale(N, n, qkv.options()), g_scale_t = empty_mx_scale(n, N, qkv.options());
+    const auto g_fp4 = grads_direct ? nvfp4_wgrad_target(n, N, qkv.options(), true) : Nvfp4Target{};
+    auto g = torch::empty({N, n}, e4m3), g_scale = empty_mx_scale(N, n, qkv.options());
+    torch::Tensor g_t, g_scale_t, g_amax;
+    if (!g_fp4.data.defined())
+      g_t = torch::empty({n, N}, e4m3), g_scale_t = empty_mx_scale(n, N, qkv.options());
     const auto part = [&](int64_t col) {
-      return std::pair{mx_out(g, g_scale, 0, col), mx_out(g_t, g_scale_t, col, 0)};
+      kernels::MxOut out_t{};
+      if (g_fp4.data.defined())
+        out_t.fp4 = nvfp4_out(g_fp4, col, 0);
+      else
+        out_t = mx_out(g_t, g_scale_t, col, 0);
+      return std::pair{mx_out(g, g_scale, 0, col), out_t};
     };
     const auto dq = grads[0].contiguous(), dk = grads[1].contiguous(), dv = grads[2].contiguous();
     for (const auto& [d, col, rstd, h] :
@@ -166,10 +179,16 @@ public:
     else
       quantize_mx_into(dv, false, v_out, v_out_t);
 
+    if (g_fp4.data.defined()) {
+      const auto t = nvfp4_finish(g_fp4);
+      g_t = t.data, g_scale_t = t.scale, g_amax = t.amax;
+    }
     auto dx = mx_gemm(g, g_scale, w_t, w_scale_t, dtype);
     torch::Tensor dw;
-    if (ctx->saved_data.count("weights") != 0)
-      mx_grad_weights(g_t, g_scale_t, x_t, x_scale_t, ctx->saved_data["weights"].toTensorVector());
+    if (grads_direct)
+      mx_grad_weights(
+            g_t, g_scale_t, x_t, x_scale_t, ctx->saved_data["weights"].toTensorVector(), {}, true, g_amax,
+            x_amax.defined() && x_t.scalar_type() == torch::kUInt8 ? x_amax : torch::Tensor());
     else
       dw = mx_gemm(g_t, g_scale_t, x_t, x_scale_t, dtype);
     const auto rows = [&](int64_t row, int64_t size) {

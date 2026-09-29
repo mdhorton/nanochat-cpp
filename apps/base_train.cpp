@@ -32,6 +32,23 @@ static int run(int argc, char** argv) {
   o.fp8_recipe = flags.str("fp8-recipe", o.fp8_recipe, "mxfp8 (32-value block scales) or tensorwise (as Python)");
   o.gemm = flags.str("gemm", o.gemm, "MXFP8 GEMMs: cutlass or cublas (cuBLASLt)");
   o.fused = flags.boolean("fused", o.fused, "fused elementwise CUDA kernels (false = op by op, as Python)");
+  o.nvfp4 = flags.str(
+        "nvfp4", o.nvfp4,
+        "simulated NVFP4 (slow, for numerics) for these GEMMs of the blocks' Linears: comma list of fwd, dgrad, wgrad "
+        "(empty = off; needs --fp8-recipe=mxfp8)");
+  o.nvfp4_rht = flags.str(
+        "nvfp4-rht", o.nvfp4_rht,
+        "nvfp4: GEMMs with a random Hadamard transform along K (fwd, dgrad, wgrad; empty = none)");
+  o.nvfp4_sr = flags.str(
+        "nvfp4-sr", o.nvfp4_sr,
+        "nvfp4: GEMMs whose gradient operand rounds stochastically (dgrad, wgrad; empty = none)");
+  o.nvfp4_weight_2d = flags.boolean("nvfp4-weight-2d", o.nvfp4_weight_2d, "nvfp4: 16x16 weight blocks (without rht)");
+  o.nvfp4_wgrad = flags.boolean(
+        "nvfp4-wgrad", o.nvfp4_wgrad,
+        "real NVFP4 weight gradients (CUTLASS) for the Linears but lm_head, with --nvfp4-rht/--nvfp4-sr's wgrad");
+  o.nvfp4_seed = flags.i64("nvfp4-seed", o.nvfp4_seed, "nvfp4: stochastic rounding seed");
+  o.nvfp4_skip_first = flags.i64("nvfp4-skip-first", o.nvfp4_skip_first, "nvfp4: first blocks kept MXFP8");
+  o.nvfp4_skip_last = flags.i64("nvfp4-skip-last", o.nvfp4_skip_last, "nvfp4: last blocks kept MXFP8");
   o.cublaslt_workspace_mb = flags.i64(
         "cublaslt-workspace-mb", o.cublaslt_workspace_mb,
         "cuBLASLt workspace in MB; split-K GEMMs need a few (<= 0 = torch's 1 MB default)");

@@ -26,6 +26,16 @@ struct TrainOptions {
   std::string gemm = "cutlass";       // MXFP8 GEMMs: cutlass or cublas (cuBLASLt)
   bool fused = true;                  // fused elementwise kernels; false: Python's op-by-op path
   int64_t cublaslt_workspace_mb = 32; // cuBLASLt workspace per stream; its split-K GEMMs need a few MB (torch: 1)
+  // simulated NVFP4 (nvfp4_sim.h; slow, for numerics) for these GEMMs of the blocks' Linears: comma list of fwd, dgrad,
+  // wgrad; empty: off. Needs fp8 with mxfp8, which the other GEMMs, blocks and lm_head keep.
+  std::string nvfp4;
+  std::string nvfp4_rht = "wgrad";      // GEMMs with a random Hadamard transform along K
+  std::string nvfp4_sr = "dgrad,wgrad"; // GEMMs whose gradient operand rounds stochastically
+  bool nvfp4_weight_2d = true;
+  int64_t nvfp4_skip_first = 0, nvfp4_skip_last = 0; // blocks kept MXFP8
+  int64_t nvfp4_seed = 0;                            // stochastic rounding's
+  // real NVFP4 weight gradients for the Linears but lm_head (nvfp4.h), with nvfp4_rht / nvfp4_sr's wgrad and nvfp4_seed
+  bool nvfp4_wgrad = false;
   // training horizon: the first one set wins
   int64_t num_iterations = -1;
   double target_flops = -1, target_param_data_ratio = 8; // Python: 12; speedrun.sh uses 8

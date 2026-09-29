@@ -1,12 +1,20 @@
 // Times cuBLASLt's algorithms for the MXFP8 GEMM shapes of a training micro-step against at::_scaled_mm's choice and
 // CUTLASS (mx_gemm_kernel.h).
-// Usage: bench_gemm [--tokens T] [--embd C] [--algos N] [--f32] [--shape M,N,K] [--torch-ws-mb MB]
+// Usage: bench_gemm [--tokens T] [--embd C] [--algos N] [--f32] [--shape M,N,K] [--torch-ws-mb MB] [--fp4]
+//                   [--sustain S] [--wgrad S] [--stage2 S]
 // Also reports whether each algorithm gives the same bits twice (split-K with in-place reduction does not).
+// --algos 0 skips cuBLASLt's algorithms. --fp4: also CUTLASS NVFP4 (nvfp4_gemm_kernel.h) per config, on random e2m1
+// operands. --sustain S: also CUTLASS MXFP8 and the best NVFP4 config back to back for S seconds each (the power-capped
+// steady state); the summary then uses those. --wgrad S: only the weight-gradient shapes, each S seconds as MXFP8
+// (mx_gemm_f32) and as NVFP4 from the same MX operands (nvfp4.h: conversion + GEMM), and the NVFP4 GEMM alone.
+// --stage2 S: the kernels that write the weight gradients' operands, MX vs NVFP4 transposes (each S seconds).
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <functional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <ATen/cuda/CUDAContext.h>
@@ -15,6 +23,8 @@
 
 #include "nanochat/model/fp8.h"
 #include "nanochat/model/mx_gemm.h"
+#include "nanochat/model/nvfp4.h"
+#include "nanochat/model/nvfp4_gemm_kernel.h"
 
 using nanochat::quantize_mx;
 
@@ -64,6 +74,23 @@ Timing time_calls(F&& f, int64_t flops, int warmup = 5, int iters = 20) {
   std::sort(ms.begin(), ms.end());
   const double med = ms[iters / 2];
   return {med, static_cast<double>(flops) / med / 1e9};
+}
+
+// mean ms per call over `seconds` of back-to-back calls
+template <class F>
+double sustained_ms(F&& f, double seconds) {
+  cudaDeviceSynchronize();
+  const auto t0 = std::chrono::steady_clock::now();
+  int64_t n = 0;
+  double elapsed = 0;
+  while (elapsed < seconds) {
+    for (int i = 0; i < 20; ++i)
+      f();
+    cudaDeviceSynchronize();
+    n += 20;
+    elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+  }
+  return elapsed * 1e3 / static_cast<double>(n);
 }
 
 // host time per call: 200 calls enqueued without syncing
@@ -117,7 +144,76 @@ struct Result {
   bool deterministic;
 };
 
-void bench_shape(const Shape& s, int max_algos) {
+// NVFP4 configs at shape s, after checking each against fp32 (unit scales); returns {MXFP8 ms, best NVFP4 ms},
+// sustained if sustain_s > 0
+std::pair<double, double> bench_nvfp4(
+      const Shape& s, const torch::Tensor& out, double cutlass_ms, const std::function<void()>& cutlass_call,
+      double sustain_s) {
+  namespace k = nanochat::kernels;
+  const auto u8 = torch::TensorOptions().device(torch::kCUDA).dtype(torch::kUInt8);
+  const auto a = torch::randint(0, 256, {s.M, s.K / 2}, u8), b = torch::randint(0, 256, {s.N, s.K / 2}, u8);
+  auto a_scale = torch::full({k::nvfp4_scale_bytes(s.M, s.K)}, 0x38, u8); // ue4m3 1.0
+  auto b_scale = torch::full({k::nvfp4_scale_bytes(s.N, s.K)}, 0x38, u8);
+  const auto lut = torch::tensor(
+        {0.f, .5f, 1.f, 1.5f, 2.f, 3.f, 4.f, 6.f, -0.f, -.5f, -1.f, -1.5f, -2.f, -3.f, -4.f, -6.f},
+        torch::TensorOptions().device(torch::kCUDA));
+  const auto unpack = [&](const torch::Tensor& p) {
+    const auto q = p.to(torch::kLong);
+    const auto lo = lut.take(torch::bitwise_and(q, 15)), hi = lut.take(torch::bitwise_right_shift(q, 4));
+    return torch::stack({lo, hi}, -1).reshape({p.size(0), -1});
+  };
+  const auto ref = torch::matmul(unpack(a), unpack(b).t());
+  const double ref_max = ref.abs().max().item<double>();
+  const auto stream = at::cuda::getCurrentCUDAStream().stream();
+  const bool f32 = out.scalar_type() == torch::kFloat32;
+  const auto call = [&](int c) {
+    const char* error = k::cutlass_nvfp4_gemm(
+          c, a.data_ptr(), a_scale.data_ptr(), b.data_ptr(), b_scale.data_ptr(), out.data_ptr(), f32, s.M, s.N, s.K,
+          stream);
+    if (error != nullptr) {
+      std::fprintf(stderr, "%s\n", error);
+      std::exit(1);
+    }
+  };
+  std::vector<double> errs;
+  for (int c = 0; c < k::nvfp4_gemm_configs(); ++c) {
+    out.zero_();
+    call(c);
+    errs.push_back((out.to(torch::kFloat32) - ref).abs().max().item<double>() / ref_max);
+  }
+  // timing: scales in [0.5, 2], as the data's bits move the power draw
+  a_scale.random_(0x30, 0x41);
+  b_scale.random_(0x30, 0x41);
+  const int64_t flops = 2 * s.M * s.N * s.K;
+  double best = 1e30;
+  int best_c = 0;
+  for (int c = 0; c < k::nvfp4_gemm_configs(); ++c) {
+    const auto t = time_calls(
+          [&] {
+            call(c);
+          },
+          flops);
+    if (t.ms < best)
+      best = t.ms, best_c = c;
+    std::printf(
+          "  nvfp4 %-24s %8.1f us %6.0f TF/s  %.2fx mxfp8  rel err %.2g\n", k::nvfp4_gemm_config_name(c), t.ms * 1e3,
+          t.tflops, cutlass_ms / t.ms, errs[c]);
+  }
+  if (sustain_s <= 0)
+    return {cutlass_ms, best};
+  const double fp8 = sustained_ms(cutlass_call, sustain_s), fp4 = sustained_ms(
+                                                                  [&] {
+                                                                    call(best_c);
+                                                                  },
+                                                                  sustain_s);
+  std::printf(
+        "  sustained %.0f s each: mxfp8 %.1f us, nvfp4 (%s) %.1f us, %.2fx\n", sustain_s, fp8 * 1e3,
+        k::nvfp4_gemm_config_name(best_c), fp4 * 1e3, fp8 / fp4);
+  return {fp8, fp4};
+}
+
+// returns {CUTLASS MXFP8 ms, best NVFP4 ms (0 without fp4)}
+std::pair<double, double> bench_shape(const Shape& s, int max_algos, bool fp4, double sustain_s) {
   const auto opts = torch::TensorOptions().device(torch::kCUDA).dtype(torch::kBFloat16);
   const auto out_dtype = s.f32_out ? torch::kFloat32 : torch::kBFloat16;
   const auto a = torch::randn({s.M, s.K}, opts), b = torch::randn({s.N, s.K}, opts);
@@ -173,7 +269,8 @@ void bench_shape(const Shape& s, int max_algos) {
 
   std::vector<cublasLtMatmulHeuristicResult_t> heur(static_cast<size_t>(max_algos));
   int n_heur = 0;
-  LT_CHECK(cublasLtMatmulAlgoGetHeuristic(handle, desc, la, lb, lc, lc, pref, max_algos, heur.data(), &n_heur));
+  if (max_algos > 0)
+    LT_CHECK(cublasLtMatmulAlgoGetHeuristic(handle, desc, la, lb, lc, lc, pref, max_algos, heur.data(), &n_heur));
 
   const float alpha = 1.f, beta = 0.f;
   auto run = [&](const cublasLtMatmulAlgo_t& algo, size_t ws) {
@@ -253,11 +350,111 @@ void bench_shape(const Shape& s, int max_algos) {
           results[i].workspace >> 10, results[i].max_err, results[i].deterministic ? "det  " : "NONDET",
           results[i].name.c_str());
 
+  nanochat::set_mx_gemm_backend(nanochat::MxGemmBackend::Cutlass); // for cutlass_call
+  const auto times = fp4 ? bench_nvfp4(s, out_cutlass, t_cutlass.ms, cutlass_call, sustain_s)
+                         : std::pair<double, double>{t_cutlass.ms, 0};
+  nanochat::set_mx_gemm_backend(nanochat::MxGemmBackend::Cublas);
+
   cublasLtMatmulPreferenceDestroy(pref);
   cublasLtMatrixLayoutDestroy(la);
   cublasLtMatrixLayoutDestroy(lb);
   cublasLtMatrixLayoutDestroy(lc);
   cublasLtMatmulDescDestroy(desc);
+  return times;
+}
+
+// weight gradient (M, N) fp32 += go_t (M, K) . in_t (N, K)^T, both MX along K (tokens); returns {MXFP8, NVFP4 GEMM
+// alone} ms
+std::pair<double, double> bench_wgrad(const Shape& s, double seconds) {
+  const auto opts = torch::TensorOptions().device(torch::kCUDA).dtype(torch::kBFloat16);
+  const auto go = quantize_mx(torch::randn({s.M, s.K}, opts), true, false);
+  const auto in = quantize_mx(torch::randn({s.N, s.K}, opts), true, false);
+  auto out = torch::zeros({s.M, s.N}, opts.dtype(torch::kFloat32));
+  nanochat::set_mx_gemm_backend(nanochat::MxGemmBackend::Cutlass);
+  const double mx = sustained_ms(
+        [&] {
+          nanochat::mx_gemm_f32(go.data, go.inv_scale, in.data, in.inv_scale, out, true);
+        },
+        seconds);
+  const nanochat::Nvfp4Wgrad o;
+  nanochat::set_nvfp4_wgrad(&o);
+  const double convert = sustained_ms(
+        [&] {
+          nanochat::nvfp4_grad_weight(go.data, go.inv_scale, {}, in.data, in.inv_scale, {}, out, true);
+        },
+        seconds);
+  const auto g4 = nanochat::mx_to_nvfp4(go.data, go.inv_scale, true, true, 1);
+  const auto i4 = nanochat::mx_to_nvfp4(in.data, in.inv_scale, true, false);
+  nanochat::set_nvfp4_wgrad(nullptr);
+  const double gemm = sustained_ms(
+        [&] {
+          nanochat::nvfp4_gemm_f32(g4, i4, out, true);
+        },
+        seconds);
+  nanochat::set_mx_gemm_backend(nanochat::MxGemmBackend::Cublas);
+  std::printf(
+        "%-16s M %5ld N %5ld K %5ld | mxfp8 %8.1f us | nvfp4 from mx %8.1f us | nvfp4 gemm %8.1f us | %.2fx\n",
+        s.what.c_str(), s.M, s.N, s.K, mx * 1e3, convert * 1e3, gemm * 1e3, mx / gemm);
+  return {mx, gemm};
+}
+
+// The weight gradients' operand producers at T tokens, width C: MX transposes vs NVFP4 (Hadamard; the gradients also
+// stochastic rounding), as training runs them. Returns {MX, NVFP4} ms summed.
+std::pair<double, double> bench_stage2(int64_t T, int64_t C, double seconds) {
+  using nanochat::WgradRole;
+  const auto opts = torch::TensorOptions().device(torch::kCUDA).dtype(torch::kBFloat16);
+  const nanochat::Nvfp4Wgrad o;
+  double mx_sum = 0, fp4_sum = 0;
+  const auto row = [&](const char* what, auto&& run) {
+    nanochat::set_nvfp4_wgrad(nullptr);
+    const double mx = sustained_ms(
+          [&] {
+            run(WgradRole::None);
+          },
+          seconds);
+    nanochat::set_nvfp4_wgrad(&o);
+    const double fp4 = sustained_ms(
+          [&] {
+            run(WgradRole::Input);
+          },
+          seconds);
+    const double fp4_sr = sustained_ms(
+          [&] {
+            run(WgradRole::Grad);
+          },
+          seconds);
+    nanochat::set_nvfp4_wgrad(nullptr);
+    std::printf("%-34s | mx %7.1f us | nvfp4 %7.1f us | nvfp4 sr %7.1f us\n", what, mx * 1e3, fp4 * 1e3, fp4_sr * 1e3);
+    return std::tuple{mx, fp4, fp4_sr};
+  };
+  // quantize_mx (both layouts): attention c_proj's input (T, C) and gradient (T, C), the MLP c_proj's gradient
+  const auto x = torch::randn({T, C}, opts);
+  const auto [q_mx, q_in, q_sr] = row("quantize_mx (T, C)", [&](WgradRole role) {
+    nanochat::quantize_mx(x, true, true, false, role);
+  });
+  mx_sum += 3 * q_mx, fp4_sum += q_in + 2 * q_sr;
+  // relu^2 GEMMs (CUTLASS): c_fc's forward (relu(h)^2's transpose: input) and the MLP c_proj's dgrad (dh's: gradient)
+  nanochat::set_mx_gemm_backend(nanochat::MxGemmBackend::Cutlass);
+  const auto xq = quantize_mx(x, true, false), wq = quantize_mx(torch::randn({4 * C, C}, opts), true, false);
+  auto h = torch::randn({T, 4 * C}, opts);
+  const auto [f_mx, f_in, f_sr] = row("relu^2 fwd GEMM (T, 4C, C)", [&](WgradRole role) {
+    auto q = nanochat::empty_mx(T, 4 * C, opts, true, true, role);
+    const auto [out, out_t] = nanochat::mx_outs(q);
+    nanochat::mx_gemm_relu_square(
+          h, q.data, q.inv_scale, q.data_t, q.inv_scale_t, xq.data, xq.inv_scale, wq.data, wq.inv_scale, out_t.fp4);
+    nanochat::finish_fp4_t(q);
+  });
+  const auto [b_mx, b_in, b_sr] = row("relu^2 bwd GEMM (T, 4C, C)", [&](WgradRole role) {
+    auto q = nanochat::empty_mx(T, 4 * C, opts, true, true, role);
+    const auto [out, out_t] = nanochat::mx_outs(q);
+    nanochat::mx_gemm_relu_square_bwd(
+          xq.data, xq.inv_scale, wq.data, wq.inv_scale, h, q.data, q.inv_scale, q.data_t, q.inv_scale_t, out_t.fp4);
+    nanochat::finish_fp4_t(q);
+  });
+  nanochat::set_mx_gemm_backend(nanochat::MxGemmBackend::Cublas);
+  mx_sum += f_mx + b_mx, fp4_sum += f_in + b_sr;
+  std::printf("per layer (quantize x3, relu^2 GEMMs): mx %.1f us, nvfp4 %.1f us\n", mx_sum * 1e3, fp4_sum * 1e3);
+  return {mx_sum, fp4_sum};
 }
 
 } // namespace
@@ -266,7 +463,8 @@ int main(int argc, char** argv) {
   int64_t T = 16384, C = 768, V = 32768;
   int algos = 32;
   int64_t torch_ws_mb = -1;
-  bool f32 = false;
+  bool f32 = false, fp4 = false;
+  double sustain_s = 0, wgrad_s = 0, stage2_s = 0;
   std::vector<Shape> shapes;
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
@@ -283,6 +481,14 @@ int main(int argc, char** argv) {
       torch_ws_mb = std::stoll(next());
     else if (arg == "--f32")
       f32 = true;
+    else if (arg == "--fp4")
+      fp4 = true;
+    else if (arg == "--sustain")
+      sustain_s = std::stod(next());
+    else if (arg == "--wgrad")
+      wgrad_s = std::stod(next());
+    else if (arg == "--stage2")
+      stage2_s = std::stod(next());
     else if (arg == "--shape") {
       int64_t m, n, k;
       if (std::sscanf(next().c_str(), "%ld,%ld,%ld", &m, &n, &k) != 3)
@@ -292,7 +498,7 @@ int main(int argc, char** argv) {
     else
       return std::fprintf(
                    stderr, "usage: bench_gemm [--tokens T] [--embd C] [--algos N] [--f32] [--shape M,N,K] "
-                           "[--torch-ws-mb MB]\n"),
+                           "[--torch-ws-mb MB] [--fp4] [--sustain S] [--wgrad S] [--stage2 S]\n"),
              2;
   }
   torch::manual_seed(0);
@@ -312,10 +518,32 @@ int main(int argc, char** argv) {
           {C, 4 * C, T, false, "mlp c_proj dW"},
           {V, C, T, true, "lm_head dW"},
     };
+  if (stage2_s > 0) {
+    bench_stage2(T, C, stage2_s);
+    return 0;
+  }
+  if (wgrad_s > 0) {
+    double mx = 0, fp4 = 0;
+    for (const auto& s : shapes)
+      if (s.what.ends_with("dW") && s.what != "lm_head dW") { // lm_head's stays MXFP8
+        const auto [a, b] = bench_wgrad(s, wgrad_s);
+        mx += a, fp4 += b;
+      }
+    std::printf("block dW shapes: mxfp8 %.1f us, nvfp4 gemm %.1f us (%.2fx)\n", mx * 1e3, fp4 * 1e3, mx / fp4);
+    return 0;
+  }
   if (torch_ws_mb >= 0)
     at::cuda::setCUDABlasLtWorkspaceSize(static_cast<size_t>(torch_ws_mb) << 20);
   std::printf("torch cublasLt workspace: %zu KB\n", at::cuda::getCUDABlasLtWorkspaceSize() >> 10);
-  for (const auto& s : shapes)
-    bench_shape(s, algos);
+  double fp8_ms = 0, fp4_ms = 0;
+  for (const auto& s : shapes) {
+    const auto [a, b] = bench_shape(s, algos, fp4, sustain_s);
+    fp8_ms += a;
+    fp4_ms += b;
+  }
+  if (fp4)
+    std::printf(
+          "\nall shapes: cutlass mxfp8 %.1f us, best nvfp4 %.1f us (%.2fx)\n", fp8_ms * 1e3, fp4_ms * 1e3,
+          fp8_ms / fp4_ms);
   return 0;
 }

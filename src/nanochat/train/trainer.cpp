@@ -1,6 +1,7 @@
 #include "nanochat/train/trainer.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <ctime>
@@ -14,6 +15,7 @@
 #include <nvtx3/nvToolsExt.h>
 
 #include "nanochat/model/mx_gemm.h"
+#include "nanochat/model/nvfp4.h"
 #include "nanochat/tokenizer/tokenizer.h"
 #include "nanochat/train/checkpoint.h"
 #include "nanochat/train/dataloader.h"
@@ -193,6 +195,14 @@ nlohmann::json options_to_json(const TrainOptions& o) {
         {"fp8_recipe", o.fp8_recipe},
         {"gemm", o.gemm},
         {"fused", o.fused},
+        {"nvfp4", o.nvfp4},
+        {"nvfp4_rht", o.nvfp4_rht},
+        {"nvfp4_sr", o.nvfp4_sr},
+        {"nvfp4_weight_2d", o.nvfp4_weight_2d},
+        {"nvfp4_seed", o.nvfp4_seed},
+        {"nvfp4_wgrad", o.nvfp4_wgrad},
+        {"nvfp4_skip_first", o.nvfp4_skip_first},
+        {"nvfp4_skip_last", o.nvfp4_skip_last},
         {"num_iterations", o.num_iterations},
         {"target_flops", o.target_flops},
         {"target_param_data_ratio", o.target_param_data_ratio},
@@ -333,6 +343,7 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
   const auto config = config_from_depth(
         o.depth, vocab_size, o.aspect_ratio, o.head_dim, o.max_seq_len, o.window_pattern);
   print("Model config:\n" + config_to_json(config).dump(2));
+  Nvfp4Options nvfp4{.fwd = false, .dgrad = false, .wgrad = false}; // outlives the model
   GPT model(config, device);
   model->init_weights();
   model->set_attention(attention);
@@ -350,6 +361,65 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
           "FP8 training enabled ({} scaling{}) - converted {}/{} linear layers, skipped {} (too small)", o.fp8_recipe,
           o.fp8_recipe == "mxfp8" ? ", " + o.gemm + " GEMMs" : "", num_fp8, num_linear, num_linear - num_fp8));
   }
+  // a comma list of GEMMs -> {fwd, dgrad, wgrad}
+  const auto gemms = [](const std::string& list, const char* what, bool fwd_ok) {
+    std::array<bool, 3> on{};
+    for (size_t pos = 0; !list.empty() && pos <= list.size();) {
+      const size_t comma = std::min(list.find(',', pos), list.size());
+      const auto gemm = list.substr(pos, comma - pos);
+      if (gemm == "fwd" && fwd_ok)
+        on[0] = true;
+      else if (gemm == "dgrad")
+        on[1] = true;
+      else if (gemm == "wgrad")
+        on[2] = true;
+      else
+        throw std::invalid_argument(
+              std::format("unknown {} GEMM: {} (use {}dgrad, wgrad)", what, gemm, fwd_ok ? "fwd, " : ""));
+      pos = comma + 1;
+    }
+    return on;
+  };
+  const auto rht = gemms(o.nvfp4_rht, "nvfp4-rht", true), sr = gemms(o.nvfp4_sr, "nvfp4-sr", false);
+  if ((!o.nvfp4.empty() || o.nvfp4_wgrad) && (!o.fp8 || o.fp8_recipe != "mxfp8"))
+    throw std::invalid_argument("nvfp4 needs fp8 with the mxfp8 recipe");
+  if (!o.nvfp4.empty() && o.nvfp4_wgrad)
+    throw std::invalid_argument("nvfp4 (simulated) and nvfp4_wgrad (real) are exclusive");
+  if (!o.nvfp4.empty()) {
+    const auto on = gemms(o.nvfp4, "nvfp4", true);
+    nvfp4 = {
+          .fwd = on[0],
+          .dgrad = on[1],
+          .wgrad = on[2],
+          .rht_fwd = rht[0],
+          .rht_dgrad = rht[1],
+          .rht_wgrad = rht[2],
+          .sr_dgrad = sr[1],
+          .sr_wgrad = sr[2],
+          .weight_2d = o.nvfp4_weight_2d,
+          .seed = static_cast<uint64_t>(o.nvfp4_seed)};
+    const int n = model->set_nvfp4(&nvfp4, o.nvfp4_skip_first, o.nvfp4_skip_last);
+    print(std::format(
+          "Simulated NVFP4 for {} ({} linear layers; rht {}, sr {}, 2d weights {}, seed {})", o.nvfp4, n,
+          o.nvfp4_rht.empty() ? "none" : o.nvfp4_rht, o.nvfp4_sr.empty() ? "none" : o.nvfp4_sr, nvfp4.weight_2d,
+          nvfp4.seed));
+  }
+
+  // real NVFP4 weight gradients, process-wide until train returns
+  const Nvfp4Wgrad wgrad{.rht = rht[2], .sr = sr[2], .seed = static_cast<uint64_t>(o.nvfp4_seed)};
+
+  struct WgradScope {
+    explicit WgradScope(const Nvfp4Wgrad* w) {
+      set_nvfp4_wgrad(w);
+    }
+
+    ~WgradScope() {
+      set_nvfp4_wgrad(nullptr);
+    }
+  } wgrad_scope(o.nvfp4_wgrad ? &wgrad : nullptr);
+
+  if (o.nvfp4_wgrad)
+    print(std::format("NVFP4 weight gradients (rht {}, sr {}, seed {})", wgrad.rht, wgrad.sr, wgrad.seed));
 
   const auto checkpoint_dir = o.base_dir / "base_checkpoints" /
                               (o.run == "dummy" ? "d" + std::to_string(o.depth) : o.run);

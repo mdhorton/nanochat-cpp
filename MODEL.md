@@ -12,5 +12,6 @@ vocabulary 32k
 
 # notes
 
-At `--depth=24` setting `--device-batch-size=4` increased performance between 1-2%. However, it pushed vram usage over
-98%. And this was after tuning memory usage. I decided it wasn't worth the change on my GPUs.
+At `--depth=24` setting `--device-batch-size=4` increased performance ~2%. However, it pushed vram usage over 98%. And
+this was after tuning memory usage. I decided it wasn't worth the change on my GPUs. I might revisit it later after
+development stabilises.

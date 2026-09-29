@@ -158,10 +158,8 @@ __device__ __forceinline__ void residual_norm_mx_fwd_body(const kernels::Residua
   const int lane = static_cast<int>(threadIdx.x % 32), warp = static_cast<int>(threadIdx.x / 32);
   const bool blend = a.base.x0 != nullptr;
   const float lr = blend ? round_bf16(*a.base.lr) : 0.f, l0 = blend ? round_bf16(*a.base.l0) : 0.f;
-  const auto dev = [](const kernels::MxOut& o) {
-    return MxOutDev{static_cast<__nv_fp8_storage_t*>(o.data), o.ld, static_cast<uint8_t*>(o.scale), o.scale_tiles};
-  };
-  const MxOutDev out = dev(a.out), out_t = dev(a.out_t);
+  const MxOutDev out = mx_dev(a.out), out_t = mx_dev(a.out_t);
+  float smax = 0.f; // NVFP4 out_t's
   for (int64_t row0 = static_cast<int64_t>(blockIdx.x) * kMxRows; row0 < a.base.rows;
        row0 += static_cast<int64_t>(gridDim.x) * kMxRows) {
     for (int r = warp; r < kMxRows; r += kMxFwdWarps) {
@@ -198,6 +196,12 @@ __device__ __forceinline__ void residual_norm_mx_fwd_body(const kernels::Residua
         v[k] = __bfloat162float(tile[k * stride + c]);
         m = fmaxf(m, fabsf(v[k]));
       }
+      if (out_t.fp4.data != nullptr) {
+#pragma unroll
+        for (int g = 0; g < kMxRows / 16; ++g)
+          smax = fmaxf(smax, nvfp4_store16(*reinterpret_cast<float (*)[16]>(v + 16 * g), out_t.fp4, c, row0 + 16 * g));
+        continue;
+      }
       const int e = mx_exponent(m);
       const float mul = mx_multiplier(e);
       __align__(16) __nv_fp8_storage_t q[kMxRows];
@@ -211,6 +215,8 @@ __device__ __forceinline__ void residual_norm_mx_fwd_body(const kernels::Residua
     }
     __syncthreads(); // before the next tile overwrites smem
   }
+  if (out_t.fp4.data != nullptr)
+    nvfp4_smax_block(out_t.fp4, smax);
 }
 
 // n = res * rs: dres = rs * (g_n - res * rs^2 * mean(g_n * res)), rounded to bf16 as the norm's output gradient, then

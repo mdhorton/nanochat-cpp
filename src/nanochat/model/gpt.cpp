@@ -132,6 +132,8 @@ torch::Tensor LinearImpl::forward(const torch::Tensor& x) {
   const auto input = x.to(kComputeDtype);
   auto out_shape = input.sizes().vec();
   out_shape.back() = weight.size(0);
+  if (nvfp4 != nullptr)
+    return nvfp4_sim_matmul(input.reshape({-1, input.size(-1)}), weight, *nvfp4).reshape(out_shape);
   return fp8_matmul(input.reshape({-1, input.size(-1)}), weight, &fp8_cache, fp8_recipe).reshape(out_shape);
 }
 
@@ -159,7 +161,7 @@ CausalSelfAttentionImpl::CausalSelfAttentionImpl(
 }
 
 bool CausalSelfAttentionImpl::mx_inputs(int64_t N, int64_t C) const {
-  return fused && c_q->fp8 && c_k->fp8 && c_v->fp8 && c_q->fp8_recipe == Fp8Recipe::Mx &&
+  return fused && c_q->fp8 && c_k->fp8 && c_v->fp8 && c_q->nvfp4 == nullptr && c_q->fp8_recipe == Fp8Recipe::Mx &&
          mx_attention_fits(N, C, c_q->weight.size(0), c_k->weight.size(0), head_dim);
 }
 
@@ -183,7 +185,7 @@ torch::Tensor CausalSelfAttentionImpl::forward(
     return c_proj(y.contiguous().view({B, T, -1}));
   }
   torch::Tensor q, k, v, gate_in;
-  if (!fused) {
+  if (!fused || (c_q->fp8 && c_q->nvfp4 != nullptr)) {
     q = c_q(x);
     k = c_k(x);
     v = c_v(x);
@@ -249,14 +251,15 @@ MLPImpl::MLPImpl(const GPTConfig& config, const torch::TensorOptions& options) {
 }
 
 bool MLPImpl::mx_inputs(int64_t N, int64_t C) const {
-  return fused && c_fc->fp8 && c_proj->fp8 && relu_square_mlp_mx(N, C, c_fc->weight, c_proj->weight, c_fc->fp8_recipe);
+  return fused && c_fc->fp8 && c_proj->fp8 && c_fc->nvfp4 == nullptr &&
+         relu_square_mlp_mx(N, C, c_fc->weight, c_proj->weight, c_fc->fp8_recipe);
 }
 
 torch::Tensor MLPImpl::forward(const torch::Tensor& x, const Fp8Tensor* x_mx) {
   TORCH_CHECK(x_mx == nullptr || mx_inputs(x.numel() / x.size(-1), x.size(-1)), "x_mx needs mx_inputs");
   if (!fused)
     return c_proj(torch::relu(c_fc(x)).square());
-  if (!c_fc->fp8 || !c_proj->fp8)
+  if (!c_fc->fp8 || !c_proj->fp8 || c_fc->nvfp4 != nullptr)
     return c_proj(relu_square(c_fc(x)));
   const auto input = x.to(kComputeDtype);
   auto out_shape = input.sizes().vec();
@@ -505,6 +508,19 @@ void GPTImpl::set_fp8_recipe(Fp8Recipe recipe) {
   for (const auto& m : modules(false))
     if (auto* linear = dynamic_cast<LinearImpl*>(m.get()))
       linear->fp8_recipe = recipe;
+}
+
+int GPTImpl::set_nvfp4(const Nvfp4Options* options, int64_t skip_first, int64_t skip_last) {
+  int n = 0;
+  for (int64_t i = 0; i < config_.n_layer; ++i) {
+    const bool on = options != nullptr && i >= skip_first && i < config_.n_layer - skip_last;
+    for (const auto& m : transformer->h[i]->modules(false))
+      if (auto* linear = dynamic_cast<LinearImpl*>(m.get()); linear != nullptr && linear->fp8) {
+        linear->nvfp4 = on ? options : nullptr;
+        n += on;
+      }
+  }
+  return n;
 }
 
 int GPTImpl::num_linears() {

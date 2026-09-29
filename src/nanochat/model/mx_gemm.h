@@ -4,6 +4,8 @@
 
 #include <torch/torch.h>
 
+#include "nanochat/model/fp8_kernel.h"
+
 namespace nanochat {
 
 enum class MxGemmBackend { Cublas, Cutlass };
@@ -24,19 +26,20 @@ void mx_gemm_out(
       const torch::Tensor& b_scale);
 
 // h = mx_gemm(a, ..., bf16) into h and q = quantize_mx(h, true, true, true) into q, q_t (N, M) in one CUTLASS GEMM.
-// False (nothing written): the Cublas backend, or dims not % 128.
+// q_t_fp4.data set: q_t as NVFP4 there instead (q_t, q_t_scale unused). False (nothing written): the Cublas backend,
+// or dims not % 128.
 bool mx_gemm_relu_square(
       const torch::Tensor& h, const torch::Tensor& q, const torch::Tensor& q_scale, const torch::Tensor& q_t,
       const torch::Tensor& q_t_scale, const torch::Tensor& a, const torch::Tensor& a_scale, const torch::Tensor& b,
-      const torch::Tensor& b_scale);
+      const torch::Tensor& b_scale, const kernels::Nvfp4Out& q_t_fp4 = {});
 
 // relu^2's backward from its dgrad GEMM in one CUTLASS GEMM: ga = mx_gemm(a, ..., bf16) (not written) and h (M, N)
 // bf16 -> quantize_mx_relu_square_bwd's outputs (fp8_kernel.h): dh rows and dh_t (N, M), each e4m3 with its MX scales.
-// False (nothing written): the Cublas backend, or dims not % 128.
+// dh_t_fp4.data set: dh_t as NVFP4 there instead. False (nothing written): the Cublas backend, or dims not % 128.
 bool mx_gemm_relu_square_bwd(
       const torch::Tensor& a, const torch::Tensor& a_scale, const torch::Tensor& b, const torch::Tensor& b_scale,
       const torch::Tensor& h, const torch::Tensor& dh, const torch::Tensor& dh_scale, const torch::Tensor& dh_t,
-      const torch::Tensor& dh_t_scale);
+      const torch::Tensor& dh_t_scale, const kernels::Nvfp4Out& dh_t_fp4 = {});
 
 // out (M, N) fp32 (+)= alpha * a (M, K) . b (N, K)^T: a, b contiguous e4m3 with their MX scales (fp8.h's quantize_mx
 // layout), dims % 128. accumulate: out += (beta 1), else out =. alpha: a device fp32 scalar (undefined: 1). Runs on
