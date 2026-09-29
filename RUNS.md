@@ -67,15 +67,23 @@ These start at run 5 because otherwise it would OOM.
 
 `--depth=24 --device-batch-size=2 --num-iterations=10 --eval-tokens=4194304 --eval-every=-1 --save=false`
 
-|    | toks/sec |     loss |      bpb | memory |  time | notes                 |
-|----|---------:|---------:|---------:|-------:|------:|-----------------------|
-| 5  |          |          |          |        |       |                       |
-| 10 |          |          |          |        |       |                       |
-| 15 |          |          |          |        |       |                       |
-| 20 |          |          |          |        |       |                       |
-| 25 |          |          |          |        |       |                       |
-| 28 |   57,183 | 8.882510 | 2.109818 |  17.7g | 3.04m | faster dgrad epilogue |
-| 29 |          |          |          |        |       |                       |
+|    | toks/sec |     loss |      bpb | memory |  time | notes                      |
+|----|---------:|---------:|---------:|-------:|------:|----------------------------|
+| 5  |          |          |          |        |       |                            |
+| 10 |          |          |          |        |       |                            |
+| 15 |          |          |          |        |       |                            |
+| 20 |          |          |          |        |       |                            |
+| 25 |          |          |          |        |       |                            |
+| 28 |   57,183 | 8.882510 | 2.109818 |  17.7g | 3.04m | faster dgrad epilogue      |
+| 29 |   58,006 | 8.882510 | 2.109818 |  18.0g | 2.98m | undervolt                  |
+| 30 |   59,161 | 8.834047 | 2.109956 |  18.0g | 2.93m | --rank-micro-steps=126,130 |
+| 25 |          |          |          |        |       |                            |
+
+Run 29: The GPU allows minor adjustments to its clock via undervolting. This raises the clock about 200-300 MHz.
+`tools/adjust_voltage.sh` enabled by default going forward.
+
+Run 30: GPU0 is about 5-10% slower. This gives a few extra micro-steps to GPU1 so that it's waiting less.
+`--rank-micro-steps=126,130` enabled by default going forward.
 
 # full run @d12
 
