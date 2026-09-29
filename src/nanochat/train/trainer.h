@@ -7,6 +7,7 @@
 #include <limits>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
@@ -30,6 +31,8 @@ struct TrainOptions {
   double target_flops = -1, target_param_data_ratio = 8; // Python: 12; speedrun.sh uses 8
   // optimization
   int64_t device_batch_size = 32, total_batch_size = -1; // -1: from scaling laws
+  // micro-steps per step for each rank (sum = world_size * grad_accum_steps), to balance unequal GPUs; empty: even
+  std::vector<int64_t> rank_micro_steps;
   double embedding_lr = 0.3, unembedding_lr = 0.008, weight_decay = 0.28, matrix_lr = 0.02, scalar_lr = 0.5;
   int64_t warmup_steps = 40;
   double warmdown_ratio = 0.65, final_lr_frac = 0.05;
@@ -59,6 +62,7 @@ struct TrainPlan {
   int64_t total_batch_size = 0;
   double batch_lr_scale = 1, weight_decay_scaled = 0;
   int64_t num_iterations = 0, grad_accum_steps = 0;
+  int64_t rank_accum_steps = 0; // this rank's micro-steps: grad_accum_steps unless rank_micro_steps
 };
 
 // Parameter counts from the config alone (no allocation), as GPT::num_scaling_params.

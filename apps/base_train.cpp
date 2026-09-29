@@ -43,6 +43,15 @@ static int run(int argc, char** argv) {
   // optimization
   o.device_batch_size = flags.i64("device-batch-size", o.device_batch_size, "per-device batch size (reduce on OOM)");
   o.total_batch_size = flags.i64("total-batch-size", o.total_batch_size, "total batch size in tokens (-1 = auto)");
+  const auto micro_steps = flags.str(
+        "rank-micro-steps", "",
+        "micro-steps per step for each rank, e.g. 126,130 to give a slower GPU 0 less (sum = nproc x grad accum "
+        "steps; empty = even)");
+  for (size_t pos = 0; pos < micro_steps.size();) {
+    const size_t comma = std::min(micro_steps.find(',', pos), micro_steps.size());
+    o.rank_micro_steps.push_back(std::stoll(micro_steps.substr(pos, comma - pos)));
+    pos = comma + 1;
+  }
   o.embedding_lr = flags.f64("embedding-lr", o.embedding_lr, "learning rate for embeddings (AdamW)");
   o.unembedding_lr = flags.f64("unembedding-lr", o.unembedding_lr, "learning rate for lm_head (AdamW)");
   o.weight_decay = flags.f64("weight-decay", o.weight_decay, "cautious weight decay for Muon");

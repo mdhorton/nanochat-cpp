@@ -65,6 +65,24 @@ TEST(Train, SpeedrunPlan) {
   EXPECT_EQ(plan.num_iterations, plan.target_tokens / (1 << 20));
 }
 
+TEST(Train, RankMicroSteps) {
+  TrainOptions o;
+  o.depth = 24;
+  o.device_batch_size = 2;
+  o.world_size = 2;
+  o.total_batch_size = 1 << 20; // 128 micro-steps per rank
+  o.rank = 1;
+  EXPECT_EQ(plan_training(o, 32768, 0).rank_accum_steps, 128);
+  o.rank_micro_steps = {126, 130};
+  const auto plan = plan_training(o, 32768, 0);
+  EXPECT_EQ(plan.grad_accum_steps, 128);
+  EXPECT_EQ(plan.rank_accum_steps, 130);
+  for (const auto& bad : std::vector<std::vector<int64_t>>{{126, 129}, {256}, {0, 256}, {126, 130, 0}}) {
+    o.rank_micro_steps = bad;
+    EXPECT_THROW(plan_training(o, 32768, 0), std::invalid_argument);
+  }
+}
+
 TEST_F(TrainGolden, PlanAndSchedulesMatchPython) {
   const auto& p = golden_["plan"];
   const auto plan = plan_training(options_, 32768, 0);

@@ -84,6 +84,19 @@ TrainPlan plan_training(const TrainOptions& o, int64_t vocab_size, int64_t flops
     throw std::invalid_argument(
           std::format("total_batch_size ({}) must be a multiple of {}", plan.total_batch_size, world_tokens));
   plan.grad_accum_steps = plan.total_batch_size / world_tokens;
+  plan.rank_accum_steps = plan.grad_accum_steps;
+  if (!o.rank_micro_steps.empty()) {
+    const auto& split = o.rank_micro_steps;
+    int64_t sum = 0;
+    for (const int64_t n : split)
+      sum += n;
+    if (std::ssize(split) != o.world_size || std::ranges::min(split) < 1 || sum != o.world_size * plan.grad_accum_steps)
+      throw std::invalid_argument(
+            std::format(
+                  "rank_micro_steps needs {} values >= 1 summing to {}", o.world_size,
+                  o.world_size * plan.grad_accum_steps));
+    plan.rank_accum_steps = split[static_cast<size_t>(o.rank)];
+  }
   return plan;
 }
 
@@ -185,6 +198,7 @@ nlohmann::json options_to_json(const TrainOptions& o) {
         {"target_param_data_ratio", o.target_param_data_ratio},
         {"device_batch_size", o.device_batch_size},
         {"total_batch_size", o.total_batch_size},
+        {"rank_micro_steps", o.rank_micro_steps},
         {"embedding_lr", o.embedding_lr},
         {"unembedding_lr", o.unembedding_lr},
         {"weight_decay", o.weight_decay},
@@ -384,8 +398,9 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
         with_commas(total_tokens), static_cast<double>(total_tokens) / static_cast<double>(plan.num_scaling_params),
         static_cast<double>(flops_per_token) * static_cast<double>(total_tokens)));
   print(std::format(
-        "Tokens / micro-batch / rank: {} x {} | gradient accumulation steps: {}", o.device_batch_size, o.max_seq_len,
-        plan.grad_accum_steps));
+        "Tokens / micro-batch / rank: {} x {} | gradient accumulation steps: {}{}", o.device_batch_size, o.max_seq_len,
+        plan.grad_accum_steps,
+        o.rank_micro_steps.empty() ? "" : " (per rank: " + nlohmann::json(o.rank_micro_steps).dump() + ")"));
 
   const double bs = plan.batch_lr_scale;
   auto optimizer = setup_optimizer(
@@ -495,7 +510,7 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
     torch::cuda::synchronize();
     const auto t0 = std::chrono::steady_clock::now();
     torch::Tensor train_loss;
-    for (int64_t micro_step = 0; micro_step < plan.grad_accum_steps; ++micro_step) {
+    for (int64_t micro_step = 0; micro_step < plan.rank_accum_steps; ++micro_step) {
       torch::Tensor loss;
       {
         NvtxRange range("forward");
@@ -504,7 +519,9 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
       train_loss = loss.detach();
       {
         NvtxRange range("backward");
-        (loss / plan.grad_accum_steps).backward(); // each backward sums grads, so normalize here
+        // each backward sums grads, so normalize here. The mean micro-steps per rank, not this rank's: with the
+        // ranks' average, the step's grad is the mean over all micro-steps even when rank_micro_steps is uneven.
+        (loss / plan.grad_accum_steps).backward();
       }
       std::tie(x, y) = train_loader.next(); // prefetch while the GPU is busy
     }
