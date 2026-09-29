@@ -1,12 +1,16 @@
-# model config
+# model config for RTX Pro 4000 Blackwell
 
-| n_layer (depth)       |  12 |   24 |
-|-----------------------|----:|-----:|
-| n_embd (depth x 64)   | 768 | 1536 |
-| n_head (n_embd / 128) |   6 |   12 |
-| --device-batch-size   |   8 |    4 |
+vocabulary 32k
 
-vocab: 32k
+| n_layer (depth)                      |   12 |   24 |
+|--------------------------------------|-----:|-----:|
+| n_embd (auto computed: depth x 64)   |  768 | 1536 |
+| n_head (auto computed: n_embd / 128) |    6 |   12 |
+| --device-batch-size                  |    8 |    2 |
+| --max-seq-len                        | 2048 | 2048 |
+| --target-param-data-ratio            |    8 |    8 |
 
---max-seq-len 2k
---target-param-data-ratio 8
+# notes
+
+At `--depth=24` setting `--device-batch-size=4` increased performance between 1-2%. However, it pushed vram usage over
+98%. And this was after tuning memory usage. I decided it wasn't worth the change on my GPUs.

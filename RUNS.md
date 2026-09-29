@@ -1,17 +1,18 @@
 # run history
 
-To speedup dev iterations, initial sm120 tuning was done at `--depth=12`. Later, fine-tuning was done at `--depth=24`.
+To speedup dev iterations, initial sm120 tuning was done at `--depth=12`. Later, `--depth=24` became fast enough to
+iterate with.
+
+Most of the runs have an associated git tag (eg, run27).
 
 # medium runs @ d12
 
 `--depth=12 --device-batch-size=8 --num-iterations=100 --eval-tokens=4194304 --eval-every=-1 --save=false`
 
-These runs are designed to finish in under 5 minutes.
-
 Runs 1-3 are from the original nanochat port (python → c++). No tuning yet.
 
-Runs 4+ are the tuning and customisations for sm120. Probably half the tuning is fusing and other optimisations that
-would normally be handled by inductor and triton.
+Runs 4+ are the tuning and customisations for sm120. Probably more than half the tuning is fusing and other
+optimisations that would normally be handled by inductor and triton.
 
 | run | toks/sec |     loss |      bpb | memory |   time | notes                                          |
 |----:|---------:|---------:|---------:|-------:|-------:|------------------------------------------------|
@@ -62,12 +63,17 @@ Run 26: `--attention=mx` enabled by default going forward.
 
 # quick runs @ d24
 
-These runs started at d12 run 5 because otherwise it would OOM.
+These start at run 5 because otherwise it would OOM.
 
 `--depth=24 --device-batch-size=2 --num-iterations=10 --eval-tokens=4194304 --eval-every=-1 --save=false`
 
 |    | toks/sec |     loss |      bpb | memory |  time | notes                 |
 |----|---------:|---------:|---------:|-------:|------:|-----------------------|
+| 5  |          |          |          |        |       |                       |
+| 10 |          |          |          |        |       |                       |
+| 15 |          |          |          |        |       |                       |
+| 20 |          |          |          |        |       |                       |
+| 25 |          |          |          |        |       |                       |
 | 28 |   57,183 | 8.882510 | 2.109818 |  17.7g | 3.04m | faster dgrad epilogue |
 | 29 |          |          |          |        |       |                       |
 
@@ -75,7 +81,18 @@ These runs started at d12 run 5 because otherwise it would OOM.
 
 `--depth=12 --device-batch-size=8`
 
-| steps | loss     | bpb      | time    |
-|-------|----------|----------|---------|
-| 2520  | 2.814477 | 0.847031 | 178.26m |
-|       |          |          |         |
+|    | toks/sec | loss | bpb | memory | time | notes |
+|----|---------:|-----:|----:|-------:|-----:|-------|
+| 5  |          |      |     |        |      |       |
+| 10 |          |      |     |        |      |       |
+| 15 |          |      |     |        |      |       |
+| 20 |          |      |     |        |      |       |
+| 25 |          |      |     |        |      |       |
+
+# full run @d24
+
+`--depth=24 --device-batch-size=2`
+
+|    | toks/sec | loss | bpb | memory | time | notes |
+|----|---------:|-----:|----:|-------:|-----:|-------|
+| 25 |          |      |     |        |      |       |
