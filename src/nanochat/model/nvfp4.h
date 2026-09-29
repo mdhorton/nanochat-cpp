@@ -1,7 +1,7 @@
-// NVFP4 weight gradients: a weight-gradient GEMM's operands in NVFP4, multiplied by CUTLASS's NVFP4 GEMM
-// (nvfp4_gemm_kernel.h), with NVIDIA's recipe for wgrad: a 16-point random Hadamard transform along K (tokens) and
-// stochastic rounding of the gradient. The kernels that quantize the operands write them as NVFP4 directly
-// (Nvfp4Target); others' MXFP8 operands are converted (mx_to_nvfp4).
+// NVFP4 backward GEMMs: the operands in NVFP4, multiplied by CUTLASS's NVFP4 GEMM (nvfp4_gemm_kernel.h), with NVIDIA's
+// recipe: for wgrad a 16-point random Hadamard transform along K (tokens), and stochastic rounding of the gradient
+// (wgrad and dgrad). The kernels that quantize the operands write them as NVFP4 directly (Nvfp4Target); others' MXFP8
+// operands are converted (mx_to_nvfp4, wgrad only).
 #pragma once
 
 #include <cstdint>
@@ -57,22 +57,38 @@ void nvfp4_gemm_f32(
       const Nvfp4Tensor& a, const Nvfp4Tensor& b, const torch::Tensor& out, bool accumulate,
       const torch::Tensor& alpha = {});
 
-struct Nvfp4Wgrad {
-  bool rht = true, sr = true; // Hadamard on both operands; stochastic rounding of the gradient
-  uint64_t seed = 0;          // stochastic rounding's
+struct Nvfp4Backward {
+  bool wgrad = true, dgrad = false; // the Linears' weight / input gradient GEMMs in NVFP4
+  bool rht = true, sr = true;       // wgrad: Hadamard on both operands; stochastic rounding of the gradient
+  bool sr_dgrad = true; // dgrad: stochastic rounding of the gradient (no Hadamard; weights round to nearest)
+  uint64_t seed = 0;    // stochastic rounding's
 };
 
-// Process-wide: the Linears' weight gradients (mx_grad_weights, fp8.h) in NVFP4 per options; null (default): MXFP8.
-// options must outlive its use.
-void set_nvfp4_wgrad(const Nvfp4Wgrad* options);
-const Nvfp4Wgrad* nvfp4_wgrad();
+// Process-wide: the Linears' backward GEMMs (but lm_head's) in NVFP4 per options; null (default): MXFP8. options must
+// outlive its use.
+void set_nvfp4_backward(const Nvfp4Backward* options);
+const Nvfp4Backward* nvfp4_backward();
 
-// With nvfp4_wgrad set: a target for a weight-gradient operand (R, C), K = C along tokens, per its options; grad: the
-// output gradient (stochastic rounding), else the input. Else undefined data.
-Nvfp4Target nvfp4_wgrad_target(int64_t R, int64_t C, const torch::TensorOptions& options, bool grad);
+// What a GEMM operand's NVFP4 copy is for: blocks along K, rounding per nvfp4_backward().
+enum class Nvfp4Role {
+  None,
+  WgradInput,  // the input's transpose (K = tokens)
+  WgradGrad,   // the output gradient's transpose (K = tokens)
+  DgradGrad,   // the output gradient (K = out features)
+  DgradWeight, // the weight's transpose (K = out features)
+};
+
+// A target for an operand (R, C), blocks along C, when role's GEMM is in NVFP4; else undefined data.
+Nvfp4Target nvfp4_target(int64_t R, int64_t C, const torch::TensorOptions& options, Nvfp4Role role);
+
+// bf16 (M, N) = a (M, K) . b (N, K)^T with the tensor scales applied (M, N % 128, K % 256)
+torch::Tensor nvfp4_gemm(const Nvfp4Tensor& a, const Nvfp4Tensor& b);
+
+// The GEMM's alpha as a device scalar: a's and b's tensor scales (times alpha when defined)
+torch::Tensor nvfp4_alpha(const Nvfp4Tensor& a, const Nvfp4Tensor& b, const torch::Tensor& alpha = {});
 
 // out (n, C) fp32 (+)= alpha * go_t (n, N) . in_t (C, N)^T in NVFP4. Each operand NVFP4 already (data, scale, amax), or
-// MX (amax undefined) converted per nvfp4_wgrad() (then set).
+// MX (amax undefined) converted per nvfp4_backward() (then set).
 void nvfp4_grad_weight(
       const torch::Tensor& go_t, const torch::Tensor& go_scale_t, const torch::Tensor& go_amax,
       const torch::Tensor& in_t, const torch::Tensor& in_scale_t, const torch::Tensor& in_amax,

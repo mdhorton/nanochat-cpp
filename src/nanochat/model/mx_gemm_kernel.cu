@@ -20,14 +20,18 @@ using namespace cute;
 using Tile = Shape<_128, _128, _128>;
 using Cluster = Shape<_1, _1, _1>;
 using Mx = cutlass::mx_float8_t<cutlass::float_e4m3_t>;
+using Nv = cutlass::nv_float4_t<cutlass::float_e2m1_t>;
 
-template <class Epilogue>
+// MXFP8 operands, or NVFP4 (Element Nv, alignment 32, its pingpong schedule)
+template <
+      class Epilogue, class Element = Mx, int kAlign = 16,
+      class Schedule = cutlass::gemm::KernelTmaWarpSpecializedPingpong>
 struct Kernel {
   using Mainloop = typename cutlass::gemm::collective::CollectiveBuilder<
-        cutlass::arch::Sm120, cutlass::arch::OpClassBlockScaledTensorOp, Mx, cutlass::layout::RowMajor, 16, Mx,
-        cutlass::layout::ColumnMajor, 16, float, Tile, Cluster,
+        cutlass::arch::Sm120, cutlass::arch::OpClassBlockScaledTensorOp, Element, cutlass::layout::RowMajor, kAlign,
+        Element, cutlass::layout::ColumnMajor, kAlign, float, Tile, Cluster,
         cutlass::gemm::collective::StageCountAutoCarveout<static_cast<int>(sizeof(typename Epilogue::SharedStorage))>,
-        cutlass::gemm::KernelTmaWarpSpecializedPingpong>::CollectiveOp;
+        Schedule>::CollectiveOp;
   using Gemm = cutlass::gemm::device::GemmUniversalAdapter<
         cutlass::gemm::kernel::GemmUniversal<Shape<int, int, int, int>, Mainloop, Epilogue, void>>;
 };
@@ -45,17 +49,21 @@ namespace fusion = cutlass::epilogue::fusion;
 using EpiTile = Shape<_64, _32>;
 using StrideH = cutlass::gemm::TagToStrideC_t<cutlass::layout::RowMajor>;
 
-// e4m3 (N, M) row-major, MX along M: scales in the swizzled layout with M / 128 tiles. fp4.data set: NVFP4 instead.
+// The transpose (N, M) row-major: e4m3, MX along M (scales in the swizzled layout with M / 128 tiles), or NVFP4 when
+// fp4.data is set. rows.data set: the values (M, N) as NVFP4 along N too. alpha: the accumulator's scale (device
+// scalar, null: 1).
 struct MxT {
   uint8_t* data;
   uint8_t* scale;
-  nanochat::kernels::Nvfp4Out fp4;
+  nanochat::kernels::Nvfp4Out fp4, rows;
+  const float* alpha;
 };
 
-// Epilogue node: returns Fn of its children's values per element (bf16) and writes their transpose quantized along M
-// (as quantize_mx's out_t). Each 64x32 subtile is staged in smem transposed; each of the 128 threads then quantizes 16
-// rows of one column, lane pairs sharing a 32-row block's amax (NVFP4: one 16-value block each). Pingpong: one
-// warpgroup per tile, the two warpgroups' epilogues serialized.
+// Epilogue node: returns Fn(alpha, its children's values) per element (bf16) and writes their transpose quantized
+// along M (as quantize_mx's out_t), and with rows the values as NVFP4 along N. Each 64x32 subtile is staged in smem
+// transposed; each of the 128 threads then quantizes 16 rows of one column, lane pairs sharing a 32-row block's amax
+// (NVFP4: one 16-value block each), and for rows 16 columns of one row. Pingpong: one warpgroup per tile, the two
+// warpgroups' epilogues serialized.
 template <int FragmentSize, class Fn>
 struct MxStoreT {
   static constexpr int kEpiM = size<0>(EpiTile{}), kEpiN = size<1>(EpiTile{}), kThreads = 128;
@@ -72,6 +80,7 @@ struct MxStoreT {
 
   using Arguments = MxT;
   using Params = Arguments;
+  using ElementAux = cutlass::bfloat16_t; // the element type when this is the root and D is void
 
   template <class ProblemShape>
   static constexpr Params to_underlying_arguments(const ProblemShape&, const Arguments& args, void*) {
@@ -130,7 +139,8 @@ struct MxStoreT {
         , M(M)
         , m0(m0)
         , n0(n0)
-        , thread_idx(thread_idx) {}
+        , thread_idx(thread_idx)
+        , alpha(params->alpha != nullptr ? *params->alpha : 1.f) {}
 
     CoordTensor tCcD; // (CPY, CPY_M, CPY_N, EPI_M, EPI_N): (m, n) relative to the thread's first element
     int thr_m, thr_n; // that element's (m, n)
@@ -139,7 +149,8 @@ struct MxStoreT {
     int64_t M;
     int m0, n0; // the CTA tile's origin
     int thread_idx;
-    float smax = 0.f; // NVFP4: the tile's max block scale so far
+    float alpha;
+    float smax = 0.f, smax_rows = 0.f; // NVFP4: the tile's max block scale so far
 
     template <class ElementAccumulator, class... ElementIn>
     CUTLASS_DEVICE cutlass::Array<float, FragmentSize> visit(
@@ -150,7 +161,7 @@ struct MxStoreT {
       cutlass::Array<float, FragmentSize> out;
       CUTLASS_PRAGMA_UNROLL
       for (int i = 0; i < FragmentSize; ++i) {
-        const cutlass::bfloat16_t v = Fn{}(static_cast<float>(frg[i])...);
+        const cutlass::bfloat16_t v = Fn{}(alpha, static_cast<float>(frg[i])...);
         const auto c = crd(epi_v * FragmentSize + i);
         const int row = (thr_m + get<0>(c)) % kEpiM, col = (thr_n + get<1>(c)) % kEpiN;
         buf[col * kPitch + row] = v;
@@ -163,6 +174,18 @@ struct MxStoreT {
     CUTLASS_DEVICE void reduce(STensor&&, const SyncFn&, int epi_m, int epi_n, bool, VTensor) {
       // lanes 4c .. 4c + 3: column c's 16-row quarters; lanes 4c, 4c + 1 hold block 0, 4c + 2, 4c + 3 block 1
       const int t = thread_idx % kThreads, col = t / 4, quarter = t % 4;
+      if (params->rows.data != nullptr) {
+        // row r's columns 16 half .. 16 half + 15: a warp reads 32 consecutive rows at a time, conflict-free
+        const int r = t % kEpiM, half = t / kEpiM;
+        const cutlass::bfloat16_t* p = stage + (epi_m & 1) * kStage + half * 16 * kPitch + r;
+        float f[16];
+        CUTLASS_PRAGMA_UNROLL
+        for (int j = 0; j < 16; ++j)
+          f[j] = static_cast<float>(p[j * kPitch]);
+        smax_rows = fmaxf(
+              smax_rows,
+              nanochat::nvfp4_store16(f, params->rows, m0 + epi_m * kEpiM + r, n0 + epi_n * kEpiN + half * 16));
+      }
       const auto* src = reinterpret_cast<const uint4*>(stage + (epi_m & 1) * kStage + col * kPitch + quarter * 16);
       uint4 raw[2] = {src[0], src[1]};
       const auto* v = reinterpret_cast<const __nv_bfloat162*>(raw);
@@ -200,6 +223,8 @@ struct MxStoreT {
     CUTLASS_DEVICE void end() {
       if (params->fp4.data != nullptr)
         nanochat::nvfp4_smax(params->fp4, smax);
+      if (params->rows.data != nullptr)
+        nanochat::nvfp4_smax(params->rows, smax_rows);
     }
   };
 
@@ -224,10 +249,10 @@ using MxGemmTree = Kernel<typename cutlass::epilogue::collective::CollectiveBuil
       cutlass::layout::RowMajor, 16, cutlass::float_e4m3_t, cutlass::layout::RowMajor, 16,
       cutlass::epilogue::collective::EpilogueScheduleAuto, Tree>::CollectiveOp>;
 
-// bf16(relu(bf16(h))^2): fp8_kernel.cu's ReluSquare on the bf16 h
+// bf16(relu(bf16(h))^2): fp8_kernel.cu's ReluSquare on the bf16 h (h = alpha * acc)
 struct ReluSquare {
-  CUTLASS_DEVICE cutlass::bfloat16_t operator()(float v) const {
-    const float h = static_cast<float>(cutlass::bfloat16_t(v));
+  CUTLASS_DEVICE cutlass::bfloat16_t operator()(float alpha, float v) const {
+    const float h = static_cast<float>(cutlass::bfloat16_t(alpha * v));
     const float r = h <= 0.f ? 0.f : h;
     return cutlass::bfloat16_t(r * r);
   }
@@ -244,10 +269,10 @@ using HStore = fusion::Sm90AuxStore<
 using MxGemmReluSquare = MxGemmTree<fusion::Sm90EVT<
       RowScales, fusion::Sm90EVT<MxStoreT<4, ReluSquare>, fusion::Sm90EVT<HStore, fusion::Sm90AccFetch>>>>;
 
-// dh = bf16(h > 0 ? bf16(ga) * 2h : 0), as quantize_mx_relu_square_bwd
+// dh = bf16(h > 0 ? bf16(ga) * 2h : 0), as quantize_mx_relu_square_bwd (ga = alpha * acc)
 struct ReluSquareGrad {
-  CUTLASS_DEVICE cutlass::bfloat16_t operator()(float ga, float h) const {
-    const float g = static_cast<float>(cutlass::bfloat16_t(ga));
+  CUTLASS_DEVICE cutlass::bfloat16_t operator()(float alpha, float ga, float h) const {
+    const float g = static_cast<float>(cutlass::bfloat16_t(alpha * ga));
     return cutlass::bfloat16_t(h <= 0.f ? 0.f : g * (2.f * h));
   }
 };
@@ -262,6 +287,15 @@ using HLoad = fusion::Sm90AuxLoad<
                StrideH, cutlass::bfloat16_t>())>;
 using MxGemmReluSquareGrad =
       MxGemmTree<fusion::Sm90EVT<RowScales, fusion::Sm90EVT<MxStoreT<4, ReluSquareGrad>, fusion::Sm90AccFetch, HLoad>>>;
+
+// The same with NVFP4 operands: no D, MxStoreT writes dh as NVFP4 (rows) and its transpose
+using Nvfp4GemmReluSquareGrad = Kernel<
+      typename cutlass::epilogue::collective::CollectiveBuilder<
+            cutlass::arch::Sm120, cutlass::arch::OpClassBlockScaledTensorOp, Tile, Cluster, EpiTile, float, float, void,
+            cutlass::layout::RowMajor, 8, void, cutlass::layout::RowMajor, 8,
+            cutlass::epilogue::collective::EpilogueScheduleAuto,
+            fusion::Sm90EVT<MxStoreT<4, ReluSquareGrad>, fusion::Sm90AccFetch, HLoad>>::CollectiveOp,
+      Nv, 32, cutlass::gemm::KernelTmaWarpSpecializedPingpongNvf4Sm120>;
 
 // the block scale store's norm constant (scales amax / 448)
 __device__ const float kOne = 1.f;
@@ -380,7 +414,7 @@ const char* cutlass_mx_gemm_relu_square(
   // {{{{acc}, {h}}, {q^T}}, {scales}}
   args.epilogue.thread = {
         {{{}, {static_cast<cutlass::bfloat16_t*>(h), cutlass::make_cute_packed_stride(StrideH{}, {m, n, 1})}},
-         {static_cast<uint8_t*>(q_t), static_cast<uint8_t*>(q_t_scale), q_t_fp4}},
+         {static_cast<uint8_t*>(q_t), static_cast<uint8_t*>(q_t_scale), q_t_fp4, {}, nullptr}},
         {static_cast<cutlass::float_ue8m0_t*>(q_scale), one(), {}}};
   return launch<G>(args, stream);
 }
@@ -400,8 +434,26 @@ const char* cutlass_mx_gemm_relu_square_bwd(
         {{},
          {static_cast<const cutlass::bfloat16_t*>(h), cutlass::bfloat16_t(0),
           cutlass::make_cute_packed_stride(StrideH{}, {m, n, 1})},
-         {static_cast<uint8_t*>(dh_t), static_cast<uint8_t*>(dh_t_scale), dh_t_fp4}},
+         {static_cast<uint8_t*>(dh_t), static_cast<uint8_t*>(dh_t_scale), dh_t_fp4, {}, nullptr}},
         {static_cast<cutlass::float_ue8m0_t*>(dh_scale), one(), {}}};
+  return launch<G>(args, stream);
+}
+
+const char* cutlass_nvfp4_gemm_relu_square_bwd(
+      const void* a, const void* a_scale, const void* b, const void* b_scale, const float* alpha, const void* h,
+      const Nvfp4Out& dh, void* dh_t, void* dh_t_scale, const Nvfp4Out& dh_t_fp4, int64_t M, int64_t N, int64_t K,
+      cudaStream_t stream) {
+  using G = Nvfp4GemmReluSquareGrad;
+  if (!fits(M, N, K) || K % 256 != 0 || dh.data == nullptr)
+    return "cutlass_nvfp4_gemm_relu_square_bwd: M, N must be % 128, K % 256, dh NVFP4";
+  const int m = static_cast<int>(M), n = static_cast<int>(N), k = static_cast<int>(K);
+  auto args = make_args<G>(a, a_scale, b, b_scale, m, n, k);
+  // {{acc}, {h}, {dh^T, dh}}
+  args.epilogue.thread = {
+        {},
+        {static_cast<const cutlass::bfloat16_t*>(h), cutlass::bfloat16_t(0),
+         cutlass::make_cute_packed_stride(StrideH{}, {m, n, 1})},
+        {static_cast<uint8_t*>(dh_t), static_cast<uint8_t*>(dh_t_scale), dh_t_fp4, dh, alpha}};
   return launch<G>(args, stream);
 }
 

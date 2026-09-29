@@ -44,7 +44,7 @@ struct MxOutDev {
   int64_t ld;
   uint8_t* scale;
   int64_t scale_tiles;
-  kernels::Nvfp4Out fp4; // out_t: NVFP4 when fp4.data is set
+  kernels::Nvfp4Out fp4; // NVFP4 when fp4.data is set
 };
 
 __device__ __forceinline__ bool mx_writes(const MxOutDev& o) {
@@ -65,9 +65,9 @@ __device__ __forceinline__ void mx_store8(
     o.scale[mx_scale_index(scale_row, col / 32, o.scale_tiles)] = static_cast<uint8_t>(e);
 }
 
-// out_t's 8 values of row `row` from col (4 lanes per 32, as mx_store8): MX, or NVFP4 (lane pairs per 16; returns the
-// block scale, 0 for MX)
-__device__ __forceinline__ float mx_store8_t(float (&v)[8], const MxOutDev& o, int64_t row, int64_t col) {
+// o's 8 values of row `row` from col, 4 lanes per 32 (lane ^ 1, lane ^ 2): MX, or NVFP4 (lane pairs per 16; returns
+// the block scale, 0 for MX)
+__device__ __forceinline__ float mx_store8_lanes(float (&v)[8], const MxOutDev& o, int64_t row, int64_t col) {
   if (o.fp4.data != nullptr)
     return nvfp4_store8(v, o.fp4, row, col);
   float m = 0.f;
@@ -94,16 +94,13 @@ __device__ __forceinline__ void mx_body(L load, MxOutDev out, MxOutDev out_t) {
     const int r = t / 8, c = t % 8 * 8;
     float v[8];
     load(row0 + r, col0 + c, v);
-    float m = 0.f;
 #pragma unroll
-    for (int k = 0; k < 8; ++k) {
-      m = fmaxf(m, fabsf(v[k]));
+    for (int k = 0; k < 8; ++k)
       tile[r][c + k] = v[k];
-    }
-    if (out.data != nullptr) {
-      m = fmaxf(m, __shfl_xor_sync(0xffffffff, m, 1));
-      m = fmaxf(m, __shfl_xor_sync(0xffffffff, m, 2));
-      mx_store8(v, m, out, row0 + r, col0 + c, row0 + r, t % 4 == 0);
+    if (mx_writes(out)) {
+      const float s = mx_store8_lanes(v, out, row0 + r, col0 + c);
+      if (out.fp4.data != nullptr)
+        nvfp4_smax_block(out.fp4, s);
     }
   }
   if (!mx_writes(out_t))
@@ -114,7 +111,7 @@ __device__ __forceinline__ void mx_body(L load, MxOutDev out, MxOutDev out_t) {
 #pragma unroll
   for (int k = 0; k < 8; ++k)
     v[k] = tile[r + k][c];
-  const float s = mx_store8_t(v, out_t, col0 + c, row0 + r);
+  const float s = mx_store8_lanes(v, out_t, col0 + c, row0 + r);
   if (out_t.fp4.data != nullptr)
     nvfp4_smax_block(out_t.fp4, s);
 }
@@ -126,28 +123,27 @@ __device__ __forceinline__ void mx_store_tile(
       const float (*tile)[kCols + 1], int64_t row0, int64_t col0, const MxOutDev& out, const MxOutDev& out_t) {
   static_assert(kCols % 64 == 0, "whole 8-value runs for every thread");
   const int t = static_cast<int>(threadIdx.x);
+  float smax = 0.f;
   for (int q = t; q < kMxRows * kCols / 8; q += kMxThreads) {
     const int r = q / (kCols / 8), c = q % (kCols / 8) * 8;
-    float v[8], m = 0.f;
+    float v[8];
 #pragma unroll
-    for (int k = 0; k < 8; ++k) {
+    for (int k = 0; k < 8; ++k)
       v[k] = tile[r][c + k];
-      m = fmaxf(m, fabsf(v[k]));
-    }
-    m = fmaxf(m, __shfl_xor_sync(0xffffffff, m, 1));
-    m = fmaxf(m, __shfl_xor_sync(0xffffffff, m, 2));
-    mx_store8(v, m, out, row0 + r, col0 + c, row0 + r, q % 4 == 0);
+    smax = fmaxf(smax, mx_store8_lanes(v, out, row0 + r, col0 + c));
   }
+  if (out.fp4.data != nullptr)
+    nvfp4_smax_block(out.fp4, smax);
   if (!mx_writes(out_t))
     return;
-  float smax = 0.f;
+  smax = 0.f;
   for (int q = t; q < kCols * kMxRows / 8; q += kMxThreads) {
     const int c = q / 4, r = q % 4 * 8;
     float v[8];
 #pragma unroll
     for (int k = 0; k < 8; ++k)
       v[k] = tile[r + k][c];
-    smax = fmaxf(smax, mx_store8_t(v, out_t, col0 + c, row0 + r));
+    smax = fmaxf(smax, mx_store8_lanes(v, out_t, col0 + c, row0 + r));
   }
   if (out_t.fp4.data != nullptr)
     nvfp4_smax_block(out_t.fp4, smax);

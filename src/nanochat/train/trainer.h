@@ -34,8 +34,9 @@ struct TrainOptions {
   bool nvfp4_weight_2d = true;
   int64_t nvfp4_skip_first = 0, nvfp4_skip_last = 0; // blocks kept MXFP8
   int64_t nvfp4_seed = 0;                            // stochastic rounding's
-  // real NVFP4 weight gradients for the Linears but lm_head (nvfp4.h), with nvfp4_rht / nvfp4_sr's wgrad and nvfp4_seed
-  bool nvfp4_wgrad = false;
+  // real NVFP4 weight / input gradients for the Linears but lm_head (nvfp4.h), with nvfp4_rht / nvfp4_sr's wgrad /
+  // dgrad (no rht) and nvfp4_seed
+  bool nvfp4_wgrad = false, nvfp4_dgrad = false;
   // training horizon: the first one set wins
   int64_t num_iterations = -1;
   double target_flops = -1, target_param_data_ratio = 8; // Python: 12; speedrun.sh uses 8

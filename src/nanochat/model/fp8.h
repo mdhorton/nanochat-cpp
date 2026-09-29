@@ -68,49 +68,58 @@ torch::autograd::variable_list fp8_qkv(
 
 // A quantized 2D tensor: data, its transpose (contiguous), and the scales that dequantize each (data * inv_scale).
 // Tensorwise: one fp32 inverse scale for both. Mx: e8m0 block scales in cuBLAS's swizzled layout, inv_scale along
-// data's rows, inv_scale_t along data_t's; for NVFP4 weight gradients (fp4_t()), data_t is NVFP4 instead (nvfp4.h's
-// Nvfp4Tensor: data_t, inv_scale_t, amax_t), written by the producer as fp4_target and completed by finish_fp4_t.
+// data's rows, inv_scale_t along data_t's. For NVFP4 backward GEMMs (nvfp4.h), data (fp4()) or data_t (fp4_t()) is
+// NVFP4 instead (Nvfp4Tensor: data, inv_scale, amax / their _t), written by the producer as fp4_target / fp4_target_t
+// and completed by finish_fp4.
 struct Fp8Tensor {
-  torch::Tensor data, data_t, inv_scale, inv_scale_t, amax_t;
-  Nvfp4Target fp4_target;
+  torch::Tensor data, data_t, inv_scale, inv_scale_t, amax, amax_t;
+  Nvfp4Target fp4_target, fp4_target_t;
 
   const torch::Tensor& inv_t() const {
     return inv_scale_t.defined() ? inv_scale_t : inv_scale;
   }
 
+  bool fp4() const {
+    return data.defined() && data.scalar_type() == torch::kUInt8;
+  }
+
   bool fp4_t() const {
     return data_t.defined() && data_t.scalar_type() == torch::kUInt8;
   }
-};
 
-// A weight-gradient GEMM operand's role, for NVFP4 weight gradients: with nvfp4_wgrad set, Input and Grad transposes
-// are NVFP4 (Grad: stochastic rounding).
-enum class WgradRole { None, Input, Grad };
+  Nvfp4Tensor nvfp4() const {
+    return {data, inv_scale, amax};
+  }
+
+  Nvfp4Tensor nvfp4_t() const {
+    return {data_t, inv_scale_t, amax_t};
+  }
+};
 
 // Tensorwise. The fused kernels (fused = true) and the torch ops of fp8.py's _to_fp8 give identical bits.
 Fp8Tensor quantize_fp8(const torch::Tensor& x, torch::ScalarType dtype, bool fused = true);
 
 // MXFP8 e4m3 of a contiguous 2D bf16 or fp32 x, rows and cols % 128; rows / cols: write data / data_t.
-// relu_square: of bf16(relu(x)^2). role: data_t as NVFP4 (see WgradRole).
+// relu_square: of bf16(relu(x)^2). role / role_t: data / data_t as NVFP4 when that role's GEMM is (nvfp4_target).
 Fp8Tensor quantize_mx(
       const torch::Tensor& x, bool rows = true, bool cols = true, bool relu_square = false,
-      WgradRole role = WgradRole::None);
+      Nvfp4Role role = Nvfp4Role::None, Nvfp4Role role_t = Nvfp4Role::None);
 
 inline bool mx_fits(int64_t rows, int64_t cols) {
   return rows % 128 == 0 && cols % 128 == 0;
 }
 
 // Uninitialized MX buffers for a (R, C) tensor, dims % 128; rows / cols: allocate data / data_t with their scales.
-// role: the transpose as an NVFP4 fp4_target instead (see WgradRole).
+// role / role_t: an NVFP4 fp4_target / fp4_target_t instead, when that role's GEMM is (nvfp4_target).
 Fp8Tensor empty_mx(
       int64_t R, int64_t C, const torch::TensorOptions& options, bool rows = true, bool cols = true,
-      WgradRole role = WgradRole::None);
+      Nvfp4Role role = Nvfp4Role::None, Nvfp4Role role_t = Nvfp4Role::None);
 
-// The kernels' views of q's buffers (null data where not allocated; out_t: fp4_target's when set).
+// The kernels' views of q's buffers (null data where not allocated; the fp4 targets' when set).
 std::pair<kernels::MxOut, kernels::MxOut> mx_outs(const Fp8Tensor& q);
 
-// After q's producers: fp4_target (if any) completed into data_t, inv_scale_t, amax_t.
-void finish_fp4_t(Fp8Tensor& q);
+// After q's producers: the fp4 targets (if any) completed into data, inv_scale, amax / their _t.
+void finish_fp4(Fp8Tensor& q);
 
 // e8m0 scales of a (rows, cols) MX tensor: cols / 32 blocks per row, swizzled (mx_fits: no padding).
 torch::Tensor empty_mx_scale(int64_t rows, int64_t cols, const torch::TensorOptions& options);
@@ -121,12 +130,15 @@ kernels::MxOut mx_out(const torch::Tensor& data, const torch::Tensor& scale, int
 // quantize_mx of x into given buffers (e.g. mx_out views of a larger tensor).
 void quantize_mx_into(const torch::Tensor& x, bool relu_square, kernels::MxOut out, kernels::MxOut out_t);
 
-// Merged q/k/v weights under MX: {w_cat (n, C), w_cat^T, their scales}, from cache (optional) while unchanged.
+// Merged q/k/v weights under MX: {w_cat (n, C), w_cat^T, their scales}, from cache (optional) while unchanged. With
+// NVFP4 dgrad, w_cat^T is NVFP4 (Nvfp4Role::DgradWeight), its amax appended.
 std::vector<torch::Tensor> mx_qkv_weights(
       const torch::Tensor& wq, const torch::Tensor& wk, const torch::Tensor& wv, Fp8WeightCache* cache);
 
-// A weight's e4m3 copy (tensorwise or Mx), from cache (optional) while w is unchanged.
-Fp8Tensor quantize_fp8_weight(const torch::Tensor& w, Fp8WeightCache* cache, Fp8Recipe recipe = Fp8Recipe::Tensorwise);
+// A weight's e4m3 copy (tensorwise or Mx), from cache (optional) while w is unchanged. fp4_t (Mx, with NVFP4 dgrad on):
+// data_t NVFP4 instead (Nvfp4Role::DgradWeight).
+Fp8Tensor quantize_fp8_weight(
+      const torch::Tensor& w, Fp8WeightCache* cache, Fp8Recipe recipe = Fp8Recipe::Tensorwise, bool fp4_t = false);
 
 // quantize_fp8 (fused) with max|x| already in scalars[0], e.g. from the kernel that wrote x; scalars: 2 device floats,
 // scalars[1] gets the inverse scale. x: aligned, contiguous 2D bf16 or fp32.
@@ -139,7 +151,7 @@ bool mx_grad_direct(const torch::Tensor& w);
 // dW = alpha * go_t (n, N) . in_t (C, N)^T into the .grad of ws, whose rows concatenate to n: allocated (=) when
 // undefined, else accumulated (+=). Several ws (merged q/k/v): their .grads are the row blocks of one buffer, so one
 // GEMM serves. alpha: a device fp32 scalar (undefined: 1). Operands MX, or NVFP4 (uint8 data with its amax, see
-// Fp8Tensor). nvfp4: in NVFP4 when set_nvfp4_wgrad is on (nvfp4.h), converting MX operands; NVFP4 ones always are.
+// Fp8Tensor). nvfp4: in NVFP4 when NVFP4 wgrad is on (nvfp4.h), converting MX operands; NVFP4 ones always are.
 void mx_grad_weights(
       const torch::Tensor& go_t, const torch::Tensor& go_scale_t, const torch::Tensor& in_t,
       const torch::Tensor& in_scale_t, const std::vector<torch::Tensor>& ws, const torch::Tensor& alpha = {},

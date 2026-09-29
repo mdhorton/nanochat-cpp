@@ -141,4 +141,11 @@ const char* cutlass_nvfp4_gemm_f32(
         a, a_scale, b, b_scale, d, M, N, K, stream, alpha, accumulate);
 }
 
+const char* cutlass_nvfp4_gemm_bf16(
+      const void* a, const void* a_scale, const void* b, const void* b_scale, void* d, int64_t M, int64_t N, int64_t K,
+      const float* alpha, cudaStream_t stream) {
+  return run<Nvfp4Gemm<Shape<_128, _128, _128>, Pingpong, cutlass::bfloat16_t>>(
+        a, a_scale, b, b_scale, d, M, N, K, stream, alpha);
+}
+
 } // namespace nanochat::kernels

@@ -46,6 +46,9 @@ static int run(int argc, char** argv) {
   o.nvfp4_wgrad = flags.boolean(
         "nvfp4-wgrad", o.nvfp4_wgrad,
         "real NVFP4 weight gradients (CUTLASS) for the Linears but lm_head, with --nvfp4-rht/--nvfp4-sr's wgrad");
+  o.nvfp4_dgrad = flags.boolean(
+        "nvfp4-dgrad", o.nvfp4_dgrad,
+        "real NVFP4 input gradients (CUTLASS) for the Linears but lm_head, with --nvfp4-sr's dgrad (no rht)");
   o.nvfp4_seed = flags.i64("nvfp4-seed", o.nvfp4_seed, "nvfp4: stochastic rounding seed");
   o.nvfp4_skip_first = flags.i64("nvfp4-skip-first", o.nvfp4_skip_first, "nvfp4: first blocks kept MXFP8");
   o.nvfp4_skip_last = flags.i64("nvfp4-skip-last", o.nvfp4_skip_last, "nvfp4: last blocks kept MXFP8");

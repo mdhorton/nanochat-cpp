@@ -201,6 +201,7 @@ nlohmann::json options_to_json(const TrainOptions& o) {
         {"nvfp4_weight_2d", o.nvfp4_weight_2d},
         {"nvfp4_seed", o.nvfp4_seed},
         {"nvfp4_wgrad", o.nvfp4_wgrad},
+        {"nvfp4_dgrad", o.nvfp4_dgrad},
         {"nvfp4_skip_first", o.nvfp4_skip_first},
         {"nvfp4_skip_last", o.nvfp4_skip_last},
         {"num_iterations", o.num_iterations},
@@ -381,10 +382,13 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
     return on;
   };
   const auto rht = gemms(o.nvfp4_rht, "nvfp4-rht", true), sr = gemms(o.nvfp4_sr, "nvfp4-sr", false);
-  if ((!o.nvfp4.empty() || o.nvfp4_wgrad) && (!o.fp8 || o.fp8_recipe != "mxfp8"))
+  const bool nvfp4_real = o.nvfp4_wgrad || o.nvfp4_dgrad;
+  if ((!o.nvfp4.empty() || nvfp4_real) && (!o.fp8 || o.fp8_recipe != "mxfp8"))
     throw std::invalid_argument("nvfp4 needs fp8 with the mxfp8 recipe");
-  if (!o.nvfp4.empty() && o.nvfp4_wgrad)
-    throw std::invalid_argument("nvfp4 (simulated) and nvfp4_wgrad (real) are exclusive");
+  if (!o.nvfp4.empty() && nvfp4_real)
+    throw std::invalid_argument("nvfp4 (simulated) and nvfp4_wgrad / nvfp4_dgrad (real) are exclusive");
+  if (o.nvfp4_dgrad && rht[1])
+    throw std::invalid_argument("nvfp4_dgrad: no rht (simulated only)");
   if (!o.nvfp4.empty()) {
     const auto on = gemms(o.nvfp4, "nvfp4", true);
     nvfp4 = {
@@ -405,21 +409,29 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
           nvfp4.seed));
   }
 
-  // real NVFP4 weight gradients, process-wide until train returns
-  const Nvfp4Wgrad wgrad{.rht = rht[2], .sr = sr[2], .seed = static_cast<uint64_t>(o.nvfp4_seed)};
+  // real NVFP4 backward GEMMs, process-wide until train returns
+  const Nvfp4Backward backward{
+        .wgrad = o.nvfp4_wgrad,
+        .dgrad = o.nvfp4_dgrad,
+        .rht = rht[2],
+        .sr = sr[2],
+        .sr_dgrad = sr[1],
+        .seed = static_cast<uint64_t>(o.nvfp4_seed)};
 
-  struct WgradScope {
-    explicit WgradScope(const Nvfp4Wgrad* w) {
-      set_nvfp4_wgrad(w);
+  struct BackwardScope {
+    explicit BackwardScope(const Nvfp4Backward* b) {
+      set_nvfp4_backward(b);
     }
 
-    ~WgradScope() {
-      set_nvfp4_wgrad(nullptr);
+    ~BackwardScope() {
+      set_nvfp4_backward(nullptr);
     }
-  } wgrad_scope(o.nvfp4_wgrad ? &wgrad : nullptr);
+  } backward_scope(nvfp4_real ? &backward : nullptr);
 
   if (o.nvfp4_wgrad)
-    print(std::format("NVFP4 weight gradients (rht {}, sr {}, seed {})", wgrad.rht, wgrad.sr, wgrad.seed));
+    print(std::format("NVFP4 weight gradients (rht {}, sr {}, seed {})", backward.rht, backward.sr, backward.seed));
+  if (o.nvfp4_dgrad)
+    print(std::format("NVFP4 input gradients (sr {}, seed {})", backward.sr_dgrad, backward.seed));
 
   const auto checkpoint_dir = o.base_dir / "base_checkpoints" /
                               (o.run == "dummy" ? "d" + std::to_string(o.depth) : o.run);

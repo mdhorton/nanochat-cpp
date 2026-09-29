@@ -70,12 +70,12 @@ public:
     Fp8Tensor n_mx;
     if (mx) {
       TORCH_CHECK(residual_norm_mx_fits(rows, cols) && gate_cols >= 0 && gate_cols <= cols, "residual_norm_mx: shape");
-      n_mx = empty_mx(rows, cols, x.options(), true, true, WgradRole::Input);
+      n_mx = empty_mx(rows, cols, x.options(), true, true, Nvfp4Role::None, Nvfp4Role::WgradInput);
       const auto [out, out_t] = mx_outs(n_mx);
       kernels::residual_norm_mx_fwd(
             {.base = args, .out = out, .out_t = out_t, .n_cols = static_cast<int>(gate_cols)}, stream);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
-      finish_fp4_t(n_mx);
+      finish_fp4(n_mx);
     }
     else
       kernels::residual_norm_fwd(args, stream);

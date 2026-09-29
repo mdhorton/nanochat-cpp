@@ -13,7 +13,7 @@ namespace nanochat {
 
 namespace {
 
-std::atomic<const Nvfp4Wgrad*> wgrad_options{nullptr};
+std::atomic<const Nvfp4Backward*> backward_options{nullptr};
 std::atomic<uint64_t> seed_counter{1};
 
 cudaStream_t stream() {
@@ -28,7 +28,7 @@ void check_mx(const torch::Tensor& data, const torch::Tensor& scale) {
 }
 
 // stochastic rounding's: a fresh one per tensor
-uint64_t next_seed(const Nvfp4Wgrad& o) {
+uint64_t next_seed(const Nvfp4Backward& o) {
   return seed_counter++ + (o.seed << 40);
 }
 
@@ -134,6 +134,15 @@ torch::Tensor mx_to_bf16(const torch::Tensor& data, const torch::Tensor& scale) 
   return out;
 }
 
+torch::Tensor nvfp4_alpha(const Nvfp4Tensor& a, const Nvfp4Tensor& b, const torch::Tensor& alpha) {
+  TORCH_CHECK(!alpha.defined() || (alpha.numel() == 1 && alpha.scalar_type() == torch::kFloat32));
+  auto scale = torch::empty({}, a.amax.options());
+  kernels::nvfp4_alpha(
+        a.amax.data_ptr<float>(), b.amax.data_ptr<float>(), alpha.defined() ? alpha.data_ptr<float>() : nullptr,
+        scale.data_ptr<float>(), stream());
+  return scale;
+}
+
 void nvfp4_gemm_f32(
       const Nvfp4Tensor& a, const Nvfp4Tensor& b, const torch::Tensor& out, bool accumulate,
       const torch::Tensor& alpha) {
@@ -142,30 +151,42 @@ void nvfp4_gemm_f32(
         b.data.size(1) * 2 == K && out.is_contiguous() && out.scalar_type() == torch::kFloat32 && out.size(0) == M &&
               out.size(1) == N,
         "nvfp4_gemm_f32: shape mismatch");
-  TORCH_CHECK(!alpha.defined() || (alpha.numel() == 1 && alpha.scalar_type() == torch::kFloat32));
-  const auto scale = torch::empty({}, a.amax.options());
-  kernels::nvfp4_alpha(
-        a.amax.data_ptr<float>(), b.amax.data_ptr<float>(), alpha.defined() ? alpha.data_ptr<float>() : nullptr,
-        scale.data_ptr<float>(), stream());
+  const auto scale = nvfp4_alpha(a, b, alpha);
   const char* error = kernels::cutlass_nvfp4_gemm_f32(
         a.data.data_ptr(), a.scale.data_ptr(), b.data.data_ptr(), b.scale.data_ptr(), out.data_ptr<float>(), M, N, K,
         scale.data_ptr<float>(), accumulate, stream());
   TORCH_CHECK(error == nullptr, error);
 }
 
-void set_nvfp4_wgrad(const Nvfp4Wgrad* options) {
-  wgrad_options = options;
+torch::Tensor nvfp4_gemm(const Nvfp4Tensor& a, const Nvfp4Tensor& b) {
+  const int64_t M = a.data.size(0), N = b.data.size(0), K = a.data.size(1) * 2;
+  TORCH_CHECK(b.data.size(1) * 2 == K, "nvfp4_gemm: shape mismatch");
+  auto out = torch::empty({M, N}, a.data.options().dtype(torch::kBFloat16));
+  const auto scale = nvfp4_alpha(a, b);
+  const char* error = kernels::cutlass_nvfp4_gemm_bf16(
+        a.data.data_ptr(), a.scale.data_ptr(), b.data.data_ptr(), b.scale.data_ptr(), out.data_ptr(), M, N, K,
+        scale.data_ptr<float>(), stream());
+  TORCH_CHECK(error == nullptr, error);
+  return out;
 }
 
-const Nvfp4Wgrad* nvfp4_wgrad() {
-  return wgrad_options;
+void set_nvfp4_backward(const Nvfp4Backward* options) {
+  backward_options = options;
 }
 
-Nvfp4Target nvfp4_wgrad_target(int64_t R, int64_t C, const torch::TensorOptions& options, bool grad) {
-  const auto* o = nvfp4_wgrad();
-  if (o == nullptr)
+const Nvfp4Backward* nvfp4_backward() {
+  return backward_options;
+}
+
+Nvfp4Target nvfp4_target(int64_t R, int64_t C, const torch::TensorOptions& options, Nvfp4Role role) {
+  const auto* o = nvfp4_backward();
+  if (o == nullptr || role == Nvfp4Role::None)
     return {};
-  return empty_nvfp4(R, C, options, o->rht, grad && o->sr, grad && o->sr ? next_seed(*o) : 0);
+  const bool wgrad = role == Nvfp4Role::WgradInput || role == Nvfp4Role::WgradGrad;
+  if (!(wgrad ? o->wgrad : o->dgrad))
+    return {};
+  const bool sr = role == Nvfp4Role::WgradGrad ? o->sr : role == Nvfp4Role::DgradGrad && o->sr_dgrad;
+  return empty_nvfp4(R, C, options, wgrad && o->rht, sr, sr ? next_seed(*o) : 0);
 }
 
 void nvfp4_grad_weight(
@@ -175,8 +196,8 @@ void nvfp4_grad_weight(
   const auto operand = [](const torch::Tensor& data, const torch::Tensor& scale, const torch::Tensor& amax, bool grad) {
     if (amax.defined())
       return Nvfp4Tensor{data, scale, amax};
-    const auto* o = nvfp4_wgrad();
-    TORCH_CHECK(o != nullptr, "nvfp4_grad_weight: MX operands need NVFP4 weight gradients on");
+    const auto* o = nvfp4_backward();
+    TORCH_CHECK(o != nullptr && o->wgrad, "nvfp4_grad_weight: MX operands need NVFP4 weight gradients on");
     return mx_to_nvfp4(data, scale, o->rht, grad && o->sr, grad && o->sr ? next_seed(*o) : 0);
   };
   nvfp4_gemm_f32(

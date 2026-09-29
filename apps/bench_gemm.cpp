@@ -1,13 +1,14 @@
 // Times cuBLASLt's algorithms for the MXFP8 GEMM shapes of a training micro-step against at::_scaled_mm's choice and
 // CUTLASS (mx_gemm_kernel.h).
 // Usage: bench_gemm [--tokens T] [--embd C] [--algos N] [--f32] [--shape M,N,K] [--torch-ws-mb MB] [--fp4]
-//                   [--sustain S] [--wgrad S] [--stage2 S]
+//                   [--sustain S] [--wgrad S] [--stage2 S] [--dgrad S]
 // Also reports whether each algorithm gives the same bits twice (split-K with in-place reduction does not).
 // --algos 0 skips cuBLASLt's algorithms. --fp4: also CUTLASS NVFP4 (nvfp4_gemm_kernel.h) per config, on random e2m1
 // operands. --sustain S: also CUTLASS MXFP8 and the best NVFP4 config back to back for S seconds each (the power-capped
 // steady state); the summary then uses those. --wgrad S: only the weight-gradient shapes, each S seconds as MXFP8
 // (mx_gemm_f32) and as NVFP4 from the same MX operands (nvfp4.h: conversion + GEMM), and the NVFP4 GEMM alone.
 // --stage2 S: the kernels that write the weight gradients' operands, MX vs NVFP4 transposes (each S seconds).
+// --dgrad S: NVFP4 input gradients per layer: the dX GEMMs and gradient quantization, MX vs NVFP4 (each S seconds).
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
@@ -376,8 +377,8 @@ std::pair<double, double> bench_wgrad(const Shape& s, double seconds) {
           nanochat::mx_gemm_f32(go.data, go.inv_scale, in.data, in.inv_scale, out, true);
         },
         seconds);
-  const nanochat::Nvfp4Wgrad o;
-  nanochat::set_nvfp4_wgrad(&o);
+  const nanochat::Nvfp4Backward o;
+  nanochat::set_nvfp4_backward(&o);
   const double convert = sustained_ms(
         [&] {
           nanochat::nvfp4_grad_weight(go.data, go.inv_scale, {}, in.data, in.inv_scale, {}, out, true);
@@ -385,7 +386,7 @@ std::pair<double, double> bench_wgrad(const Shape& s, double seconds) {
         seconds);
   const auto g4 = nanochat::mx_to_nvfp4(go.data, go.inv_scale, true, true, 1);
   const auto i4 = nanochat::mx_to_nvfp4(in.data, in.inv_scale, true, false);
-  nanochat::set_nvfp4_wgrad(nullptr);
+  nanochat::set_nvfp4_backward(nullptr);
   const double gemm = sustained_ms(
         [&] {
           nanochat::nvfp4_gemm_f32(g4, i4, out, true);
@@ -401,59 +402,142 @@ std::pair<double, double> bench_wgrad(const Shape& s, double seconds) {
 // The weight gradients' operand producers at T tokens, width C: MX transposes vs NVFP4 (Hadamard; the gradients also
 // stochastic rounding), as training runs them. Returns {MX, NVFP4} ms summed.
 std::pair<double, double> bench_stage2(int64_t T, int64_t C, double seconds) {
-  using nanochat::WgradRole;
+  using nanochat::Nvfp4Role;
   const auto opts = torch::TensorOptions().device(torch::kCUDA).dtype(torch::kBFloat16);
-  const nanochat::Nvfp4Wgrad o;
+  const nanochat::Nvfp4Backward o;
   double mx_sum = 0, fp4_sum = 0;
   const auto row = [&](const char* what, auto&& run) {
-    nanochat::set_nvfp4_wgrad(nullptr);
+    nanochat::set_nvfp4_backward(nullptr);
     const double mx = sustained_ms(
           [&] {
-            run(WgradRole::None);
+            run(Nvfp4Role::None);
           },
           seconds);
-    nanochat::set_nvfp4_wgrad(&o);
+    nanochat::set_nvfp4_backward(&o);
     const double fp4 = sustained_ms(
           [&] {
-            run(WgradRole::Input);
+            run(Nvfp4Role::WgradInput);
           },
           seconds);
     const double fp4_sr = sustained_ms(
           [&] {
-            run(WgradRole::Grad);
+            run(Nvfp4Role::WgradGrad);
           },
           seconds);
-    nanochat::set_nvfp4_wgrad(nullptr);
+    nanochat::set_nvfp4_backward(nullptr);
     std::printf("%-34s | mx %7.1f us | nvfp4 %7.1f us | nvfp4 sr %7.1f us\n", what, mx * 1e3, fp4 * 1e3, fp4_sr * 1e3);
     return std::tuple{mx, fp4, fp4_sr};
   };
   // quantize_mx (both layouts): attention c_proj's input (T, C) and gradient (T, C), the MLP c_proj's gradient
   const auto x = torch::randn({T, C}, opts);
-  const auto [q_mx, q_in, q_sr] = row("quantize_mx (T, C)", [&](WgradRole role) {
-    nanochat::quantize_mx(x, true, true, false, role);
+  const auto [q_mx, q_in, q_sr] = row("quantize_mx (T, C)", [&](Nvfp4Role role) {
+    nanochat::quantize_mx(x, true, true, false, Nvfp4Role::None, role);
   });
   mx_sum += 3 * q_mx, fp4_sum += q_in + 2 * q_sr;
   // relu^2 GEMMs (CUTLASS): c_fc's forward (relu(h)^2's transpose: input) and the MLP c_proj's dgrad (dh's: gradient)
   nanochat::set_mx_gemm_backend(nanochat::MxGemmBackend::Cutlass);
   const auto xq = quantize_mx(x, true, false), wq = quantize_mx(torch::randn({4 * C, C}, opts), true, false);
   auto h = torch::randn({T, 4 * C}, opts);
-  const auto [f_mx, f_in, f_sr] = row("relu^2 fwd GEMM (T, 4C, C)", [&](WgradRole role) {
-    auto q = nanochat::empty_mx(T, 4 * C, opts, true, true, role);
+  const auto [f_mx, f_in, f_sr] = row("relu^2 fwd GEMM (T, 4C, C)", [&](Nvfp4Role role) {
+    auto q = nanochat::empty_mx(T, 4 * C, opts, true, true, Nvfp4Role::None, role);
     const auto [out, out_t] = nanochat::mx_outs(q);
     nanochat::mx_gemm_relu_square(
           h, q.data, q.inv_scale, q.data_t, q.inv_scale_t, xq.data, xq.inv_scale, wq.data, wq.inv_scale, out_t.fp4);
-    nanochat::finish_fp4_t(q);
+    nanochat::finish_fp4(q);
   });
-  const auto [b_mx, b_in, b_sr] = row("relu^2 bwd GEMM (T, 4C, C)", [&](WgradRole role) {
-    auto q = nanochat::empty_mx(T, 4 * C, opts, true, true, role);
+  const auto [b_mx, b_in, b_sr] = row("relu^2 bwd GEMM (T, 4C, C)", [&](Nvfp4Role role) {
+    auto q = nanochat::empty_mx(T, 4 * C, opts, true, true, Nvfp4Role::None, role);
     const auto [out, out_t] = nanochat::mx_outs(q);
     nanochat::mx_gemm_relu_square_bwd(
           xq.data, xq.inv_scale, wq.data, wq.inv_scale, h, q.data, q.inv_scale, q.data_t, q.inv_scale_t, out_t.fp4);
-    nanochat::finish_fp4_t(q);
+    nanochat::finish_fp4(q);
   });
   nanochat::set_mx_gemm_backend(nanochat::MxGemmBackend::Cublas);
   mx_sum += f_mx + b_mx, fp4_sum += f_in + b_sr;
   std::printf("per layer (quantize x3, relu^2 GEMMs): mx %.1f us, nvfp4 %.1f us\n", mx_sum * 1e3, fp4_sum * 1e3);
+  return {mx_sum, fp4_sum};
+}
+
+// NVFP4 dgrad per layer at T tokens, width C, NVFP4 wgrad on throughout: the input-gradient GEMMs (the MLP c_proj's
+// with its relu^2 epilogue) and quantizing the Linears' output gradients, MX rows vs NVFP4 (stochastic rounding).
+// Returns {MX, NVFP4} ms summed.
+std::pair<double, double> bench_dgrad(int64_t T, int64_t C, double seconds) {
+  using nanochat::Nvfp4Role;
+  const auto opts = torch::TensorOptions().device(torch::kCUDA).dtype(torch::kBFloat16);
+  const nanochat::Nvfp4Backward wgrad, both{.dgrad = true};
+  nanochat::set_mx_gemm_backend(nanochat::MxGemmBackend::Cutlass);
+  double mx_sum = 0, fp4_sum = 0;
+  const auto line = [&](const char* what, auto&& mx_run, auto&& fp4_run, int times) {
+    nanochat::set_nvfp4_backward(&wgrad);
+    const double mx = sustained_ms(mx_run, seconds);
+    nanochat::set_nvfp4_backward(&both);
+    const double fp4 = sustained_ms(fp4_run, seconds);
+    nanochat::set_nvfp4_backward(nullptr);
+    std::printf("%-30s | mx %7.1f us | nvfp4 %7.1f us | %.2fx\n", what, mx * 1e3, fp4 * 1e3, mx / fp4);
+    mx_sum += times * mx, fp4_sum += times * fp4;
+  };
+  // plain dX GEMMs: gradient (T, K) . weight^T (C, K)^T
+  for (const auto& [what, K] :
+       {std::pair{"c_proj dX (T, C, C)", C}, {"qkv dX (T, C, 3C)", 3 * C}, {"c_fc dX (T, C, 4C)", 4 * C}}) {
+    const auto g = torch::randn({T, K}, opts), w = torch::randn({C, K}, opts) * 0.05;
+    const auto gm = nanochat::quantize_mx(g, true, false), wm = nanochat::quantize_mx(w, true, false);
+    nanochat::set_nvfp4_backward(&both);
+    const auto g4 = nanochat::quantize_mx(g, true, false, false, Nvfp4Role::DgradGrad);
+    const auto w4 = nanochat::quantize_mx(w, true, false, false, Nvfp4Role::DgradWeight);
+    line(
+          what,
+          [&] {
+            nanochat::mx_gemm(gm.data, gm.inv_scale, wm.data, wm.inv_scale, torch::kBFloat16);
+          },
+          [&] {
+            nanochat::nvfp4_gemm(g4.nvfp4(), w4.nvfp4());
+          },
+          1);
+  }
+  // the MLP c_proj's dX with relu^2's backward: dh rows (dgrad) and transpose (wgrad, NVFP4 either way)
+  {
+    const auto go = torch::randn({T, C}, opts), w_t = torch::randn({4 * C, C}, opts) * 0.05;
+    const auto h = torch::randn({T, 4 * C}, opts);
+    const auto gm = nanochat::quantize_mx(go, true, false), wm = nanochat::quantize_mx(w_t, true, false);
+    nanochat::set_nvfp4_backward(&both);
+    const auto g4 = nanochat::quantize_mx(go, true, false, false, Nvfp4Role::DgradGrad);
+    const auto w4 = nanochat::quantize_mx(w_t, true, false, false, Nvfp4Role::DgradWeight);
+    const auto run = [&](bool fp4) {
+      auto q = nanochat::empty_mx(
+            T, 4 * C, opts, true, true, fp4 ? Nvfp4Role::DgradGrad : Nvfp4Role::None, Nvfp4Role::WgradGrad);
+      const auto [out, out_t] = nanochat::mx_outs(q);
+      if (fp4)
+        nanochat::nvfp4_gemm_relu_square_bwd(g4.nvfp4(), w4.nvfp4(), h, out, out_t);
+      else
+        nanochat::mx_gemm_relu_square_bwd(
+              gm.data, gm.inv_scale, wm.data, wm.inv_scale, h, q.data, q.inv_scale, q.data_t, q.inv_scale_t, out_t.fp4);
+      nanochat::finish_fp4(q);
+    };
+    line(
+          "relu^2 dX (T, 4C, C)",
+          [&] {
+            run(false);
+          },
+          [&] {
+            run(true);
+          },
+          1);
+  }
+  // the output gradients (T, C) of attention's and the MLP's c_proj (qkv's comes from the attention kernels)
+  const auto x = torch::randn({T, C}, opts);
+  line(
+        "quantize grad (T, C)",
+        [&] {
+          nanochat::quantize_mx(x, true, true, false, Nvfp4Role::None, Nvfp4Role::WgradGrad);
+        },
+        [&] {
+          nanochat::quantize_mx(x, true, true, false, Nvfp4Role::DgradGrad, Nvfp4Role::WgradGrad);
+        },
+        2);
+  nanochat::set_mx_gemm_backend(nanochat::MxGemmBackend::Cublas);
+  std::printf(
+        "per layer (dX GEMMs, quantize x2): mx %.1f us, nvfp4 %.1f us (%.2fx)\n", mx_sum * 1e3, fp4_sum * 1e3,
+        mx_sum / fp4_sum);
   return {mx_sum, fp4_sum};
 }
 
@@ -464,7 +548,7 @@ int main(int argc, char** argv) {
   int algos = 32;
   int64_t torch_ws_mb = -1;
   bool f32 = false, fp4 = false;
-  double sustain_s = 0, wgrad_s = 0, stage2_s = 0;
+  double sustain_s = 0, wgrad_s = 0, stage2_s = 0, dgrad_s = 0;
   std::vector<Shape> shapes;
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
@@ -489,6 +573,8 @@ int main(int argc, char** argv) {
       wgrad_s = std::stod(next());
     else if (arg == "--stage2")
       stage2_s = std::stod(next());
+    else if (arg == "--dgrad")
+      dgrad_s = std::stod(next());
     else if (arg == "--shape") {
       int64_t m, n, k;
       if (std::sscanf(next().c_str(), "%ld,%ld,%ld", &m, &n, &k) != 3)
@@ -498,7 +584,7 @@ int main(int argc, char** argv) {
     else
       return std::fprintf(
                    stderr, "usage: bench_gemm [--tokens T] [--embd C] [--algos N] [--f32] [--shape M,N,K] "
-                           "[--torch-ws-mb MB] [--fp4] [--sustain S] [--wgrad S] [--stage2 S]\n"),
+                           "[--torch-ws-mb MB] [--fp4] [--sustain S] [--wgrad S] [--stage2 S] [--dgrad S]\n"),
              2;
   }
   torch::manual_seed(0);
@@ -520,6 +606,10 @@ int main(int argc, char** argv) {
     };
   if (stage2_s > 0) {
     bench_stage2(T, C, stage2_s);
+    return 0;
+  }
+  if (dgrad_s > 0) {
+    bench_dgrad(T, C, dgrad_s);
     return 0;
   }
   if (wgrad_s > 0) {

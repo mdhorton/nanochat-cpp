@@ -5,6 +5,7 @@
 #include <torch/torch.h>
 
 #include "nanochat/model/fp8_kernel.h"
+#include "nanochat/model/nvfp4.h"
 
 namespace nanochat {
 
@@ -40,6 +41,12 @@ bool mx_gemm_relu_square_bwd(
       const torch::Tensor& a, const torch::Tensor& a_scale, const torch::Tensor& b, const torch::Tensor& b_scale,
       const torch::Tensor& h, const torch::Tensor& dh, const torch::Tensor& dh_scale, const torch::Tensor& dh_t,
       const torch::Tensor& dh_t_scale, const kernels::Nvfp4Out& dh_t_fp4 = {});
+
+// mx_gemm_relu_square_bwd with NVFP4 a (M, K), b (N, K): dh as NVFP4 (out.fp4, required), dh_t (out_t) MX or NVFP4
+// (fp8.h's mx_outs views). False (nothing written): the Cublas backend.
+bool nvfp4_gemm_relu_square_bwd(
+      const Nvfp4Tensor& a, const Nvfp4Tensor& b, const torch::Tensor& h, const kernels::MxOut& out,
+      const kernels::MxOut& out_t);
 
 // out (M, N) fp32 (+)= alpha * a (M, K) . b (N, K)^T: a, b contiguous e4m3 with their MX scales (fp8.h's quantize_mx
 // layout), dims % 128. accumulate: out += (beta 1), else out =. alpha: a device fp32 scalar (undefined: 1). Runs on

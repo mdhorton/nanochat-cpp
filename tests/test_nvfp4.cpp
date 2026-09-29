@@ -286,10 +286,10 @@ TEST(Nvfp4, ResidualNormWritesNvfp4) {
   torch::manual_seed(0);
   const auto opts = kCuda.dtype(torch::kBFloat16);
   const auto x = torch::randn({256, 512}, opts), r = torch::randn({256, 512}, opts);
-  const Nvfp4Wgrad o{.rht = false};
-  set_nvfp4_wgrad(&o);
+  const Nvfp4Backward o{.rht = false};
+  set_nvfp4_backward(&o);
   const auto m = residual_norm_mx(x, r);
-  set_nvfp4_wgrad(nullptr);
+  set_nvfp4_backward(nullptr);
   const auto n = residual_norm(x, r).second;
   ASSERT_TRUE(m.n_mx.fp4_t());
   const Nvfp4Tensor q{m.n_mx.data_t, m.n_mx.inv_scale_t, m.n_mx.amax_t};
@@ -333,7 +333,65 @@ TEST(Nvfp4, ReluSquareEpiloguesWriteNvfp4) {
   EXPECT_TRUE(torch::equal(u8(nvfp4_finish(t_bwd)), u8(nvfp4_finish(want_bwd))));
 }
 
-// set_nvfp4_wgrad: the blocks' weight gradients go NVFP4, lm_head's stays MXFP8 (same bits)
+// ---------------------------------------------------------------------------------------------------------------
+// NVFP4 dgrad: the gradient's rows and the weights' transposes, blocks along the output features.
+
+// quantize_mx's rows as NVFP4: the simulation's bits (round to nearest and stochastic)
+TEST(Nvfp4, ProducerRowsMatchFakeQuant) {
+  torch::manual_seed(0);
+  const auto x = spread(256, 512).to(torch::kBFloat16);
+  for (const bool stochastic : {false, true}) {
+    const auto t = empty_nvfp4(256, 512, kCuda, false, stochastic, 99);
+    kernels::MxOut out{}, none{};
+    out.fp4 = nvfp4_out(t);
+    kernels::quantize_mx(x.data_ptr(), true, 256, 512, out, none, false, at::cuda::getCurrentCUDAStream().stream());
+    const auto q = nvfp4_finish(t);
+    const auto normal = normal_blocks(x, q);
+    EXPECT_GT(normal.to(torch::kFloat32).mean().item<double>(), 0.9);
+    EXPECT_TRUE(
+          torch::equal(nvfp4_to_bf16(q).masked_select(normal), fake_at(x, q, stochastic, 99).masked_select(normal)))
+          << stochastic;
+  }
+}
+
+// bf16 output: the fp32 GEMM's, rounded
+TEST(Nvfp4, GemmBf16MatchesF32) {
+  torch::manual_seed(0);
+  const auto ma = mx_of(spread(256, 512).to(torch::kBFloat16)), mb = mx_of(spread(384, 512).to(torch::kBFloat16));
+  const auto qa = mx_to_nvfp4(ma.data, ma.scale, false, true, 3), qb = mx_to_nvfp4(mb.data, mb.scale, false, false);
+  auto out = torch::empty({256, 384}, kCuda);
+  nvfp4_gemm_f32(qa, qb, out, false);
+  EXPECT_TRUE(torch::equal(nvfp4_gemm(qa, qb), out.to(torch::kBFloat16)));
+}
+
+// The NVFP4 relu^2 dgrad GEMM's epilogue (dh rows and transpose) vs nvfp4_gemm then quantize_mx's kernel: bit for bit
+TEST(Nvfp4, ReluSquareBwdEpilogueNvfp4) {
+  torch::manual_seed(0);
+  const CutlassScope scope;
+  const int64_t M = 256, N = 384, K = 512;
+  const auto ma = mx_of(spread(M, K).to(torch::kBFloat16)), mb = mx_of(spread(N, K).to(torch::kBFloat16));
+  const auto a = mx_to_nvfp4(ma.data, ma.scale, false, true, 5), b = mx_to_nvfp4(mb.data, mb.scale, false, false);
+  const auto h = torch::randn({M, N}, kCuda.dtype(torch::kBFloat16));
+  const auto u8 = [](const Nvfp4Tensor& t) {
+    return torch::cat({t.data.flatten(), t.scale.flatten(), t.amax.view({1}).view(torch::kUInt8)});
+  };
+  const auto run = [&](bool fused) {
+    const auto rows = empty_nvfp4(M, N, kCuda, false, true, 11), cols = empty_nvfp4(N, M, kCuda, true, true, 12);
+    kernels::MxOut out{}, out_t{};
+    out.fp4 = nvfp4_out(rows), out_t.fp4 = nvfp4_out(cols);
+    if (fused)
+      EXPECT_TRUE(nvfp4_gemm_relu_square_bwd(a, b, h, out, out_t));
+    else
+      kernels::quantize_mx_relu_square_bwd(
+            nvfp4_gemm(a, b).data_ptr(), h.data_ptr(), M, N, out, out_t, at::cuda::getCurrentCUDAStream().stream());
+    return std::pair{u8(nvfp4_finish(rows)), u8(nvfp4_finish(cols))};
+  };
+  const auto f = run(true), u = run(false);
+  EXPECT_TRUE(torch::equal(f.first, u.first));
+  EXPECT_TRUE(torch::equal(f.second, u.second));
+}
+
+// set_nvfp4_backward: the blocks' weight gradients go NVFP4, lm_head's stays MXFP8 (same bits)
 TEST(Nvfp4, WgradInGpt) {
   torch::manual_seed(0);
   GPT model(
@@ -357,18 +415,18 @@ TEST(Nvfp4, WgradInGpt) {
   model->set_fp8(true);
   model->set_loss_chunk_rows(512);
   const auto idx = torch::randint(0, 1000, {2, 256}, kCuda.dtype(torch::kInt64));
-  auto grads = [&](const Nvfp4Wgrad* o) {
-    set_nvfp4_wgrad(o);
+  auto grads = [&](const Nvfp4Backward* o) {
+    set_nvfp4_backward(o);
     model->zero_grad();
     model->forward(idx, idx.roll(-1, 1)).backward();
-    set_nvfp4_wgrad(nullptr);
+    set_nvfp4_backward(nullptr);
     std::map<std::string, torch::Tensor> g;
     for (const auto& p : model->named_parameters(true))
       g[p.key()] = p.value().grad().clone();
     return g;
   };
   const auto mx = grads(nullptr);
-  const Nvfp4Wgrad o;
+  const Nvfp4Backward o;
   const auto fp4 = grads(&o);
   EXPECT_TRUE(torch::equal(fp4.at("lm_head.weight"), mx.at("lm_head.weight")));
   for (const auto* name :
@@ -376,5 +434,19 @@ TEST(Nvfp4, WgradInGpt) {
         "transformer.h.0.attn.c_proj.weight"}) {
     EXPECT_FALSE(torch::equal(fp4.at(name), mx.at(name))) << name;
     EXPECT_LT(rel_err(fp4.at(name), mx.at(name)), 0.3) << name;
+  }
+  // NVFP4 dgrad (with and without wgrad): the last block's c_proj weights (upstream of every dgrad) keep their bits
+  for (const bool wgrad : {false, true}) {
+    const Nvfp4Backward d{.wgrad = wgrad, .dgrad = true};
+    const auto g = grads(&d);
+    EXPECT_TRUE(torch::equal(g.at("lm_head.weight"), mx.at("lm_head.weight")));
+    EXPECT_EQ(
+          torch::equal(g.at("transformer.h.1.mlp.c_proj.weight"), mx.at("transformer.h.1.mlp.c_proj.weight")), !wgrad);
+    for (const auto* name :
+         {"transformer.h.0.attn.c_q.weight", "transformer.h.1.mlp.c_fc.weight", "transformer.h.0.mlp.c_proj.weight",
+          "transformer.h.0.attn.c_proj.weight", "transformer.wte.weight"}) {
+      EXPECT_FALSE(torch::equal(g.at(name), mx.at(name))) << name << " wgrad " << wgrad;
+      EXPECT_LT(rel_err(g.at(name), mx.at(name)), 0.4) << name << " wgrad " << wgrad;
+    }
   }
 }
