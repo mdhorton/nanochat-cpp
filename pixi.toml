@@ -36,6 +36,7 @@ tiktoken = "*"
 [pypi-dependencies]
 rustbpe = "*"
 safetensors = "*"
+wandb = "*"
 torch = { version = "==2.14.*", index = "https://download.pytorch.org/whl/cu132" }
 
 [activation.env]
@@ -83,6 +84,7 @@ export-golden = "python tools/export_golden.py"
 export-train-golden = "python tools/export_train_golden.py"
 export-train-golden-ddp = "torchrun --standalone --nproc-per-node 2 tools/export_train_golden.py --sections train"
 export-pretrained = "python tools/export_tokenizer.py --pretrained gpt2 cl100k_base"
+wandb-upload = "python tools/wandb_upload.py"
 
 # run a nanochat module against the shared cache, e.g. `pixi run nanochat nanochat.dataset -n 8`
 nanochat = { cmd = "python -m", cwd = "external/nanochat" }

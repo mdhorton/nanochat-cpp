@@ -38,21 +38,28 @@ private:
   std::vector<torch::Tensor> value_;
 };
 
+// Whether an MX GEMM contracting over K can run in NVFP4 (its GEMM needs K % 256).
+inline bool nvfp4_fits(int64_t K) {
+  return K % 256 == 0;
+}
+
 // input_2d (N, in) bf16, weight (out, in) any float dtype -> (N, out) in input_2d's dtype.
-// cache (optional): the weight's FP8 copy. Mx needs N, in, out % 128 (else tensorwise).
+// cache (optional): the weight's FP8 copy. Mx needs N, in, out % 128 (else tensorwise). fp4 (Mx, nvfp4_fits(in)): the
+// forward GEMM in NVFP4 (the input's rows, the weight in 16x16 blocks; nvfp4.h).
 torch::Tensor fp8_matmul(
       const torch::Tensor& input_2d, const torch::Tensor& weight, Fp8WeightCache* cache = nullptr,
-      Fp8Recipe recipe = Fp8Recipe::Tensorwise);
+      Fp8Recipe recipe = Fp8Recipe::Tensorwise, bool fp4 = false);
 
 struct Fp8Tensor;
 
 // The MLP's c_proj(relu(c_fc(x)).square()) with both matmuls as fp8_matmul, bit for bit. x_2d (N, in) bf16 (N % 16
 // == 0), w_fc (hidden, in), w_proj (out, hidden) -> (N, out). x_mx (Mx only, see relu_square_mlp_mx): x_2d already
-// quantized (residual_norm_mx); x_2d then only carries autograd.
+// quantized (residual_norm_mx); x_2d then only carries autograd. fp4 (Mx, nvfp4_fits(in) and (hidden)): both forward
+// GEMMs in NVFP4 as fp8_matmul's; x_mx's rows then NVFP4 too.
 torch::Tensor fp8_relu_square_mlp(
       const torch::Tensor& x_2d, const torch::Tensor& w_fc, const torch::Tensor& w_proj,
       Fp8WeightCache* fc_cache = nullptr, Fp8WeightCache* proj_cache = nullptr,
-      Fp8Recipe recipe = Fp8Recipe::Tensorwise, const Fp8Tensor* x_mx = nullptr);
+      Fp8Recipe recipe = Fp8Recipe::Tensorwise, const Fp8Tensor* x_mx = nullptr, bool fp4 = false);
 
 // Whether fp8_relu_square_mlp of an (N, in) input runs under Mx (else tensorwise).
 bool relu_square_mlp_mx(
@@ -68,7 +75,7 @@ torch::autograd::variable_list fp8_qkv(
 
 // A quantized 2D tensor: data, its transpose (contiguous), and the scales that dequantize each (data * inv_scale).
 // Tensorwise: one fp32 inverse scale for both. Mx: e8m0 block scales in cuBLAS's swizzled layout, inv_scale along
-// data's rows, inv_scale_t along data_t's. For NVFP4 backward GEMMs (nvfp4.h), data (fp4()) or data_t (fp4_t()) is
+// data's rows, inv_scale_t along data_t's. For NVFP4 GEMMs (nvfp4.h), data (fp4()) or data_t (fp4_t()) is
 // NVFP4 instead (Nvfp4Tensor: data, inv_scale, amax / their _t), written by the producer as fp4_target / fp4_target_t
 // and completed by finish_fp4.
 struct Fp8Tensor {
@@ -130,15 +137,19 @@ kernels::MxOut mx_out(const torch::Tensor& data, const torch::Tensor& scale, int
 // quantize_mx of x into given buffers (e.g. mx_out views of a larger tensor).
 void quantize_mx_into(const torch::Tensor& x, bool relu_square, kernels::MxOut out, kernels::MxOut out_t);
 
-// Merged q/k/v weights under MX: {w_cat (n, C), w_cat^T, their scales}, from cache (optional) while unchanged. With
-// NVFP4 dgrad, w_cat^T is NVFP4 (Nvfp4Role::DgradWeight), its amax appended.
+// Merged q/k/v weights under MX: {w_cat (n, C), w_cat^T, their scales, their NVFP4 amaxes (else undefined)}, from
+// cache (optional) while unchanged. fp4: w_cat NVFP4 in 16x16 blocks, as quantize_fp8_weight's. With NVFP4 dgrad,
+// w_cat^T is NVFP4 (the same blocks with fp4, else Nvfp4Role::DgradWeight).
 std::vector<torch::Tensor> mx_qkv_weights(
-      const torch::Tensor& wq, const torch::Tensor& wk, const torch::Tensor& wv, Fp8WeightCache* cache);
+      const torch::Tensor& wq, const torch::Tensor& wk, const torch::Tensor& wv, Fp8WeightCache* cache,
+      bool fp4 = false);
 
-// A weight's e4m3 copy (tensorwise or Mx), from cache (optional) while w is unchanged. fp4_t (Mx, with NVFP4 dgrad on):
-// data_t NVFP4 instead (Nvfp4Role::DgradWeight).
+// A weight's e4m3 copy (tensorwise or Mx), from cache (optional) while w is unchanged. fp4 (Mx): data NVFP4 in 16x16
+// blocks (quantize_nvfp4_2d). fp4_t (Mx, with NVFP4 dgrad on): data_t NVFP4 instead, the same blocks with fp4, else
+// Nvfp4Role::DgradWeight.
 Fp8Tensor quantize_fp8_weight(
-      const torch::Tensor& w, Fp8WeightCache* cache, Fp8Recipe recipe = Fp8Recipe::Tensorwise, bool fp4_t = false);
+      const torch::Tensor& w, Fp8WeightCache* cache, Fp8Recipe recipe = Fp8Recipe::Tensorwise, bool fp4_t = false,
+      bool fp4 = false);
 
 // quantize_fp8 (fused) with max|x| already in scalars[0], e.g. from the kernel that wrote x; scalars: 2 device floats,
 // scalars[1] gets the inverse scale. x: aligned, contiguous 2D bf16 or fp32.

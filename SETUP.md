@@ -21,6 +21,15 @@ cd nanochat-cpp
 pixi install                                   
 ```
 
+# wandb (optional)
+
+`base_train --run=<name> --wandb` uploads metrics live; `pixi run wandb-upload --file cache/metrics/<run>` uploads a
+finished run.
+
+```bash
+pixi run wandb login   # or export WANDB_API_KEY=<key>
+```
+
 # CLion
 
 use the "Debug (pixi)" / "RelWithDebInfo (pixi)" CMake presets with the Default toolchain.

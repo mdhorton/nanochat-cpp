@@ -50,15 +50,4 @@ RemoveBracesLLVM: true
 PenaltyBreakOpenParenthesis: 10
 PenaltyBreakAssignment: 100
 PenaltyReturnTypeOnItsOwnLine: 1000
-
-#PenaltyBreakScopeResolution: 1000
-
-#AlignAfterOpenBracket: AlwaysBreak
-#AlignEscapedNewlines: LeftWithLastLine
-#AlignOperands: DontAlign
-#
-#AllowShortLoopsOnASingleLine: false
-#
-#ConstructorInitializerIndentWidth: 0
-#PackConstructorInitializers: NextLine
 ---

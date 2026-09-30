@@ -89,13 +89,13 @@ Run 30: GPU0 is about 5-10% slower. This gives a few extra micro-steps to GPU1 s
 
 `--depth=12 --device-batch-size=8`
 
-|    | toks/sec | loss | bpb | memory | time | notes |
-|----|---------:|-----:|----:|-------:|-----:|-------|
-| 5  |          |      |     |        |      |       |
-| 10 |          |      |     |        |      |       |
-| 15 |          |      |     |        |      |       |
-| 20 |          |      |     |        |      |       |
-| 25 |          |      |     |        |      |       |
+|    | toks/sec |     loss |      bpb | memory |   time | notes                                   |
+|----|---------:|---------:|---------:|-------:|-------:|-----------------------------------------|
+| 5  |          |          |          |        |        |                                         |
+| 10 |          |          |          |        |        |                                         |
+| 15 |          |          |          |        |        |                                         |
+| 20 |          |          |          |        |        |                                         |
+| 31 |  351,321 | 2.860658 | 0.879813 |   8.0g | 41.75m | --nvfp4-wgrad --nvfp4-dgrad --nvfp4-fwd |
 
 # full run @d24
 
@@ -107,11 +107,11 @@ Run 30: GPU0 is about 5-10% slower. This gives a few extra micro-steps to GPU1 s
 
 # nvfp4
 
-1.436141  (baseline)
-1.442035  --nvfp4=fwd,dgrad,wgrad  
-1.442549  --nvfp4=fwd,dgrad        
-1.443382  --nvfp4=fwd,dgrad,wgrad --nvfp4-skip-last=2
+1.436141 (baseline)
+1.442035 --nvfp4=fwd,dgrad,wgrad  
+1.442549 --nvfp4=fwd,dgrad        
+1.443382 --nvfp4=fwd,dgrad,wgrad --nvfp4-skip-last=2
 
-1.436142  (baseline)
-1.439150  --nvfp4=dgrad,wgrad
-1.439393  --nvfp4=fwd
+1.436142 (baseline)
+1.439150 --nvfp4=dgrad,wgrad
+1.439393 --nvfp4=fwd

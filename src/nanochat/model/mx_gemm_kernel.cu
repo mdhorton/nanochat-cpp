@@ -12,6 +12,7 @@
 #include <cutlass/util/packed_stride.hpp>
 
 #include "nanochat/model/mx_kernel.cuh"
+#include "nanochat/model/nvfp4_alpha.cuh"
 
 namespace {
 
@@ -312,14 +313,15 @@ struct ReluSquare {
 
 // Epilogue: h (bf16, through smem + TMA) -> relu^2, its transpose MX-quantized along M -> MX scales per 32 along rows
 // -> D e4m3. The epilogue tile is the 64x32 EpilogueTileAuto picks.
-using HStore = fusion::Sm90AuxStore<
-      2, EpiTile, cutlass::bfloat16_t, cutlass::FloatRoundStyle::round_to_nearest, StrideH,
+template <class E>
+using HStoreT = fusion::Sm90AuxStore<
+      2, E, cutlass::bfloat16_t, cutlass::FloatRoundStyle::round_to_nearest, StrideH,
       decltype(cutlass::epilogue::collective::detail::sm90_get_epilogue_smem_swizzle_layout_atom<
-               StrideH, cutlass::bfloat16_t, EpiTile>()),
+               StrideH, cutlass::bfloat16_t, E>()),
       decltype(cutlass::epilogue::collective::detail::sm120_get_smem_store_op_for_accumulator<
                StrideH, cutlass::bfloat16_t>())>;
 using MxGemmReluSquare = MxGemmTree<fusion::Sm90EVT<
-      RowScales, fusion::Sm90EVT<MxStoreT<4, ReluSquare>, fusion::Sm90EVT<HStore, fusion::Sm90AccFetch>>>>;
+      RowScales, fusion::Sm90EVT<MxStoreT<4, ReluSquare>, fusion::Sm90EVT<HStoreT<EpiTile>, fusion::Sm90AccFetch>>>>;
 
 // dh = bf16(h > 0 ? bf16(ga) * 2h : 0), as quantize_mx_relu_square_bwd (ga = alpha * acc)
 struct ReluSquareGrad {
@@ -351,6 +353,23 @@ using Nvfp4GemmReluSquareGrad = Kernel<
             void, cutlass::layout::RowMajor, 8, void, cutlass::layout::RowMajor, 8,
             cutlass::epilogue::collective::EpilogueScheduleAuto,
             fusion::Sm90EVT<MxStoreT<4, ReluSquareGrad, 64>, fusion::Sm90AccFetch, HLoadT<EpiTile64>>>::CollectiveOp,
+      Nv, 32, cutlass::gemm::KernelTmaWarpSpecializedPingpongNvf4Sm120>;
+
+// The forward's with NVFP4 operands: h = the accumulator times the tensor scales (Nvfp4Alpha), stored by TMA; no D,
+// MxStoreT writes relu^2 as NVFP4 (rows) and its transpose. 64x64 subtiles as Nvfp4GemmReluSquareGrad.
+using Nvfp4GemmReluSquare = Kernel<
+      typename cutlass::epilogue::collective::CollectiveBuilder<
+            cutlass::arch::Sm120, cutlass::arch::OpClassBlockScaledTensorOp, Tile, Cluster, EpiTile64, float, float,
+            void, cutlass::layout::RowMajor, 8, void, cutlass::layout::RowMajor, 8,
+            cutlass::epilogue::collective::EpilogueScheduleAuto,
+            fusion::Sm90EVT<
+                  MxStoreT<4, ReluSquare, 64>,
+                  fusion::Sm90EVT<
+                        HStoreT<EpiTile64>,
+                        fusion::Sm90EVT<
+                              fusion::Sm90Compute<
+                                    cutlass::multiplies, float, float, cutlass::FloatRoundStyle::round_to_nearest>,
+                              nanochat::Nvfp4Alpha, fusion::Sm90AccFetch>>>>::CollectiveOp,
       Nv, 32, cutlass::gemm::KernelTmaWarpSpecializedPingpongNvf4Sm120>;
 
 // the block scale store's norm constant (scales amax / 448)
@@ -472,6 +491,23 @@ const char* cutlass_mx_gemm_relu_square(
         {{{}, {static_cast<cutlass::bfloat16_t*>(h), cutlass::make_cute_packed_stride(StrideH{}, {m, n, 1})}},
          {static_cast<uint8_t*>(q_t), static_cast<uint8_t*>(q_t_scale), q_t_fp4, {}, {}}},
         {static_cast<cutlass::float_ue8m0_t*>(q_scale), one(), {}}};
+  return launch<G>(args, stream);
+}
+
+const char* cutlass_nvfp4_gemm_relu_square(
+      const void* a, const void* a_scale, const void* b, const void* b_scale, const float* a_amax, const float* b_amax,
+      void* h, const Nvfp4Out& q, void* q_t, void* q_t_scale, const Nvfp4Out& q_t_fp4, int64_t M, int64_t N, int64_t K,
+      cudaStream_t stream) {
+  using G = Nvfp4GemmReluSquare;
+  if (!fits(M, N, K) || K % 256 != 0 || q.data == nullptr)
+    return "cutlass_nvfp4_gemm_relu_square: M, N must be % 128, K % 256, q NVFP4";
+  const int m = static_cast<int>(M), n = static_cast<int>(N), k = static_cast<int>(K);
+  auto args = make_args<G>(a, a_scale, b, b_scale, m, n, k);
+  // {{{{amaxes}, {acc}, {*}}, {h}}, {q^T, q}}
+  args.epilogue.thread = {
+        {{{a_amax, b_amax, nullptr}, {}, {}},
+         {static_cast<cutlass::bfloat16_t*>(h), cutlass::make_cute_packed_stride(StrideH{}, {m, n, 1})}},
+        {static_cast<uint8_t*>(q_t), static_cast<uint8_t*>(q_t_scale), q_t_fp4, q, {}}};
   return launch<G>(args, stream);
 }
 

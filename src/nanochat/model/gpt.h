@@ -58,7 +58,8 @@ bool has_ve(int64_t layer_idx, int64_t n_layer);
 torch::Tensor rms_norm(const torch::Tensor& x);
 
 // Linear without bias whose weight is cast to the input dtype in forward (replaces autocast). With fp8 set, the
-// matmuls run in FP8 (fp8.h), as Python's Float8Linear; with fp8 and nvfp4 set, as simulated NVFP4 (nvfp4_sim.h).
+// matmuls run in FP8 (fp8.h), as Python's Float8Linear; with fp8 and nvfp4 set, as simulated NVFP4 (nvfp4_sim.h);
+// with fp8 (Mx) and nvfp4_fwd, the forward matmul in NVFP4 (nvfp4.h).
 class LinearImpl : public torch::nn::Module {
 public:
   LinearImpl(int64_t in_features, int64_t out_features, const torch::TensorOptions& options);
@@ -68,6 +69,7 @@ public:
   Fp8Recipe fp8_recipe = Fp8Recipe::Tensorwise;
   Fp8WeightCache fp8_cache; // enabled by GPT's set_fused
   const Nvfp4Options* nvfp4 = nullptr;
+  bool nvfp4_fwd = false;
 };
 
 TORCH_MODULE(Linear);
@@ -89,8 +91,9 @@ public:
   torch::Tensor forward(
         const torch::Tensor& x, const torch::Tensor& ve, const torch::Tensor& cos, const torch::Tensor& sin,
         int64_t window, const Fp8Tensor* x_mx = nullptr);
-  // Whether an (N, C) input goes through mx_attention_inputs.
+  // Whether an (N, C) input goes through mx_attention_inputs; and with its GEMM in NVFP4 (c_q's nvfp4_fwd).
   bool mx_inputs(int64_t N, int64_t C) const;
+  bool fp4_inputs(int64_t N, int64_t C) const;
 
   static constexpr int64_t kVeGateChannels = 12;
   int64_t n_head, n_kv_head, head_dim;
@@ -115,8 +118,9 @@ public:
   MLPImpl(const GPTConfig& config, const torch::TensorOptions& options);
   // x_mx (with mx_inputs): x already quantized (residual_norm_mx)
   torch::Tensor forward(const torch::Tensor& x, const Fp8Tensor* x_mx = nullptr);
-  // Whether an (N, C) input goes through the Mx fp8_relu_square_mlp.
+  // Whether an (N, C) input goes through the Mx fp8_relu_square_mlp; and with its GEMMs in NVFP4 (c_fc's nvfp4_fwd).
   bool mx_inputs(int64_t N, int64_t C) const;
+  bool fp4_inputs(int64_t N, int64_t C) const;
   bool fused = false; // relu^2 in one kernel; with FP8, also folded into the quantization (relu_square.h, fp8.h)
   Linear c_fc{nullptr}, c_proj{nullptr};
 };
@@ -204,6 +208,9 @@ public:
   // must outlive the model's use). The attention and MLP of those blocks then run their Linears one by one. Returns
   // the number of Linears switched.
   int set_nvfp4(const Nvfp4Options* options, int64_t skip_first = 0, int64_t skip_last = 0);
+  // Real NVFP4 forward GEMMs (LinearImpl's nvfp4_fwd) for the FP8 Linears of blocks [first, n_layer - skip_last).
+  // Returns the number of Linears switched on.
+  int set_nvfp4_fwd(bool enabled, int64_t skip_first = 0, int64_t skip_last = 0);
 
   Transformer transformer{nullptr};
   Linear lm_head{nullptr};

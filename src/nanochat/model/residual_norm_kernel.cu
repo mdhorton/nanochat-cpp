@@ -176,7 +176,7 @@ __device__ __forceinline__ void residual_norm_mx_fwd_body(const kernels::Residua
   const bool blend = a.base.x0 != nullptr;
   const float lr = blend ? round_bf16(*a.base.lr) : 0.f, l0 = blend ? round_bf16(*a.base.l0) : 0.f;
   const MxOutDev out = mx_dev(a.out), out_t = mx_dev(a.out_t);
-  float smax = 0.f; // NVFP4 out_t's
+  float smax = 0.f, smax_rows = 0.f; // NVFP4 out_t's, out's
   for (int64_t row0 = static_cast<int64_t>(blockIdx.x) * kRows; row0 < a.base.rows;
        row0 += static_cast<int64_t>(gridDim.x) * kRows) {
     for (int r = warp; r < kRows; r += kBlock / 32) {
@@ -196,10 +196,13 @@ __device__ __forceinline__ void residual_norm_mx_fwd_body(const kernels::Residua
           for (int k = 0; k < kVec; ++k)
             m = fmaxf(m, fabsf(v.v[k]));
         }
-        m = fmaxf(m, __shfl_xor_sync(0xffffffff, m, 1));
-        m = fmaxf(m, __shfl_xor_sync(0xffffffff, m, 2));
+        const float m16 = fmaxf(m, __shfl_xor_sync(0xffffffff, m, 1)); // NVFP4's block
+        m = fmaxf(m16, __shfl_xor_sync(0xffffffff, m16, 2));
         if (active) {
-          mx_store8(v.v, m, out, row, col, row, lane % 4 == 0);
+          if (out.fp4.data != nullptr)
+            smax_rows = fmaxf(smax_rows, nvfp4_store8_amax(v.v, m16, out.fp4, row, col));
+          else
+            mx_store8(v.v, m, out, row, col, row, lane % 4 == 0);
           if (col < a.n_cols)
             static_cast<uint4*>(a.base.n)[(row * a.base.cols + col) / kVec] = n[it];
         }
@@ -236,6 +239,8 @@ __device__ __forceinline__ void residual_norm_mx_fwd_body(const kernels::Residua
   }
   if (out_t.fp4.data != nullptr)
     nvfp4_smax_block(out_t.fp4, smax);
+  if (out.fp4.data != nullptr)
+    nvfp4_smax_block(out.fp4, smax_rows);
 }
 
 // n = res * rs: dres = rs * (g_n - res * rs^2 * mean(g_n * res)), rounded to bf16 as the norm's output gradient, then

@@ -184,22 +184,27 @@ __device__ __forceinline__ float nvfp4_store16(float (&v)[16], const kernels::Nv
   return s;
 }
 
+// nvfp4_store8's stores, the block's amax m given (no rht)
+__device__ __forceinline__ float nvfp4_store8_amax(
+      const float (&v)[8], float m, const kernels::Nvfp4Out& o, int64_t row, int64_t col) {
+  const float s = nvfp4_round_scale(nvfp4_div6(m)), to_q = s > 0.f ? nvfp4_rcp(s) : 0.f;
+  const int64_t i = row * o.ld + col;
+  *reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(o.data) + i / 2) = nvfp4_pack8(v, to_q, o, o.index0 + i);
+  if (col % 16 == 0)
+    nvfp4_store_scale(o, row, col, s);
+  return s;
+}
+
 // nvfp4_store16 over a lane pair (lane ^ 1), 8 values each from col (% 8). Both lanes return the block scale.
 __device__ __forceinline__ float nvfp4_store8(float (&v)[8], const kernels::Nvfp4Out& o, int64_t row, int64_t col) {
-  const bool high = col % 16 != 0;
   if (o.rht)
-    nvfp4_rht8(v, o.rht_signs, high);
+    nvfp4_rht8(v, o.rht_signs, col % 16 != 0);
   float m = 0.f;
 #pragma unroll
   for (int k = 0; k < 8; ++k)
     m = fmaxf(m, fabsf(v[k]));
   m = fmaxf(m, __shfl_xor_sync(0xffffffff, m, 1));
-  const float s = nvfp4_round_scale(nvfp4_div6(m)), to_q = s > 0.f ? nvfp4_rcp(s) : 0.f;
-  const int64_t i = row * o.ld + col;
-  *reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(o.data) + i / 2) = nvfp4_pack8(v, to_q, o, o.index0 + i);
-  if (!high)
-    nvfp4_store_scale(o, row, col, s);
-  return s;
+  return nvfp4_store8_amax(v, m, o, row, col);
 }
 
 __device__ __forceinline__ unsigned nvfp4_slot() {

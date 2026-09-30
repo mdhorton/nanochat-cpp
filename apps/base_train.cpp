@@ -50,8 +50,14 @@ static int run(int argc, char** argv) {
   o.nvfp4_dgrad = flags.boolean(
         "nvfp4-dgrad", o.nvfp4_dgrad,
         "real NVFP4 input gradients (CUTLASS) for the Linears but lm_head, with --nvfp4-sr's dgrad (no rht)");
-  o.nvfp4_skip_first = flags.i64("nvfp4-skip-first", o.nvfp4_skip_first, "nvfp4: first blocks kept MXFP8");
-  o.nvfp4_skip_last = flags.i64("nvfp4-skip-last", o.nvfp4_skip_last, "nvfp4: last blocks kept MXFP8");
+  o.nvfp4_fwd = flags.boolean(
+        "nvfp4-fwd", o.nvfp4_fwd,
+        "real NVFP4 forward GEMMs (CUTLASS) for the blocks' Linears: 16x16 weight blocks (dgrad sees the same weight), "
+        "round to nearest");
+  o.nvfp4_skip_first = flags.i64(
+        "nvfp4-skip-first", o.nvfp4_skip_first, "nvfp4, nvfp4-fwd: first blocks kept MXFP8 (nvfp4-fwd: forward only)");
+  o.nvfp4_skip_last = flags.i64(
+        "nvfp4-skip-last", o.nvfp4_skip_last, "nvfp4, nvfp4-fwd: last blocks kept MXFP8 (nvfp4-fwd: forward only)");
   o.cublaslt_workspace_mb = flags.i64(
         "cublaslt-workspace-mb", o.cublaslt_workspace_mb,
         "cuBLASLt workspace in MB; split-K GEMMs need a few (<= 0 = torch's 1 MB default)");
@@ -94,6 +100,8 @@ static int run(int argc, char** argv) {
         "run", o.run,
         "run name: checkpoint dir, metrics/<run>/metrics-<timestamp>.jsonl, wandb name ('dummy' = d<depth>, no "
         "metrics)");
+  o.wandb = flags.boolean(
+        "wandb", o.wandb, "upload the metrics live to wandb (project nanochat) with tools/wandb_upload.py");
   // distributed
   const auto nproc = static_cast<int>(flags.i64("nproc", 1, "number of GPUs (one process each)"));
   const auto rank = static_cast<int>(flags.i64("rank", -1, "internal: set by --nproc for each process"));

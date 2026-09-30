@@ -1,19 +1,26 @@
 #include "nanochat/train/trainer.h"
 
+#include <spawn.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
 #include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <cstring>
 #include <ctime>
 #include <format>
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
+#include <thread>
 
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <nvtx3/nvToolsExt.h>
 
+#include "nanochat/common.h"
 #include "nanochat/model/mx_gemm.h"
 #include "nanochat/model/nvfp4.h"
 #include "nanochat/tokenizer/tokenizer.h"
@@ -22,6 +29,8 @@
 #include "nanochat/train/dist.h"
 #include "nanochat/train/loss_eval.h"
 #include "nanochat/train/optim.h"
+
+extern char** environ;
 
 namespace nanochat {
 
@@ -202,6 +211,7 @@ nlohmann::json options_to_json(const TrainOptions& o) {
         {"nvfp4_weight_2d", o.nvfp4_weight_2d},
         {"nvfp4_wgrad", o.nvfp4_wgrad},
         {"nvfp4_dgrad", o.nvfp4_dgrad},
+        {"nvfp4_fwd", o.nvfp4_fwd},
         {"nvfp4_skip_first", o.nvfp4_skip_first},
         {"nvfp4_skip_last", o.nvfp4_skip_last},
         {"num_iterations", o.num_iterations},
@@ -222,7 +232,8 @@ nlohmann::json options_to_json(const TrainOptions& o) {
         {"eval_every", o.eval_every},
         {"eval_tokens", o.eval_tokens},
         {"save_every", o.save_every},
-        {"run", o.run}};
+        {"run", o.run},
+        {"wandb", o.wandb}};
 }
 
 double seconds_since(std::chrono::steady_clock::time_point t0) {
@@ -281,8 +292,8 @@ fs::path metrics_path(const fs::path& dir, bool resuming) {
   return dir / std::format("metrics-{}.jsonl", stamp);
 }
 
-// JSON lines: a header (config), then one line per step and eval, keyed as base_train.py's wandb logs.
-// Resuming keeps the lines before the resume step.
+// JSON lines: a header (config), then one line per step and eval, keyed as base_train.py's wandb logs, then
+// {"step", "event": "end"}. Resuming keeps the lines before the resume step.
 class MetricsLog {
 public:
   MetricsLog(const fs::path& path, const nlohmann::json& header, int64_t resume_step) {
@@ -310,6 +321,39 @@ public:
 
 private:
   std::ofstream out_;
+};
+
+// tools/wandb_upload.py --follow on the metrics file, in the background. It stops at the metrics end line, or when
+// this process exits.
+class WandbUpload {
+public:
+  explicit WandbUpload(const fs::path& metrics) {
+    const auto script = default_base_dir().parent_path() / "tools" / "wandb_upload.py"; // <project>/cache's parent
+    const auto pid = std::to_string(getpid());
+    std::vector<std::string> argv{"python", script.string(), "--file", metrics.string(), "--follow", "--pid", pid};
+    std::vector<char*> cargv;
+    for (auto& a : argv)
+      cargv.push_back(a.data());
+    cargv.push_back(nullptr);
+    if (const int err = posix_spawnp(&pid_, "python", nullptr, nullptr, cargv.data(), environ))
+      throw std::runtime_error(std::string("cannot start wandb_upload.py: ") + std::strerror(err));
+  }
+
+  // after the end line: lets the upload finish, up to timeout_s
+  void wait(double timeout_s) const {
+    const auto t0 = std::chrono::steady_clock::now();
+    int status = 0;
+    while (waitpid(pid_, &status, WNOHANG) == 0) {
+      if (seconds_since(t0) > timeout_s) {
+        std::cerr << "wandb_upload.py still running, not waiting for it" << std::endl;
+        return;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+  }
+
+private:
+  pid_t pid_ = -1;
 };
 
 } // namespace
@@ -382,11 +426,11 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
     return on;
   };
   const auto rht = gemms(o.nvfp4_rht, "nvfp4-rht", true), sr = gemms(o.nvfp4_sr, "nvfp4-sr", false);
-  const bool nvfp4_real = o.nvfp4_wgrad || o.nvfp4_dgrad;
+  const bool nvfp4_real = o.nvfp4_wgrad || o.nvfp4_dgrad || o.nvfp4_fwd;
   if ((!o.nvfp4.empty() || nvfp4_real) && (!o.fp8 || o.fp8_recipe != "mxfp8"))
     throw std::invalid_argument("nvfp4 needs fp8 with the mxfp8 recipe");
   if (!o.nvfp4.empty() && nvfp4_real)
-    throw std::invalid_argument("nvfp4 (simulated) and nvfp4_wgrad / nvfp4_dgrad (real) are exclusive");
+    throw std::invalid_argument("nvfp4 (simulated) and nvfp4_wgrad / nvfp4_dgrad / nvfp4_fwd (real) are exclusive");
   if (o.nvfp4_dgrad && rht[1])
     throw std::invalid_argument("nvfp4_dgrad: no rht (simulated only)");
   if (!o.nvfp4.empty()) {
@@ -426,7 +470,12 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
     ~BackwardScope() {
       set_nvfp4_backward(nullptr);
     }
-  } backward_scope(nvfp4_real ? &backward : nullptr);
+  } backward_scope(o.nvfp4_wgrad || o.nvfp4_dgrad ? &backward : nullptr);
+
+  if (o.nvfp4_fwd) {
+    const int n = model->set_nvfp4_fwd(true, o.nvfp4_skip_first, o.nvfp4_skip_last);
+    print(std::format("NVFP4 forward GEMMs for {} linear layers (16x16 weight blocks)", n));
+  }
 
   if (o.nvfp4_wgrad)
     print(std::format("NVFP4 weight gradients (rht {}, sr {}, seed {})", backward.rht, backward.sr, backward.seed));
@@ -455,6 +504,7 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
 
   const auto plan = plan_training(o, vocab_size, flops_per_token);
   std::optional<MetricsLog> metrics;
+  std::optional<WandbUpload> wandb;
   if (master && o.run != "dummy") {
     const auto path = metrics_path(o.base_dir / "metrics" / o.run, resuming);
     print("Metrics: " + path.string());
@@ -470,6 +520,8 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
                 {"num_iterations", plan.num_iterations},
                 {"total_batch_size", plan.total_batch_size}},
           o.resume_from_step);
+    if (o.wandb)
+      wandb.emplace(path);
   }
   print(std::format(
         "Total batch size: {} tokens | LR scale: {:.4f} | weight decay: {:.6f}", with_commas(plan.total_batch_size),
@@ -663,6 +715,8 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
       callbacks.on_step({step, train_loss_f, lrm, dt});
     ++step;
   }
+  if (metrics)
+    metrics->log({{"step", step}, {"event", "end"}}); // resuming drops it with the steps >= resume step
 
   const auto stats = c10::cuda::CUDACachingAllocator::getDeviceStats(device.index());
   const auto peak = stats.allocated_bytes[static_cast<size_t>(c10::CachingAllocator::StatType::AGGREGATE)].peak;
@@ -672,6 +726,8 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
   if (val_bpb)
     print(std::format("Minimum validation bpb: {:.6f}", min_val_bpb));
   print(std::format("Total wall-clock time: {:.2f}m (incl. setup, evals, checkpoints)", seconds_since(start) / 60));
+  if (wandb)
+    wandb->wait(60);
   if (callbacks.on_end)
     callbacks.on_end(*model);
   return val_bpb;

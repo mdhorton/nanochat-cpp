@@ -27,6 +27,13 @@ const char* cutlass_mx_gemm_relu_square(
       const void* a, const void* a_scale, const void* b, const void* b_scale, void* h, void* q, void* q_scale,
       void* q_t, void* q_t_scale, const Nvfp4Out& q_t_fp4, int64_t M, int64_t N, int64_t K, cudaStream_t stream);
 
+// cutlass_mx_gemm_relu_square with NVFP4 a, b (scaled by their amaxes as cutlass_nvfp4_gemm_relu_square_bwd's) and q
+// as NVFP4 (required); q_t as there. K % 256.
+const char* cutlass_nvfp4_gemm_relu_square(
+      const void* a, const void* a_scale, const void* b, const void* b_scale, const float* a_amax, const float* b_amax,
+      void* h, const Nvfp4Out& q, void* q_t, void* q_t_scale, const Nvfp4Out& q_t_fp4, int64_t M, int64_t N, int64_t K,
+      cudaStream_t stream);
+
 // ga = a . b^T (bf16, not written) and h (M, N) bf16 -> quantize_mx_relu_square_bwd's outputs from the epilogue, bit
 // for bit: dh (M, N) e4m3 + dh_scale, dh_t (N, M) + dh_t_scale. dh_t_fp4.data set: dh_t as NVFP4 instead.
 const char* cutlass_mx_gemm_relu_square_bwd(

@@ -1,4 +1,5 @@
-// Pre-training loop. Port of scripts/base_train.py (without torch.compile, wandb, CORE eval and sampling).
+// Pre-training loop. Port of scripts/base_train.py (without torch.compile, CORE eval and sampling; wandb via
+// tools/wandb_upload.py).
 #pragma once
 
 #include <cstdint>
@@ -33,10 +34,10 @@ struct TrainOptions {
   std::string nvfp4_rht = "wgrad";      // GEMMs with a random Hadamard transform along K
   std::string nvfp4_sr = "dgrad,wgrad"; // GEMMs whose gradient operand rounds stochastically
   bool nvfp4_weight_2d = true;
-  int64_t nvfp4_skip_first = 0, nvfp4_skip_last = 0; // blocks kept MXFP8
+  int64_t nvfp4_skip_first = 0, nvfp4_skip_last = 0; // blocks kept MXFP8 (sim: all GEMMs; nvfp4_fwd: forward)
   // real NVFP4 weight / input gradients for the Linears but lm_head (nvfp4.h), with nvfp4_rht / nvfp4_sr's wgrad /
-  // dgrad (no rht) and seed
-  bool nvfp4_wgrad = false, nvfp4_dgrad = false;
+  // dgrad (no rht) and seed; forward GEMMs for the blocks' Linears (16x16 weight blocks, round to nearest)
+  bool nvfp4_wgrad = false, nvfp4_dgrad = false, nvfp4_fwd = false;
   // training horizon: the first one set wins
   int64_t num_iterations = -1;
   double target_flops = -1, target_param_data_ratio = 8; // Python: 12; speedrun.sh uses 8
@@ -54,6 +55,7 @@ struct TrainOptions {
   // run name: checkpoint dir and wandb name; metrics go to <base_dir>/metrics/<run>/metrics-<timestamp>.jsonl.
   // "dummy" (as base_train.py): checkpoint dir d<depth>, no metrics
   std::string run = "dummy";
+  bool wandb = false; // rank 0 uploads the metrics live with tools/wandb_upload.py (not with run "dummy")
   // nsys: NVTX range "profile" around steps [profile_start, profile_start + profile_steps), -1 = off
   int64_t profile_start = -1, profile_steps = 3;
   // paths

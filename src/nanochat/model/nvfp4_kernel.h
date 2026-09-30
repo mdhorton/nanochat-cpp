@@ -6,6 +6,8 @@
 
 #include <cuda_runtime_api.h>
 
+#include "nanochat/model/fp8_kernel.h"
+
 namespace nanochat::kernels {
 
 // MX (rows, cols) row-major e4m3 with e8m0 scales per 32 along cols in the swizzled layout (fp8.h's quantize_mx) ->
@@ -16,6 +18,13 @@ namespace nanochat::kernels {
 void mx_to_nvfp4(
       const void* data, const void* scale, int64_t rows, int64_t cols, const float* hadamard, bool stochastic,
       uint64_t seed, void* out, void* out_scale, float* amax, cudaStream_t stream);
+
+// x (rows, cols) row-major fp32 (else bf16) -> NVFP4 in 16x16 blocks (one scale each, round to nearest) as producers
+// write it (fp8_kernel.h's Nvfp4Out): out along cols, and out_t (data null: none) x's transpose along rows, the same
+// values (W and W^T for forward and dgrad). rows, cols % 16.
+void quantize_nvfp4_2d(
+      const void* x, bool x_f32, int64_t rows, int64_t cols, const Nvfp4Out& out, const Nvfp4Out& out_t,
+      cudaStream_t stream);
 
 // Completes NVFP4 (rows, cols) written by producers (fp8_kernel.h's Nvfp4Out): the tensor scale 2^-k with the largest
 // k keeping every block scale within 448, so out_scale = ue4m3(scale16 * 2^k) (exact but for e4m3's subnormals), and

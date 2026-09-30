@@ -34,6 +34,12 @@ bool mx_gemm_relu_square(
       const torch::Tensor& q_t_scale, const torch::Tensor& a, const torch::Tensor& a_scale, const torch::Tensor& b,
       const torch::Tensor& b_scale, const kernels::Nvfp4Out& q_t_fp4 = {});
 
+// mx_gemm_relu_square with NVFP4 a (M, K), b (N, K): q as NVFP4 (out.fp4, required), q_t (out_t) MX or NVFP4 (fp8.h's
+// mx_outs views). False (nothing written): the Cublas backend.
+bool nvfp4_gemm_relu_square(
+      const Nvfp4Tensor& a, const Nvfp4Tensor& b, const torch::Tensor& h, const kernels::MxOut& out,
+      const kernels::MxOut& out_t);
+
 // relu^2's backward from its dgrad GEMM in one CUTLASS GEMM: ga = mx_gemm(a, ..., bf16) (not written) and h (M, N)
 // bf16 -> quantize_mx_relu_square_bwd's outputs (fp8_kernel.h): dh rows and dh_t (N, M), each e4m3 with its MX scales.
 // dh_t_fp4.data set: dh_t as NVFP4 there instead. False (nothing written): the Cublas backend, or dims not % 128.

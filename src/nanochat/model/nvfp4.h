@@ -1,7 +1,7 @@
-// NVFP4 backward GEMMs: the operands in NVFP4, multiplied by CUTLASS's NVFP4 GEMM (nvfp4_gemm_kernel.h), with NVIDIA's
-// recipe: for wgrad a 16-point random Hadamard transform along K (tokens), and stochastic rounding of the gradient
-// (wgrad and dgrad). The kernels that quantize the operands write them as NVFP4 directly (Nvfp4Target); others' MXFP8
-// operands are converted (mx_to_nvfp4, wgrad only).
+// NVFP4 GEMMs: the operands in NVFP4, multiplied by CUTLASS's NVFP4 GEMM (nvfp4_gemm_kernel.h), with NVIDIA's recipe:
+// for wgrad a 16-point random Hadamard transform along K (tokens), stochastic rounding of the gradient (wgrad and
+// dgrad), and for forward 16x16 weight blocks, so dgrad sees the same weight. The kernels that quantize the operands
+// write them as NVFP4 directly (Nvfp4Target); others' MXFP8 operands are converted (mx_to_nvfp4, wgrad only).
 #pragma once
 
 #include <cstdint>
@@ -80,6 +80,7 @@ const Nvfp4Backward* nvfp4_backward();
 // What a GEMM operand's NVFP4 copy is for: blocks along K, rounding per nvfp4_backward().
 enum class Nvfp4Role {
   None,
+  FwdInput,    // a forward GEMM's input (K = in features; round to nearest, NVFP4 whatever nvfp4_backward())
   WgradInput,  // the input's transpose (K = tokens)
   WgradGrad,   // the output gradient's transpose (K = tokens)
   DgradGrad,   // the output gradient (K = out features)
@@ -88,6 +89,10 @@ enum class Nvfp4Role {
 
 // A target for an operand (R, C), blocks along C, when role's GEMM is in NVFP4; else undefined data.
 Nvfp4Target nvfp4_target(int64_t R, int64_t C, const torch::TensorOptions& options, Nvfp4Role role);
+
+// w (R, C) contiguous fp32 or bf16 in 16x16 blocks (kernels::quantize_nvfp4_2d) into out and out_t (data null: none),
+// e.g. nvfp4_out views of targets
+void quantize_nvfp4_2d(const torch::Tensor& w, const kernels::Nvfp4Out& out, const kernels::Nvfp4Out& out_t = {});
 
 // bf16 (M, N) = a (M, K) . b (N, K)^T with the tensor scales applied (M, N % 128, K % 256)
 torch::Tensor nvfp4_gemm(const Nvfp4Tensor& a, const Nvfp4Tensor& b);

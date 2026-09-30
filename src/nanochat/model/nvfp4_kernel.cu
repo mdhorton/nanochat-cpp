@@ -136,6 +136,41 @@ __global__ void mx_to_bf16_kernel(const uint8_t* data, const uint8_t* scale, int
     o[i] = __float2bfloat16_rn(v[i]);
 }
 
+// 16 threads per 16x16 block: thread i reads the block's row i and column i, and writes them to out and out_t
+template <class T>
+__global__ void quantize_2d_kernel(
+      const T* x, int64_t rows, int64_t cols, const kernels::Nvfp4Out out, const kernels::Nvfp4Out out_t) {
+  const int64_t t = static_cast<int64_t>(blockIdx.x) * kThreads + threadIdx.x, b = t / kGroup;
+  const bool active = b < rows * cols / (kGroup * kGroup);
+  const int i = static_cast<int>(threadIdx.x % kGroup);
+  const int64_t r0 = active ? b / (cols / kGroup) * kGroup : 0, c0 = active ? b % (cols / kGroup) * kGroup : 0;
+  float row[kGroup], col[kGroup], m = 0.f;
+#pragma unroll
+  for (int k = 0; k < kGroup; ++k) {
+    row[k] = active ? static_cast<float>(x[(r0 + i) * cols + c0 + k]) : 0.f;
+    col[k] = active ? static_cast<float>(x[(r0 + k) * cols + c0 + i]) : 0.f;
+    m = fmaxf(m, fabsf(row[k]));
+  }
+#pragma unroll
+  for (int o = 1; o < kGroup; o *= 2)
+    m = fmaxf(m, __shfl_xor_sync(0xffffffff, m, o));
+  const float s = nvfp4_round_scale(nvfp4_div6(m)), to_q = s > 0.f ? nvfp4_rcp(s) : 0.f;
+  if (active) {
+    const auto store = [&](const kernels::Nvfp4Out& o, const float* v, int64_t r, int64_t c) {
+      const int64_t j = r * o.ld + c;
+      *reinterpret_cast<uint2*>(static_cast<uint8_t*>(o.data) + j / 2) = make_uint2(
+            nvfp4_pack8(v, to_q, o, o.index0 + j), nvfp4_pack8(v + 8, to_q, o, o.index0 + j + 8));
+      nvfp4_store_scale(o, r, c, s);
+    };
+    store(out, row, r0 + i, c0);
+    if (out_t.data != nullptr)
+      store(out_t, col, c0 + i, r0);
+  }
+  nvfp4_smax_block(out, s);
+  if (out_t.data != nullptr)
+    nvfp4_smax_block(out_t, s);
+}
+
 // The tensor scale's exponent: the largest k with smax * 2^k <= 448 (smax has 3 mantissa bits; 448 = 1.75 * 2^8)
 __device__ __forceinline__ int finish_shift(unsigned smax) {
   if (smax == 0)
@@ -203,6 +238,19 @@ void mx_to_nvfp4(
   quantize_kernel<<<grid_for(rows, cols), kThreads, 0, stream>>>(
         d, s, rows, cols, hadamard, stochastic, seed, static_cast<uint8_t*>(out), static_cast<uint8_t*>(out_scale),
         amax);
+}
+
+void quantize_nvfp4_2d(
+      const void* x, bool x_f32, int64_t rows, int64_t cols, const Nvfp4Out& out, const Nvfp4Out& out_t,
+      cudaStream_t stream) {
+  if (rows * cols == 0)
+    return;
+  if (x_f32)
+    quantize_2d_kernel<<<grid_for(rows, cols), kThreads, 0, stream>>>(
+          static_cast<const float*>(x), rows, cols, out, out_t);
+  else
+    quantize_2d_kernel<<<grid_for(rows, cols), kThreads, 0, stream>>>(
+          static_cast<const bf16*>(x), rows, cols, out, out_t);
 }
 
 void nvfp4_finish(const Nvfp4Finish& a, const Nvfp4Finish* b, cudaStream_t stream) {

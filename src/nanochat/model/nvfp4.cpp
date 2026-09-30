@@ -210,6 +210,16 @@ void nvfp4_gemm_f32(
   TORCH_CHECK(error == nullptr, error);
 }
 
+void quantize_nvfp4_2d(const torch::Tensor& w, const kernels::Nvfp4Out& out, const kernels::Nvfp4Out& out_t) {
+  TORCH_CHECK(
+        w.is_cuda() && w.dim() == 2 && w.is_contiguous() && w.size(0) % 16 == 0 && w.size(1) % 16 == 0 &&
+              (w.scalar_type() == torch::kFloat32 || w.scalar_type() == torch::kBFloat16),
+        "quantize_nvfp4_2d: expected contiguous 2D fp32 or bf16, dims % 16");
+  kernels::quantize_nvfp4_2d(
+        w.data_ptr(), w.scalar_type() == torch::kFloat32, w.size(0), w.size(1), out, out_t, stream());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
 torch::Tensor nvfp4_gemm(const Nvfp4Tensor& a, const Nvfp4Tensor& b) {
   const int64_t M = a.data.size(0), N = b.data.size(0), K = a.data.size(1) * 2;
   TORCH_CHECK(b.data.size(1) * 2 == K, "nvfp4_gemm: shape mismatch");
@@ -230,6 +240,8 @@ const Nvfp4Backward* nvfp4_backward() {
 }
 
 Nvfp4Target nvfp4_target(int64_t R, int64_t C, const torch::TensorOptions& options, Nvfp4Role role) {
+  if (role == Nvfp4Role::FwdInput)
+    return empty_nvfp4(R, C, options, false, false);
   const auto* o = nvfp4_backward();
   if (o == nullptr || role == Nvfp4Role::None)
     return {};

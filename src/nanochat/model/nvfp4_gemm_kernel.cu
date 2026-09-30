@@ -10,92 +10,16 @@
 #include <cutlass/gemm/kernel/gemm_universal.hpp>
 #include <cutlass/util/packed_stride.hpp>
 
-#include "nanochat/model/nvfp4.cuh"
+#include "nanochat/model/nvfp4_alpha.cuh"
 
 namespace {
 
 using namespace cute;
 namespace fusion = cutlass::epilogue::fusion;
+using nanochat::Nvfp4Alpha;
 
 using Cluster = Shape<_1, _1, _1>;
 using Nv = cutlass::nv_float4_t<cutlass::float_e2m1_t>;
-
-// Epilogue leaf: alpha = a_amax / (6 * 448) * (b_amax / (6 * 448)) (* *alpha), the operands' tensor scales; null
-// amaxes: 1. In the GEMM rather than a kernel of its own.
-struct Nvfp4Alpha {
-  struct SharedStorage {};
-
-  struct Arguments {
-    const float *a_amax = nullptr, *b_amax = nullptr, *alpha = nullptr;
-  };
-
-  using Params = Arguments;
-
-  template <class P>
-  static constexpr Params to_underlying_arguments(const P&, const Arguments& args, void*) {
-    return args;
-  }
-
-  template <class P>
-  static bool can_implement(const P&, const Arguments&) {
-    return true;
-  }
-
-  template <class P>
-  static size_t get_workspace_size(const P&, const Arguments&) {
-    return 0;
-  }
-
-  template <class P>
-  static cutlass::Status initialize_workspace(
-        const P&, const Arguments&, void*, cudaStream_t, cutlass::CudaHostAdapter* = nullptr) {
-    return cutlass::Status::kSuccess;
-  }
-
-  CUTLASS_HOST_DEVICE Nvfp4Alpha() {}
-
-  CUTLASS_HOST_DEVICE Nvfp4Alpha(const Params& params, const SharedStorage&)
-      : params(params) {}
-
-  Params params;
-
-  CUTLASS_DEVICE bool is_producer_load_needed() const {
-    return false;
-  }
-
-  CUTLASS_DEVICE bool is_C_load_needed() const {
-    return false;
-  }
-
-  template <class... Args>
-  CUTLASS_DEVICE auto get_producer_load_callbacks(const fusion::ProducerLoadArgs<Args...>&) {
-    return fusion::EmptyProducerLoadCallbacks{};
-  }
-
-  struct ConsumerStoreCallbacks : fusion::EmptyConsumerStoreCallbacks {
-    CUTLASS_DEVICE explicit ConsumerStoreCallbacks(float scalar)
-        : scalar(scalar) {}
-
-    float scalar;
-
-    template <class ElementAccumulator, int FragmentSize>
-    CUTLASS_DEVICE cutlass::Array<float, FragmentSize> visit(
-          const cutlass::Array<ElementAccumulator, FragmentSize>&, int, int, int) {
-      cutlass::Array<float, FragmentSize> f;
-      f.fill(scalar);
-      return f;
-    }
-  };
-
-  template <bool ReferenceSrc, class... Args>
-  CUTLASS_DEVICE auto get_consumer_store_callbacks(const fusion::ConsumerStoreArgs<Args...>&) {
-    constexpr float kNorm = nanochat::kE2m1Max * nanochat::kE4m3Max;
-    float s = params.a_amax != nullptr ? *params.a_amax / kNorm * (*params.b_amax / kNorm) : 1.f;
-    if (params.alpha != nullptr)
-      s = s * *params.alpha;
-    return ConsumerStoreCallbacks(s);
-  }
-};
 
 // D = beta * C + alpha * acc: CUTLASS's LinearCombination with Nvfp4Alpha
 template <class ElementD, class ElementC>

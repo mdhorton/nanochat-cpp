@@ -29,7 +29,7 @@ public:
         AutogradContext* ctx, const torch::Tensor& x, const torch::Tensor& wq, const torch::Tensor& wk,
         const torch::Tensor& wv, const torch::Tensor& cos, const torch::Tensor& sin, double scale,
         const Optional& ve_in, const Optional& w_gate_in, int64_t head_dim, Fp8WeightCache* cache,
-        const Fp8Tensor* x_mx, bool quantize_attention) {
+        const Fp8Tensor* x_mx, bool quantize_attention, bool fp4) {
     const auto ve = ve_in.value_or(torch::Tensor()), w_gate = w_gate_in.value_or(torch::Tensor());
     const int64_t N = x.size(0), T = cos.size(1), nq = wq.size(0), nkv = wk.size(0), n = nq + 2 * nkv;
     TORCH_CHECK(mx_attention_fits(N, x.size(1), nq, nkv, head_dim) && wv.size(0) == nkv && N % T == 0);
@@ -42,13 +42,16 @@ public:
     const auto stream = at::cuda::getCurrentCUDAStream().stream();
 
     TORCH_CHECK(x_mx == nullptr || (x_mx->data.defined() && x_mx->data_t.defined()), "x_mx: both layouts");
+    TORCH_CHECK(x_mx == nullptr || x_mx->fp4() == fp4, "x_mx: NVFP4 rows with fp4");
+    TORCH_CHECK(!fp4 || (nvfp4_fits(x.size(1)) && x.scalar_type() == torch::kBFloat16), "fp4: bf16, C % 256");
     const bool grads_direct = mx_grad_direct(wq) && mx_grad_direct(wk) && mx_grad_direct(wv);
     const auto xq = x_mx != nullptr ? *x_mx
                                     : quantize_mx(
-                                            x, true, true, false, Nvfp4Role::None,
+                                            x, true, true, false, fp4 ? Nvfp4Role::FwdInput : Nvfp4Role::None,
                                             grads_direct ? Nvfp4Role::WgradInput : Nvfp4Role::None);
-    const auto wf = mx_qkv_weights(wq, wk, wv, cache);
-    const auto qkv = mx_gemm(xq.data, xq.inv_scale, wf[0], wf[2], x.scalar_type());
+    const auto wf = mx_qkv_weights(wq, wk, wv, cache, fp4);
+    const auto qkv = fp4 ? nvfp4_gemm(xq.nvfp4(), {wf[0], wf[2], wf[4]})
+                         : mx_gemm(xq.data, xq.inv_scale, wf[0], wf[2], x.scalar_type());
 
     // mx_flash_attention's inputs (MxFlashInputs' order and layouts)
     const int64_t B = N / T;
@@ -115,7 +118,7 @@ public:
 
     ctx->save_for_backward(
           {xq.data_t, xq.inv_scale_t, wf[1], wf[3], qkv, rstd_q, rstd_k, cos, sin, gate_in, w_gate_bf16, z, ve,
-           xq.amax_t, wf.size() > 4 ? wf[4] : torch::Tensor()});
+           xq.amax_t, wf[5]});
     if (grads_direct)
       ctx->saved_data["weights"] = std::vector{wq, wk, wv}; // backward writes their .grad itself
     ctx->saved_data["scale"] = scale;
@@ -200,7 +203,7 @@ public:
       dx.narrow(1, 0, gate_in.size(1)).add_(at::mm(dz, w_gate_bf16));
       dw_gate = at::mm(dz.t(), gate_in).to(static_cast<torch::ScalarType>(ctx->saved_data["w_gate_dtype"].toInt()));
     }
-    return {dx, rows(0, nq), rows(nq, nkv), rows(nq + nkv, nkv), {}, {}, {}, dve, dw_gate, {}, {}, {}, {}};
+    return {dx, rows(0, nq), rows(nq, nkv), rows(nq + nkv, nkv), {}, {}, {}, dve, dw_gate, {}, {}, {}, {}, {}};
   }
 };
 
@@ -214,13 +217,13 @@ variable_list mx_attention_inputs(
       const torch::Tensor& x_2d, const torch::Tensor& wq, const torch::Tensor& wk, const torch::Tensor& wv,
       const torch::Tensor& cos, const torch::Tensor& sin, double scale, const torch::Tensor& ve,
       const torch::Tensor& w_gate, int64_t head_dim, Fp8WeightCache* cache, const Fp8Tensor* x_mx,
-      bool quantize_attention) {
+      bool quantize_attention, bool fp4) {
   const auto opt = [](const torch::Tensor& t) {
     return t.defined() ? Optional(t) : std::nullopt;
   };
   return MxAttentionInputs::apply(
-        x_2d.contiguous(), wq, wk, wv, cos, sin, scale, opt(ve), opt(w_gate), head_dim, cache, x_mx,
-        quantize_attention);
+        x_2d.contiguous(), wq, wk, wv, cos, sin, scale, opt(ve), opt(w_gate), head_dim, cache, x_mx, quantize_attention,
+        fp4);
 }
 
 } // namespace nanochat

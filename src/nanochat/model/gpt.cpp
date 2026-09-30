@@ -134,7 +134,7 @@ torch::Tensor LinearImpl::forward(const torch::Tensor& x) {
   out_shape.back() = weight.size(0);
   if (nvfp4 != nullptr)
     return nvfp4_sim_matmul(input.reshape({-1, input.size(-1)}), weight, *nvfp4).reshape(out_shape);
-  return fp8_matmul(input.reshape({-1, input.size(-1)}), weight, &fp8_cache, fp8_recipe).reshape(out_shape);
+  return fp8_matmul(input.reshape({-1, input.size(-1)}), weight, &fp8_cache, fp8_recipe, nvfp4_fwd).reshape(out_shape);
 }
 
 EmbeddingImpl::EmbeddingImpl(int64_t num_embeddings, int64_t dim, const torch::TensorOptions& options) {
@@ -165,6 +165,10 @@ bool CausalSelfAttentionImpl::mx_inputs(int64_t N, int64_t C) const {
          mx_attention_fits(N, C, c_q->weight.size(0), c_k->weight.size(0), head_dim);
 }
 
+bool CausalSelfAttentionImpl::fp4_inputs(int64_t N, int64_t C) const {
+  return mx_inputs(N, C) && c_q->nvfp4_fwd && nvfp4_fits(C);
+}
+
 torch::Tensor CausalSelfAttentionImpl::forward(
       const torch::Tensor& x, const torch::Tensor& ve, const torch::Tensor& cos, const torch::Tensor& sin,
       int64_t window, const Fp8Tensor* x_mx) {
@@ -175,7 +179,7 @@ torch::Tensor CausalSelfAttentionImpl::forward(
     const auto out = mx_attention_inputs(
           x.to(kComputeDtype).reshape({B * T, -1}), c_q->weight, c_k->weight, c_v->weight, cos, sin, 1.2,
           ve.defined() ? ve.reshape({B * T, -1}) : torch::Tensor(), ve.defined() ? ve_gate->weight : torch::Tensor(),
-          head_dim, &qkv_cache, x_mx, attention == Attention::MX);
+          head_dim, &qkv_cache, x_mx, attention == Attention::MX, fp4_inputs(B * T, x.size(-1)));
     MxFlashInputs pre;
     if (attention == Attention::MX)
       pre = {out[3], out[4], out[5], out[6], out[7], out[8], out[9], out[10], out[11], out[12], out[13], out[14]};
@@ -255,6 +259,10 @@ bool MLPImpl::mx_inputs(int64_t N, int64_t C) const {
          relu_square_mlp_mx(N, C, c_fc->weight, c_proj->weight, c_fc->fp8_recipe);
 }
 
+bool MLPImpl::fp4_inputs(int64_t N, int64_t C) const {
+  return mx_inputs(N, C) && c_fc->nvfp4_fwd && nvfp4_fits(C) && nvfp4_fits(c_fc->weight.size(0));
+}
+
 torch::Tensor MLPImpl::forward(const torch::Tensor& x, const Fp8Tensor* x_mx) {
   TORCH_CHECK(x_mx == nullptr || mx_inputs(x.numel() / x.size(-1), x.size(-1)), "x_mx needs mx_inputs");
   if (!fused)
@@ -266,7 +274,7 @@ torch::Tensor MLPImpl::forward(const torch::Tensor& x, const Fp8Tensor* x_mx) {
   out_shape.back() = c_proj->weight.size(0);
   return fp8_relu_square_mlp(
                input.reshape({-1, input.size(-1)}), c_fc->weight, c_proj->weight, &c_fc->fp8_cache, &c_proj->fp8_cache,
-               c_fc->fp8_recipe, x_mx)
+               c_fc->fp8_recipe, x_mx, fp4_inputs(input.numel() / input.size(-1), input.size(-1)))
         .reshape(out_shape);
 }
 
@@ -288,7 +296,7 @@ std::pair<torch::Tensor, torch::Tensor> BlockImpl::forward_split(
   const auto a = attn(x_norm, ve, cos, sin, window, x_norm_mx);
   const int64_t C = x.size(-1), N = x.numel() / C;
   if (mlp->mx_inputs(N, C) && residual_norm_mx_fits(N, C)) { // the norm writes the MLP's quantized input
-    const auto o = residual_norm_mx(x, a);
+    const auto o = residual_norm_mx(x, a, {}, {}, {}, 0, {}, 0, mlp->fp4_inputs(N, C));
     return {o.res, mlp(o.n, &o.n_mx)};
   }
   auto [y, y_norm] = residual_norm(x, a);
@@ -441,7 +449,7 @@ torch::Tensor GPTImpl::forward(
       if (block->attn->mx_inputs(N, C) && residual_norm_mx_fits(N, C)) { // the norm writes attention's quantized input
         auto o = residual_norm_mx(
               x, pending, x0, resid_lambdas, x0_lambdas, i, x0_grad,
-              ve.defined() ? CausalSelfAttentionImpl::kVeGateChannels : 0);
+              ve.defined() ? CausalSelfAttentionImpl::kVeGateChannels : 0, block->attn->fp4_inputs(N, C));
         res = o.res, res_norm = o.n, res_mx = o.n_mx;
       }
       else
@@ -517,6 +525,19 @@ int GPTImpl::set_nvfp4(const Nvfp4Options* options, int64_t skip_first, int64_t 
     for (const auto& m : transformer->h[i]->modules(false))
       if (auto* linear = dynamic_cast<LinearImpl*>(m.get()); linear != nullptr && linear->fp8) {
         linear->nvfp4 = on ? options : nullptr;
+        n += on;
+      }
+  }
+  return n;
+}
+
+int GPTImpl::set_nvfp4_fwd(bool enabled, int64_t skip_first, int64_t skip_last) {
+  int n = 0;
+  for (int64_t i = 0; i < config_.n_layer; ++i) {
+    const bool on = enabled && i >= skip_first && i < config_.n_layer - skip_last;
+    for (const auto& m : transformer->h[i]->modules(false))
+      if (auto* linear = dynamic_cast<LinearImpl*>(m.get()); linear != nullptr && linear->fp8) {
+        linear->nvfp4_fwd = on;
         n += on;
       }
   }

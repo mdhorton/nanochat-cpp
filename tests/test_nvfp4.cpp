@@ -450,3 +450,159 @@ TEST(Nvfp4, WgradInGpt) {
     }
   }
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// NVFP4 forward: the inputs' rows, weights in 16x16 blocks.
+
+// 16x16 blocks: the simulation's bits (weight_2d) at the tensor scale picked; the transpose holds the same values
+TEST(Nvfp4, TwoDWeightMatchesFakeQuant) {
+  torch::manual_seed(0);
+  const int64_t R = 256, C = 384;
+  for (const auto dtype : {torch::kFloat32, torch::kBFloat16}) {
+    const auto w = (spread(C, R).t().contiguous() * 0.05).to(dtype); // magnitudes vary along both dims
+    const auto rows = empty_nvfp4(R, C, kCuda, false, false), cols = empty_nvfp4(C, R, kCuda, false, false);
+    quantize_nvfp4_2d(w, nvfp4_out(rows), nvfp4_out(cols));
+    const auto [q, q_t] = nvfp4_finish(rows, cols);
+    EXPECT_TRUE(torch::equal(nvfp4_to_bf16(q_t), nvfp4_to_bf16(q).t())) << dtype;
+    const auto bmax = w.to(torch::kFloat32).abs().view({R / 16, 16, C / 16, 16}).amax({1, 3}).repeat_interleave(16, 0);
+    auto fake = torch::empty({R, C}, kCuda.dtype(torch::kBFloat16));
+    kernels::nvfp4_fake_quant(
+          w.data_ptr(), dtype == torch::kBFloat16, R, C, q.amax.data_ptr<float>(), bmax.data_ptr<float>(), false, 0,
+          fake.data_ptr(), at::cuda::getCurrentCUDAStream().stream());
+    const auto normal = (bmax / 6 * (2688.f / q.amax) >= std::ldexp(1.f, -6)).repeat_interleave(16, 1);
+    EXPECT_GT(normal.to(torch::kFloat32).mean().item<double>(), 0.9) << dtype;
+    EXPECT_TRUE(torch::equal(nvfp4_to_bf16(q).masked_select(normal), fake.masked_select(normal))) << dtype;
+  }
+}
+
+// residual_norm_mx's NVFP4 rows: quantize_mx's of n, bit for bit
+TEST(Nvfp4, ResidualNormWritesNvfp4Rows) {
+  torch::manual_seed(0);
+  const auto opts = kCuda.dtype(torch::kBFloat16);
+  const auto x = torch::randn({256, 512}, opts), r = torch::randn({256, 512}, opts);
+  const auto m = residual_norm_mx(x, r, {}, {}, {}, 0, {}, 0, true);
+  const auto n = residual_norm(x, r).second;
+  ASSERT_TRUE(m.n_mx.fp4());
+  const auto want = quantize_mx(n, true, true, false, Nvfp4Role::FwdInput);
+  EXPECT_TRUE(torch::equal(m.n_mx.data, want.data));
+  EXPECT_TRUE(torch::equal(m.n_mx.inv_scale, want.inv_scale));
+  EXPECT_TRUE(torch::equal(m.n_mx.amax, want.amax));
+  EXPECT_TRUE(torch::equal(m.n_mx.data_t.view(torch::kUInt8), want.data_t.view(torch::kUInt8)));
+}
+
+// The NVFP4 relu^2 forward GEMM's epilogue (h, relu^2 rows and transpose) vs nvfp4_gemm then quantize_mx's kernel: bit
+// for bit
+TEST(Nvfp4, ReluSquareFwdEpilogueNvfp4) {
+  torch::manual_seed(0);
+  const CutlassScope scope;
+  const int64_t M = 256, N = 384, K = 512;
+  const auto ma = mx_of(spread(M, K).to(torch::kBFloat16)), mb = mx_of(spread(N, K).to(torch::kBFloat16));
+  const auto a = mx_to_nvfp4(ma.data, ma.scale, false, false), b = mx_to_nvfp4(mb.data, mb.scale, false, false);
+  const auto u8 = [](const Nvfp4Tensor& t) {
+    return torch::cat({t.data.flatten(), t.scale.flatten(), t.amax.view({1}).view(torch::kUInt8)});
+  };
+  const auto run = [&](bool fused, bool fp4_t) {
+    auto h = torch::empty({M, N}, kCuda.dtype(torch::kBFloat16));
+    const auto rows = empty_nvfp4(M, N, kCuda, false, false);
+    const auto cols = fp4_t ? empty_nvfp4(N, M, kCuda, true, true, 13) : Nvfp4Target{};
+    const auto mx_t = empty_mx(M, N, kCuda, false, true);
+    kernels::MxOut out{}, out_t{};
+    out.fp4 = nvfp4_out(rows);
+    if (fp4_t)
+      out_t.fp4 = nvfp4_out(cols);
+    else
+      out_t = mx_out(mx_t.data_t, mx_t.inv_scale_t, 0, 0);
+    if (fused)
+      EXPECT_TRUE(nvfp4_gemm_relu_square(a, b, h, out, out_t));
+    else {
+      h = nvfp4_gemm(a, b);
+      quantize_mx_into(h, true, out, out_t);
+    }
+    return std::tuple{
+          h, u8(nvfp4_finish(rows)),
+          fp4_t ? u8(nvfp4_finish(cols))
+                : torch::cat({mx_t.data_t.view(torch::kUInt8).flatten(), mx_t.inv_scale_t.view(torch::kUInt8)})};
+  };
+  for (const bool fp4_t : {false, true}) {
+    const auto f = run(true, fp4_t), u = run(false, fp4_t);
+    EXPECT_TRUE(torch::equal(std::get<0>(f), std::get<0>(u))) << fp4_t;
+    EXPECT_TRUE(torch::equal(std::get<1>(f), std::get<1>(u))) << fp4_t;
+    EXPECT_TRUE(torch::equal(std::get<2>(f), std::get<2>(u))) << fp4_t;
+  }
+}
+
+// fp8_matmul with fp4: the product of the dequantized NVFP4 operands; with NVFP4 dgrad the weight's transpose holds
+// the forward's values
+TEST(Nvfp4, FwdMatmulMatchesDequantized) {
+  torch::manual_seed(0);
+  const auto x = spread(256, 512).to(torch::kBFloat16);
+  const auto w = torch::randn({384, 512}, kCuda) * 0.05;
+  const auto y = fp8_matmul(x, w, nullptr, Fp8Recipe::Mx, true);
+  const auto qx = quantize_mx(x, true, false, false, Nvfp4Role::FwdInput);
+  const auto qw = quantize_fp8_weight(w, nullptr, Fp8Recipe::Mx, false, true);
+  ASSERT_TRUE(qx.fp4() && qw.fp4() && !qw.fp4_t());
+  at::globalContext().setFloat32MatmulPrecision("highest");
+  const auto ref = torch::mm(
+        nvfp4_to_bf16(qx.nvfp4()).to(torch::kFloat32), nvfp4_to_bf16(qw.nvfp4()).to(torch::kFloat32).t());
+  EXPECT_LT(rel_err(y, ref), 1e-2);
+  EXPECT_LT(rel_err(y, torch::mm(x.to(torch::kFloat32), w.t())), 0.2);
+  const Nvfp4Backward d{.wgrad = false, .dgrad = true};
+  set_nvfp4_backward(&d);
+  const auto q2 = quantize_fp8_weight(w, nullptr, Fp8Recipe::Mx, true, true);
+  set_nvfp4_backward(nullptr);
+  ASSERT_TRUE(q2.fp4() && q2.fp4_t());
+  EXPECT_TRUE(torch::equal(nvfp4_to_bf16(q2.nvfp4_t()), nvfp4_to_bf16(q2.nvfp4()).t()));
+}
+
+// set_nvfp4_fwd: the blocks' Linears between the skipped ones, not lm_head; a step runs, near MXFP8, with NVFP4
+// backward GEMMs too
+TEST(Nvfp4, FwdInGpt) {
+  torch::manual_seed(0);
+  const CutlassScope scope;
+  GPT model(
+        GPTConfig{
+              .sequence_len = 256,
+              .vocab_size = 1000,
+              .n_layer = 3,
+              .n_head = 2,
+              .n_kv_head = 2,
+              .n_embd = 256,
+              .window_pattern = "L"});
+  model->init_weights();
+  {
+    torch::NoGradGuard no_grad;
+    for (auto& p : model->transformer->h->parameters())
+      if (p.dim() == 2)
+        p.normal_(0, 0.05);
+  }
+  model->set_fused(true);
+  model->set_fp8_recipe(Fp8Recipe::Mx);
+  model->set_fp8(true);
+  model->set_attention(Attention::MX);
+  model->set_loss_chunk_rows(512);
+  const auto idx = torch::randint(0, 1000, {2, 256}, kCuda.dtype(torch::kInt64));
+  const auto step = [&](const Nvfp4Backward* o) {
+    set_nvfp4_backward(o);
+    model->zero_grad();
+    auto loss = model->forward(idx, idx.roll(-1, 1));
+    loss.backward();
+    set_nvfp4_backward(nullptr);
+    return std::pair{loss.item<float>(), model->transformer->h[0]->as<BlockImpl>()->attn->c_q->weight.grad().clone()};
+  };
+  const auto mx = step(nullptr);
+  EXPECT_EQ(model->set_nvfp4_fwd(true, 0, 1), 2 * 6);
+  auto h = model->transformer->h;
+  EXPECT_TRUE(h[1]->as<BlockImpl>()->mlp->c_proj->nvfp4_fwd);
+  EXPECT_FALSE(h[2]->as<BlockImpl>()->attn->c_q->nvfp4_fwd);
+  EXPECT_FALSE(model->lm_head->nvfp4_fwd);
+  const Nvfp4Backward all{.dgrad = true};
+  for (const auto* o : {static_cast<const Nvfp4Backward*>(nullptr), &all}) {
+    const auto fp4 = step(o);
+    EXPECT_NE(fp4.first, mx.first);
+    EXPECT_NEAR(fp4.first, mx.first, 0.05);
+    EXPECT_TRUE(fp4.second.isfinite().all().item<bool>());
+    EXPECT_LT(rel_err(fp4.second, mx.second), 0.7); // the simulation's forward alone: ~0.4
+  }
+  EXPECT_EQ(model->set_nvfp4_fwd(false), 0);
+  EXPECT_EQ(step(nullptr).first, mx.first);
+}
