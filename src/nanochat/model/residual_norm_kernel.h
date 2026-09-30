@@ -36,8 +36,9 @@ struct ResidualNormMxFwd {
   int n_cols;
 };
 
-// Shared memory the MX variant needs for cols (must be within the device's opt-in limit).
-int residual_norm_mx_smem(int cols);
+// Shared memory the MX variant needs for cols with rows-row tiles (32: MX transpose, 16: NVFP4; must be within the
+// device's opt-in limit).
+int residual_norm_mx_smem(int cols, int rows = 32);
 
 void residual_norm_mx_fwd(const ResidualNormMxFwd& a, cudaStream_t stream);
 
