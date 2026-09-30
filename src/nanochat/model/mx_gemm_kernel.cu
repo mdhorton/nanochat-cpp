@@ -59,69 +59,105 @@ struct MxT {
   const float* alpha;
 };
 
-constexpr int kEpiM = 64, kEpiN = 32, kPitch = kEpiM + 8; // MxStoreT's subtile and its stage's row pitch
+constexpr int kEpiM = 64, kPitch = kEpiM + 8; // MxStoreT's subtile rows and its stage's row pitch
 
-// MxStoreT's quantization of one staged subtile (origin (m, n)) by thread t: out of line, so the epilogue's unrolled
-// subtiles share one copy (inlined, they overflow the instruction cache). smax: (fp4's, rows') so far, returned
-// updated.
-__device__ __noinline__ float2 mx_store_subtile(
+// mx_store_subtile's body: p must not alias the stores
+template <int kEpiN>
+CUTLASS_DEVICE float2 mx_store_subtile_body(
       const MxT& p, const cutlass::bfloat16_t* stage, int t, int64_t M, int64_t m, int64_t n, float2 smax) {
+  constexpr int kP = kEpiN / 32;
+  const nanochat::kernels::Nvfp4Out rows = p.rows, fp4 = p.fp4; // loaded up front: one latency
   // lanes 4c .. 4c + 3: column c's 16-row quarters; lanes 4c, 4c + 1 hold block 0, 4c + 2, 4c + 3 block 1
   const int col = t / 4, quarter = t % 4;
-  if (p.rows.data != nullptr) {
+  if (rows.data != nullptr) {
     // row r's columns 16 half .. 16 half + 15: a warp reads 32 consecutive rows at a time, conflict-free
     const int r = t % kEpiM, half = t / kEpiM;
-    const cutlass::bfloat16_t* s = stage + half * 16 * kPitch + r;
-    float f[16];
+    float f[kP][16];
     CUTLASS_PRAGMA_UNROLL
-    for (int j = 0; j < 16; ++j)
-      f[j] = static_cast<float>(s[j * kPitch]);
-    smax.y = fmaxf(smax.y, nanochat::nvfp4_store16(f, p.rows, m + r, n + half * 16));
-  }
-  const auto* src = reinterpret_cast<const uint4*>(stage + col * kPitch + quarter * 16);
-  uint4 raw[2] = {src[0], src[1]};
-  const auto* v = reinterpret_cast<const __nv_bfloat162*>(raw);
-  const int64_t nc = n + col, mq = m + quarter * 16;
-  if (p.fp4.data != nullptr) {
-    float f[16];
-    CUTLASS_PRAGMA_UNROLL
-    for (int i = 0; i < 8; ++i) {
-      const float2 q = __bfloat1622float2(v[i]);
-      f[2 * i] = q.x, f[2 * i + 1] = q.y;
+    for (int i = 0; i < kP; ++i) {
+      const cutlass::bfloat16_t* s = stage + (half + 2 * i) * 16 * kPitch + r;
+      CUTLASS_PRAGMA_UNROLL
+      for (int j = 0; j < 16; ++j)
+        f[i][j] = static_cast<float>(s[j * kPitch]);
     }
-    smax.x = fmaxf(smax.x, nanochat::nvfp4_store16(f, p.fp4, nc, mq));
+    CUTLASS_PRAGMA_UNROLL
+    for (int i = 0; i < kP; ++i)
+      smax.y = fmaxf(smax.y, nanochat::nvfp4_store16(f[i], rows, m + r, n + (half + 2 * i) * 16));
+  }
+  uint4 raw[kP][2];
+  CUTLASS_PRAGMA_UNROLL
+  for (int i = 0; i < kP; ++i) {
+    const auto* src = reinterpret_cast<const uint4*>(stage + (col + 32 * i) * kPitch + quarter * 16);
+    raw[i][0] = src[0], raw[i][1] = src[1];
+  }
+  const int64_t mq = m + quarter * 16;
+  if (fp4.data != nullptr) {
+    CUTLASS_PRAGMA_UNROLL
+    for (int i = 0; i < kP; ++i) {
+      const auto* v = reinterpret_cast<const __nv_bfloat162*>(raw[i]);
+      float f[16];
+      CUTLASS_PRAGMA_UNROLL
+      for (int j = 0; j < 8; ++j) {
+        const float2 q = __bfloat1622float2(v[j]);
+        f[2 * j] = q.x, f[2 * j + 1] = q.y;
+      }
+      smax.x = fmaxf(smax.x, nanochat::nvfp4_store16(f, fp4, n + col + 32 * i, mq));
+    }
     return smax;
   }
-  __nv_bfloat162 amax2 = __habs2(v[0]);
   CUTLASS_PRAGMA_UNROLL
-  for (int i = 1; i < 8; ++i)
-    amax2 = __hmax2(amax2, __habs2(v[i]));
-  float amax = fmaxf(__low2float(amax2), __high2float(amax2));
-  amax = fmaxf(amax, __shfl_xor_sync(0xffffffff, amax, 1));
-  const int e = nanochat::mx_exponent(amax);
-  const float mul = nanochat::mx_multiplier(e);
-  uint4 q4;
-  auto* q = reinterpret_cast<__nv_fp8x2_storage_t*>(&q4);
-  CUTLASS_PRAGMA_UNROLL
-  for (int i = 0; i < 8; ++i) {
-    const float2 f = __bfloat1622float2(v[i]);
-    q[i] = __nv_cvt_float2_to_fp8x2(make_float2(f.x * mul, f.y * mul), __NV_SATFINITE, __NV_E4M3);
+  for (int i = 0; i < kP; ++i) {
+    const auto* v = reinterpret_cast<const __nv_bfloat162*>(raw[i]);
+    const int64_t nc = n + col + 32 * i;
+    __nv_bfloat162 amax2 = __habs2(v[0]);
+    CUTLASS_PRAGMA_UNROLL
+    for (int j = 1; j < 8; ++j)
+      amax2 = __hmax2(amax2, __habs2(v[j]));
+    float amax = fmaxf(__low2float(amax2), __high2float(amax2));
+    amax = fmaxf(amax, __shfl_xor_sync(0xffffffff, amax, 1));
+    const int e = nanochat::mx_exponent(amax);
+    const float mul = nanochat::mx_multiplier(e);
+    uint4 q4;
+    auto* q = reinterpret_cast<__nv_fp8x2_storage_t*>(&q4);
+    CUTLASS_PRAGMA_UNROLL
+    for (int j = 0; j < 8; ++j) {
+      const float2 f = __bfloat1622float2(v[j]);
+      q[j] = __nv_cvt_float2_to_fp8x2(make_float2(f.x * mul, f.y * mul), __NV_SATFINITE, __NV_E4M3);
+    }
+    *reinterpret_cast<uint4*>(p.data + nc * M + mq) = q4;
+    if (quarter % 2 == 0)
+      p.scale[nanochat::mx_scale_index(nc, mq / 32, M / 128)] = static_cast<uint8_t>(e);
   }
-  *reinterpret_cast<uint4*>(p.data + nc * M + mq) = q4;
-  if (quarter % 2 == 0)
-    p.scale[nanochat::mx_scale_index(nc, mq / 32, M / 128)] = static_cast<uint8_t>(e);
   return smax;
 }
 
+// MxStoreT's quantization of one staged 64 x kEpiN subtile (origin (m, n)) by thread t: out of line, so the
+// epilogue's unrolled subtiles share one copy (inlined, they overflow the instruction cache). Each thread takes kEpiN /
+// 32 columns' and rows' blocks, loading them all first. smax: (fp4's, rows') so far, returned updated. params: 64x64
+// copies them all, which the compiler then passes in uniform registers; that spills in the 64x32 kernels, so restrict
+// instead (the stores can't change params, so they aren't reloaded after each).
+template <int kEpiN>
+__device__ __noinline__ float2 mx_store_subtile(
+      const MxT* __restrict__ params, const cutlass::bfloat16_t* stage, int t, int64_t M, int64_t m, int64_t n,
+      float2 smax) {
+  if constexpr (kEpiN == 64) {
+    const MxT p = *params;
+    return mx_store_subtile_body<kEpiN>(p, stage, t, M, m, n, smax);
+  }
+  else {
+    return mx_store_subtile_body<kEpiN>(*params, stage, t, M, m, n, smax);
+  }
+}
+
 // Epilogue node: returns Fn(alpha, its children's values) per element (bf16) and writes their transpose quantized
-// along M (as quantize_mx's out_t), and with rows the values as NVFP4 along N. Each 64x32 subtile is staged in smem
-// transposed; each of the 128 threads then quantizes 16 rows of one column, lane pairs sharing a 32-row block's amax
-// (NVFP4: one 16-value block each), and for rows 16 columns of one row. Pingpong: one warpgroup per tile, the two
-// warpgroups' epilogues serialized.
-template <int FragmentSize, class Fn>
+// along M (as quantize_mx's out_t), and with rows the values as NVFP4 along N. Each 64 x kEpiN subtile (the
+// collective's EpiTile) is staged in smem transposed; each of the 128 threads then quantizes 16 rows of kEpiN / 32
+// columns, lane pairs sharing a 32-row block's amax (NVFP4: one 16-value block each), and for rows 16 columns of
+// kEpiN / 32 rows. Pingpong: one warpgroup per tile, the two warpgroups' epilogues serialized.
+template <int FragmentSize, class Fn, int kEpiN = 32>
 struct MxStoreT {
   static constexpr int kThreads = 128;
-  static_assert(kEpiM == size<0>(EpiTile{}) && kEpiN == size<1>(EpiTile{}), "32 columns x 4 quarters = 128 threads");
+  static_assert(kEpiN % 32 == 0, "32 columns x 4 quarters = 128 threads");
 
   // [subtile parity][col][row], rows padded to 72: conflict-free fragment writes and 16 B quarter reads. The collective
   // syncs the warpgroup before reduce, so a subtile's stage is complete there, and its readers are done before the
@@ -226,8 +262,8 @@ struct MxStoreT {
 
     template <class STensor, class SyncFn, class VTensor>
     CUTLASS_DEVICE void reduce(STensor&&, const SyncFn&, int epi_m, int epi_n, bool, VTensor) {
-      const float2 r = mx_store_subtile(
-            *params, stage + (epi_m & 1) * kStage, thread_idx % kThreads, M, m0 + epi_m * kEpiM, n0 + epi_n * kEpiN,
+      const float2 r = mx_store_subtile<kEpiN>(
+            params, stage + (epi_m & 1) * kStage, thread_idx % kThreads, M, m0 + epi_m * kEpiM, n0 + epi_n * kEpiN,
             make_float2(smax, smax_rows));
       smax = r.x, smax_rows = r.y;
     }
@@ -242,6 +278,8 @@ struct MxStoreT {
 
   template <bool ReferenceSrc, class... Args>
   CUTLASS_DEVICE auto get_consumer_store_callbacks(const fusion::detail::ConsumerStoreArgs<Args...>& args) {
+    using E = decltype(args.epi_tile);
+    static_assert(size<0>(E{}) == kEpiM && size<1>(E{}) == kEpiN, "MxStoreT's subtile is the EpiTile");
     auto [M, N, K, L] = args.problem_shape_mnkl;
     auto [m, n, k, l] = args.tile_coord_mnkl;
     // residue: (M, N) - the thread's first (m, n)
@@ -291,22 +329,26 @@ struct ReluSquareGrad {
 
 // Epilogue: h (bf16, TMA load) and the accumulator (ga) -> dh, its transpose MX-quantized along M -> MX scales per 32
 // along rows -> D e4m3
-using HLoad = fusion::Sm90AuxLoad<
-      2, EpiTile, cutlass::bfloat16_t, StrideH,
+template <class E>
+using HLoadT = fusion::Sm90AuxLoad<
+      2, E, cutlass::bfloat16_t, StrideH,
       decltype(cutlass::epilogue::collective::detail::sm90_get_epilogue_smem_swizzle_layout_atom<
-               StrideH, cutlass::bfloat16_t, EpiTile>()),
+               StrideH, cutlass::bfloat16_t, E>()),
       decltype(cutlass::epilogue::collective::detail::sm120_get_smem_load_op_for_source<
                StrideH, cutlass::bfloat16_t>())>;
+using HLoad = HLoadT<EpiTile>;
 using MxGemmReluSquareGrad =
       MxGemmTree<fusion::Sm90EVT<RowScales, fusion::Sm90EVT<MxStoreT<4, ReluSquareGrad>, fusion::Sm90AccFetch, HLoad>>>;
 
-// The same with NVFP4 operands: no D, MxStoreT writes dh as NVFP4 (rows) and its transpose
+// The same with NVFP4 operands: no D, MxStoreT writes dh as NVFP4 (rows) and its transpose. 64x64 subtiles: half
+// the per-subtile syncs, two independent quantize chains per thread.
+using EpiTile64 = Shape<_64, _64>;
 using Nvfp4GemmReluSquareGrad = Kernel<
       typename cutlass::epilogue::collective::CollectiveBuilder<
-            cutlass::arch::Sm120, cutlass::arch::OpClassBlockScaledTensorOp, Tile, Cluster, EpiTile, float, float, void,
-            cutlass::layout::RowMajor, 8, void, cutlass::layout::RowMajor, 8,
+            cutlass::arch::Sm120, cutlass::arch::OpClassBlockScaledTensorOp, Tile, Cluster, EpiTile64, float, float,
+            void, cutlass::layout::RowMajor, 8, void, cutlass::layout::RowMajor, 8,
             cutlass::epilogue::collective::EpilogueScheduleAuto,
-            fusion::Sm90EVT<MxStoreT<4, ReluSquareGrad>, fusion::Sm90AccFetch, HLoad>>::CollectiveOp,
+            fusion::Sm90EVT<MxStoreT<4, ReluSquareGrad, 64>, fusion::Sm90AccFetch, HLoadT<EpiTile64>>>::CollectiveOp,
       Nv, 32, cutlass::gemm::KernelTmaWarpSpecializedPingpongNvf4Sm120>;
 
 // the block scale store's norm constant (scales amax / 448)

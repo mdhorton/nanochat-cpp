@@ -106,6 +106,21 @@ __device__ __forceinline__ float nvfp4_round_scale(float x) {
   return __uint_as_float((b + 0x7ffffu + ((b >> 20) & 1u)) & 0xfff00000u);
 }
 
+// m / 6 without the division's slow-path branch (which splits the caller's scheduling): correctly rounded but for
+// m < 2^-125 (checked exhaustively), whose blocks' scales vanish under any tensor scale anyway
+__device__ __forceinline__ float nvfp4_div6(float m) {
+  const float c = 1.f / kE2m1Max, q = m * c;
+  return fmaf(fmaf(-q, kE2m1Max, m), c, q);
+}
+
+// 1 / s for nvfp4_round_scale's s (at most 4 significant bits) below 2^126, as __frcp_rn without its slow-path branch
+// (checked exhaustively)
+__device__ __forceinline__ float nvfp4_rcp(float s) {
+  float y;
+  asm("rcp.approx.ftz.f32 %0, %1;" : "=f"(y) : "f"(s));
+  return fmaf(fmaf(-s, y, 1.f), y, y);
+}
+
 // 8 values' codes for o; index: the first value's in the whole tensor
 __device__ __forceinline__ uint32_t nvfp4_pack8(const float* v, float to_q, const kernels::Nvfp4Out& o, int64_t index) {
   return nvfp4_codes8(v, to_q, o.stochastic, o.seed, index);
@@ -161,7 +176,7 @@ __device__ __forceinline__ float nvfp4_store16(float (&v)[16], const kernels::Nv
 #pragma unroll
   for (int k = 0; k < 16; ++k)
     m = fmaxf(m, fabsf(v[k]));
-  const float s = nvfp4_round_scale(m / kE2m1Max), to_q = s > 0.f ? __frcp_rn(s) : 0.f;
+  const float s = nvfp4_round_scale(nvfp4_div6(m)), to_q = s > 0.f ? nvfp4_rcp(s) : 0.f;
   const int64_t i = row * o.ld + col;
   *reinterpret_cast<uint2*>(static_cast<uint8_t*>(o.data) + i / 2) = make_uint2(
         nvfp4_pack8(v, to_q, o, o.index0 + i), nvfp4_pack8(v + 8, to_q, o, o.index0 + i + 8));
@@ -179,7 +194,7 @@ __device__ __forceinline__ float nvfp4_store8(float (&v)[8], const kernels::Nvfp
   for (int k = 0; k < 8; ++k)
     m = fmaxf(m, fabsf(v[k]));
   m = fmaxf(m, __shfl_xor_sync(0xffffffff, m, 1));
-  const float s = nvfp4_round_scale(m / kE2m1Max), to_q = s > 0.f ? __frcp_rn(s) : 0.f;
+  const float s = nvfp4_round_scale(nvfp4_div6(m)), to_q = s > 0.f ? nvfp4_rcp(s) : 0.f;
   const int64_t i = row * o.ld + col;
   *reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(o.data) + i / 2) = nvfp4_pack8(v, to_q, o, o.index0 + i);
   if (!high)
