@@ -161,7 +161,8 @@ __global__ void finish_kernel(const FinishJobs jobs) {
   const auto* smax = j.smax;
   __shared__ int shift;
   if (threadIdx.x < 32) {
-    const unsigned m = __reduce_max_sync(0xffffffff, threadIdx.x < kernels::kNvfp4Slots ? smax[threadIdx.x] : 0u);
+    const unsigned long long v = threadIdx.x < kernels::kNvfp4Slots ? smax[threadIdx.x] : 0ull;
+    const unsigned m = __reduce_max_sync(0xffffffff, v >> 32 == j.epoch ? static_cast<unsigned>(v) : 0u);
     if (threadIdx.x == 0)
       shift = finish_shift(m);
   }

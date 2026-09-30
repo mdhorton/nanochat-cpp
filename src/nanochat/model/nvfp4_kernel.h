@@ -20,10 +20,11 @@ void mx_to_nvfp4(
 // Completes NVFP4 (rows, cols) written by producers (fp8_kernel.h's Nvfp4Out): the tensor scale 2^-k with the largest
 // k keeping every block scale within 448, so out_scale = ue4m3(scale16 * 2^k) (exact but for e4m3's subnormals), and
 // *amax = 6 * 448 * 2^-k for that tensor scale. scale16: rows * cols / 16 bf16 in out_scale's swizzled layout (as
-// mx_to_nvfp4's); smax: kNvfp4Slots, their max's bits. rows % 128, cols % 64.
+// mx_to_nvfp4's); smax: kNvfp4Slots, their max's bits (those of epoch). rows % 128, cols % 64.
 struct Nvfp4Finish {
   const void* scale16;
-  const unsigned* smax;
+  const unsigned long long* smax;
+  uint32_t epoch;
   int64_t rows, cols;
   void* out_scale;
   float* amax;

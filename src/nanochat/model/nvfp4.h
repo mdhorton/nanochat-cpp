@@ -5,6 +5,7 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <utility>
 
 #include <torch/torch.h>
@@ -35,10 +36,13 @@ const torch::Tensor& nvfp4_hadamard(const torch::Device& device);
 uint32_t nvfp4_hadamard_signs();
 
 // NVFP4 (R, C) as a producer writes it (kernels::Nvfp4Out): data (R, C / 2), scale16 (R * C / 16) bf16 block scales
-// without the tensor scale (swizzled as the final ones), smax (zeroed) their max; nvfp4_finish completes it. R % 128,
-// C % 64.
+// without the tensor scale (swizzled as the final ones), smax their max (kernels::Nvfp4Out's, leased from a per-device
+// pool while the target lives); nvfp4_finish completes it. R % 128, C % 64.
 struct Nvfp4Target {
-  torch::Tensor data, scale16, smax;
+  torch::Tensor data, scale16;
+  std::shared_ptr<void> smax_lease;
+  unsigned long long* smax = nullptr;
+  uint32_t epoch = 0;
   bool rht = false, stochastic = false;
   uint64_t seed = 0;
 };

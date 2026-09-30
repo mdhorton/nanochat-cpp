@@ -210,7 +210,7 @@ __device__ __forceinline__ unsigned nvfp4_slot() {
 __device__ __forceinline__ void nvfp4_smax(const kernels::Nvfp4Out& o, float s) {
   const unsigned m = __reduce_max_sync(0xffffffff, __float_as_uint(s)); // non-negative floats order as unsigned
   if (threadIdx.x % 32 == 0 && m > 0)
-    atomicMax(o.smax + nvfp4_slot(), m);
+    atomicMax(o.smax + nvfp4_slot(), static_cast<unsigned long long>(o.epoch) << 32 | m);
 }
 
 // The thread block's max block scale into o.smax, one atomic. All threads, whole warps.
@@ -224,7 +224,7 @@ __device__ __forceinline__ void nvfp4_smax_block(const kernels::Nvfp4Out& o, flo
     atomicMax(&block_max, m);
   __syncthreads();
   if (threadIdx.x == 0 && block_max > 0)
-    atomicMax(o.smax + nvfp4_slot(), block_max);
+    atomicMax(o.smax + nvfp4_slot(), static_cast<unsigned long long>(o.epoch) << 32 | block_max);
 }
 
 } // namespace nanochat

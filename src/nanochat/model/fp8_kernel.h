@@ -29,13 +29,16 @@ void quantize_fp8_relu_square(
 inline constexpr int kNvfp4Slots = 32; // smax's, spreading the atomics
 
 struct Nvfp4Out {
-  void* data;         // (rows, ld / 2) bytes at this view; null: MX
-  int64_t ld;         // row stride in values
-  void* scale16;      // bf16 at this view, in the ue4m3 scales' swizzled layout (ld / 64 tiles per 128 rows)
-  unsigned* smax;     // kNvfp4Slots: the whole tensor's max block scale is their max (float bits, atomicMax)
+  void* data;    // (rows, ld / 2) bytes at this view; null: MX
+  int64_t ld;    // row stride in values
+  void* scale16; // bf16 at this view, in the ue4m3 scales' swizzled layout (ld / 64 tiles per 128 rows)
+  // kNvfp4Slots: the whole tensor's max block scale is their max, as epoch << 32 | float bits (atomicMax), so slots
+  // left from earlier epochs lose and need no zeroing
+  unsigned long long* smax;
   int64_t index0;     // this view's first value's index in the whole tensor: stochastic rounding's counter
   uint64_t seed;      // stochastic rounding's
   uint32_t rht_signs; // bit i: the random Hadamard's row i negated
+  uint32_t epoch;     // smax's, > any earlier value's there
   bool rht, stochastic;
 };
 

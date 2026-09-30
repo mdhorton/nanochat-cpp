@@ -3,6 +3,7 @@
 #include <atomic>
 #include <map>
 #include <mutex>
+#include <vector>
 
 #include <ATen/cuda/CUDAContext.h>
 
@@ -61,18 +62,58 @@ uint32_t nvfp4_hadamard_signs() {
   return signs;
 }
 
+namespace {
+
+// smax slot sets per device, zeroed once, each leased to one target at a time under a fresh epoch
+constexpr int64_t kSmaxSets = 4096;
+
+struct SmaxPool {
+  torch::Tensor slots; // (kSmaxSets, kNvfp4Slots)
+  std::vector<std::weak_ptr<void>> leases;
+  std::vector<uint32_t> epochs;
+  int64_t next = 0;
+};
+
+void lease_smax(Nvfp4Target& t, const torch::Device& device) {
+  static std::mutex mutex;
+  static std::map<int, SmaxPool> pools;
+  const std::lock_guard lock(mutex);
+  const int index = device.has_index() ? device.index() : at::cuda::current_device();
+  auto& p = pools[index];
+  if (!p.slots.defined()) {
+    p.slots = torch::zeros(
+          {kSmaxSets, kernels::kNvfp4Slots},
+          torch::TensorOptions(torch::Device(torch::kCUDA, index)).dtype(torch::kInt64));
+    p.leases.resize(kSmaxSets);
+    p.epochs.assign(kSmaxSets, 0);
+  }
+  for (int64_t n = 0; n < kSmaxSets; ++n, p.next = (p.next + 1) % kSmaxSets) {
+    if (!p.leases[p.next].expired())
+      continue;
+    auto lease = std::make_shared<int>();
+    p.leases[p.next] = lease;
+    t.smax_lease = std::move(lease);
+    t.smax = reinterpret_cast<unsigned long long*>(p.slots[p.next].data_ptr<int64_t>());
+    t.epoch = ++p.epochs[p.next];
+    p.next = (p.next + 1) % kSmaxSets;
+    return;
+  }
+  TORCH_CHECK(false, "NVFP4: over ", kSmaxSets, " targets alive");
+}
+
+} // namespace
+
 Nvfp4Target empty_nvfp4(
       int64_t R, int64_t C, const torch::TensorOptions& options, bool rht, bool stochastic, uint64_t seed) {
   TORCH_CHECK(R % 128 == 0 && C % 64 == 0, "empty_nvfp4: R % 128, C % 64");
-  auto smax = torch::empty({kernels::kNvfp4Slots}, options.dtype(torch::kInt32));
-  C10_CUDA_CHECK(cudaMemsetAsync(smax.data_ptr(), 0, smax.nbytes(), stream()));
-  return {
-        torch::empty({R, C / 2}, options.dtype(torch::kUInt8)),
-        torch::empty({R * C / 16}, options.dtype(torch::kInt16)),
-        smax,
-        rht,
-        stochastic,
-        seed};
+  Nvfp4Target t{
+        .data = torch::empty({R, C / 2}, options.dtype(torch::kUInt8)),
+        .scale16 = torch::empty({R * C / 16}, options.dtype(torch::kInt16)),
+        .rht = rht,
+        .stochastic = stochastic,
+        .seed = seed};
+  lease_smax(t, options.device());
+  return t;
 }
 
 kernels::Nvfp4Out nvfp4_out(const Nvfp4Target& t, int64_t row, int64_t col) {
@@ -82,10 +123,11 @@ kernels::Nvfp4Out nvfp4_out(const Nvfp4Target& t, int64_t row, int64_t col) {
         static_cast<uint8_t*>(t.data.data_ptr()) + i / 2,
         ld,
         static_cast<int16_t*>(t.scale16.data_ptr()) + ((row / 128) * (ld / 64) + col / 64) * 512,
-        reinterpret_cast<unsigned*>(t.smax.data_ptr<int32_t>()),
+        t.smax,
         i,
         t.seed,
         nvfp4_hadamard_signs(),
+        t.epoch,
         t.rht,
         t.stochastic};
 }
@@ -98,11 +140,7 @@ std::pair<Nvfp4Tensor, kernels::Nvfp4Finish> finish_args(const Nvfp4Target& t) {
   Nvfp4Tensor out{
         t.data, torch::empty({R * C / 16}, t.data.options()),
         torch::empty({}, t.data.options().dtype(torch::kFloat32))};
-  const kernels::Nvfp4Finish args{t.scale16.data_ptr(),
-                                  reinterpret_cast<const unsigned*>(t.smax.data_ptr<int32_t>()),
-                                  R,
-                                  C,
-                                  out.scale.data_ptr(),
+  const kernels::Nvfp4Finish args{t.scale16.data_ptr(),      t.smax, t.epoch, R, C, out.scale.data_ptr(),
                                   out.amax.data_ptr<float>()};
   return {out, args};
 }
