@@ -188,6 +188,7 @@ nlohmann::json options_to_json(const TrainOptions& o) {
         {"aspect_ratio", o.aspect_ratio},
         {"head_dim", o.head_dim},
         {"max_seq_len", o.max_seq_len},
+        {"seed", o.seed},
         {"window_pattern", o.window_pattern},
         {"attention", o.attention},
         {"loss_chunk_rows", o.loss_chunk_rows},
@@ -199,7 +200,6 @@ nlohmann::json options_to_json(const TrainOptions& o) {
         {"nvfp4_rht", o.nvfp4_rht},
         {"nvfp4_sr", o.nvfp4_sr},
         {"nvfp4_weight_2d", o.nvfp4_weight_2d},
-        {"nvfp4_seed", o.nvfp4_seed},
         {"nvfp4_wgrad", o.nvfp4_wgrad},
         {"nvfp4_dgrad", o.nvfp4_dgrad},
         {"nvfp4_skip_first", o.nvfp4_skip_first},
@@ -324,7 +324,7 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
   const torch::Device device(torch::kCUDA, static_cast<c10::DeviceIndex>(o.rank));
   Dist dist(o.rank, o.world_size, o.master_addr, o.master_port); // also makes `device` the current GPU
   print(std::format("Distributed world size: {}", o.world_size));
-  torch::manual_seed(42);                                // every rank initializes the same weights
+  torch::manual_seed(static_cast<uint64_t>(o.seed));     // every rank initializes the same weights
   at::globalContext().setFloat32MatmulPrecision("high"); // TF32
   if (o.cublaslt_workspace_mb > 0)
     at::cuda::setCUDABlasLtWorkspaceSize(static_cast<size_t>(o.cublaslt_workspace_mb) << 20);
@@ -401,7 +401,7 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
           .sr_dgrad = sr[1],
           .sr_wgrad = sr[2],
           .weight_2d = o.nvfp4_weight_2d,
-          .seed = static_cast<uint64_t>(o.nvfp4_seed)};
+          .seed = static_cast<uint64_t>(o.seed)};
     const int n = model->set_nvfp4(&nvfp4, o.nvfp4_skip_first, o.nvfp4_skip_last);
     print(std::format(
           "Simulated NVFP4 for {} ({} linear layers; rht {}, sr {}, 2d weights {}, seed {})", o.nvfp4, n,
@@ -416,7 +416,7 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
         .rht = rht[2],
         .sr = sr[2],
         .sr_dgrad = sr[1],
-        .seed = static_cast<uint64_t>(o.nvfp4_seed)};
+        .seed = static_cast<uint64_t>(o.seed)};
 
   struct BackwardScope {
     explicit BackwardScope(const Nvfp4Backward* b) {

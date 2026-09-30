@@ -20,6 +20,7 @@ static int run(int argc, char** argv) {
   o.aspect_ratio = flags.i64("aspect-ratio", o.aspect_ratio, "model_dim = depth * aspect_ratio");
   o.head_dim = flags.i64("head-dim", o.head_dim, "target head dimension for attention");
   o.max_seq_len = flags.i64("max-seq-len", o.max_seq_len, "max context length");
+  o.seed = flags.i64("seed", o.seed, "weight init and nvfp4 stochastic rounding seed");
   o.window_pattern = flags.str(
         "window-pattern", o.window_pattern, "sliding window pattern tiled across layers: L=full, S=quarter context");
   o.attention = flags.str(
@@ -49,7 +50,6 @@ static int run(int argc, char** argv) {
   o.nvfp4_dgrad = flags.boolean(
         "nvfp4-dgrad", o.nvfp4_dgrad,
         "real NVFP4 input gradients (CUTLASS) for the Linears but lm_head, with --nvfp4-sr's dgrad (no rht)");
-  o.nvfp4_seed = flags.i64("nvfp4-seed", o.nvfp4_seed, "nvfp4: stochastic rounding seed");
   o.nvfp4_skip_first = flags.i64("nvfp4-skip-first", o.nvfp4_skip_first, "nvfp4: first blocks kept MXFP8");
   o.nvfp4_skip_last = flags.i64("nvfp4-skip-last", o.nvfp4_skip_last, "nvfp4: last blocks kept MXFP8");
   o.cublaslt_workspace_mb = flags.i64(

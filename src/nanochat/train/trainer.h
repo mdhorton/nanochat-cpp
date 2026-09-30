@@ -18,6 +18,7 @@ namespace nanochat {
 struct TrainOptions {
   // model
   int64_t depth = 20, aspect_ratio = 64, head_dim = 128, max_seq_len = 2048;
+  int64_t seed = 42; // weight init and NVFP4 stochastic rounding
   std::string window_pattern = "SSSL";
   std::string attention = "mx";       // mx (MXFP8 fwd + bwd), bf16 (ours), bf16mx (MXFP8 bwd), fa2, sdpa (as Python)
   int64_t loss_chunk_rows = 4096;     // > 0: fused chunked lm_head + loss (never all logits at once); 0: as Python
@@ -33,9 +34,8 @@ struct TrainOptions {
   std::string nvfp4_sr = "dgrad,wgrad"; // GEMMs whose gradient operand rounds stochastically
   bool nvfp4_weight_2d = true;
   int64_t nvfp4_skip_first = 0, nvfp4_skip_last = 0; // blocks kept MXFP8
-  int64_t nvfp4_seed = 0;                            // stochastic rounding's
   // real NVFP4 weight / input gradients for the Linears but lm_head (nvfp4.h), with nvfp4_rht / nvfp4_sr's wgrad /
-  // dgrad (no rht) and nvfp4_seed
+  // dgrad (no rht) and seed
   bool nvfp4_wgrad = false, nvfp4_dgrad = false;
   // training horizon: the first one set wins
   int64_t num_iterations = -1;
