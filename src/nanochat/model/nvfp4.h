@@ -5,6 +5,7 @@
 #pragma once
 
 #include <cstdint>
+#include <utility>
 
 #include <torch/torch.h>
 
@@ -51,6 +52,9 @@ kernels::Nvfp4Out nvfp4_out(const Nvfp4Target& t, int64_t row = 0, int64_t col =
 // After its producers: the tensor scale and ue4m3 block scales (nvfp4_kernel.h's nvfp4_finish)
 Nvfp4Tensor nvfp4_finish(const Nvfp4Target& t);
 
+// Both in one launch
+std::pair<Nvfp4Tensor, Nvfp4Tensor> nvfp4_finish(const Nvfp4Target& a, const Nvfp4Target& b);
+
 // out (M, N) fp32 (+)= alpha * a (M, K) . b (N, K)^T with the tensor scales applied. accumulate: +=. alpha: a device
 // fp32 scalar (undefined: 1). M, N % 128, K % 256.
 void nvfp4_gemm_f32(
@@ -83,9 +87,6 @@ Nvfp4Target nvfp4_target(int64_t R, int64_t C, const torch::TensorOptions& optio
 
 // bf16 (M, N) = a (M, K) . b (N, K)^T with the tensor scales applied (M, N % 128, K % 256)
 torch::Tensor nvfp4_gemm(const Nvfp4Tensor& a, const Nvfp4Tensor& b);
-
-// The GEMM's alpha as a device scalar: a's and b's tensor scales (times alpha when defined)
-torch::Tensor nvfp4_alpha(const Nvfp4Tensor& a, const Nvfp4Tensor& b, const torch::Tensor& alpha = {});
 
 // out (n, C) fp32 (+)= alpha * go_t (n, N) . in_t (C, N)^T in NVFP4. Each operand NVFP4 already (data, scale, amax), or
 // MX (amax undefined) converted per nvfp4_backward() (then set).

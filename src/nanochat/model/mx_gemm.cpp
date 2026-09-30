@@ -211,11 +211,10 @@ bool nvfp4_gemm_relu_square_bwd(
         h.is_contiguous() && h.size(0) == M && h.size(1) == N && b.data.size(1) * 2 == K && out.fp4.data != nullptr &&
               out.fp4.ld == N && (out_t.fp4.data != nullptr ? out_t.fp4.ld == M : out_t.ld == M),
         "nvfp4_gemm_relu_square_bwd: shape mismatch");
-  const auto alpha = nvfp4_alpha(a, b);
   check_cutlass(
         kernels::cutlass_nvfp4_gemm_relu_square_bwd(
-              a.data.data_ptr(), a.scale.data_ptr(), b.data.data_ptr(), b.scale.data_ptr(), alpha.data_ptr<float>(),
-              h.data_ptr(), out.fp4, out_t.data, out_t.scale, out_t.fp4, M, N, K,
+              a.data.data_ptr(), a.scale.data_ptr(), b.data.data_ptr(), b.scale.data_ptr(), a.amax.data_ptr<float>(),
+              b.amax.data_ptr<float>(), h.data_ptr(), out.fp4, out_t.data, out_t.scale, out_t.fp4, M, N, K,
               at::cuda::getCurrentCUDAStream().stream()));
   return true;
 }

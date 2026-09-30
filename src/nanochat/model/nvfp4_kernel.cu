@@ -144,8 +144,21 @@ __device__ __forceinline__ int finish_shift(unsigned smax) {
   return 8 - e - (mantissa == 7 ? 1 : 0);
 }
 
+int64_t finish_blocks(int64_t rows, int64_t cols) {
+  return std::max<int64_t>((rows * cols / kGroup / 8 + kThreads - 1) / kThreads, 1);
+}
+
+// up to two tensors, blocks [0, blocks0) the first's
+struct FinishJobs {
+  kernels::Nvfp4Finish job[2];
+  unsigned blocks0;
+};
+
 // elementwise over the swizzled scales, 8 per thread
-__global__ void finish_kernel(const uint4* scale16, const unsigned* smax, int64_t n, uint2* out_scale, float* amax) {
+__global__ void finish_kernel(const FinishJobs jobs) {
+  const bool second = blockIdx.x >= jobs.blocks0;
+  const kernels::Nvfp4Finish j = second ? jobs.job[1] : jobs.job[0];
+  const auto* smax = j.smax;
   __shared__ int shift;
   if (threadIdx.x < 32) {
     const unsigned m = __reduce_max_sync(0xffffffff, threadIdx.x < kernels::kNvfp4Slots ? smax[threadIdx.x] : 0u);
@@ -154,12 +167,12 @@ __global__ void finish_kernel(const uint4* scale16, const unsigned* smax, int64_
   }
   __syncthreads();
   const int k = shift;
-  const int64_t i = static_cast<int64_t>(blockIdx.x) * kThreads + threadIdx.x;
+  const int64_t i = static_cast<int64_t>(second ? blockIdx.x - jobs.blocks0 : blockIdx.x) * kThreads + threadIdx.x;
   if (i == 0)
-    *amax = ldexpf(kE2m1Max * kE4m3Max, -k);
-  if (i >= n / 8)
+    *j.amax = ldexpf(kE2m1Max * kE4m3Max, -k);
+  if (i >= j.rows * j.cols / kGroup / 8)
     return;
-  const uint4 raw = scale16[i];
+  const uint4 raw = static_cast<const uint4*>(j.scale16)[i];
   const uint32_t w[4] = {raw.x, raw.y, raw.z, raw.w};
   uint32_t out[2] = {0, 0};
 #pragma unroll
@@ -167,12 +180,7 @@ __global__ void finish_kernel(const uint4* scale16, const unsigned* smax, int64_
     const float s = ldexpf(__uint_as_float(((w[j / 2] >> (16 * (j % 2))) & 0xffffu) << 16), k);
     out[j / 4] |= static_cast<uint32_t>(__nv_cvt_float_to_fp8(s, __NV_SATFINITE, __NV_E4M3)) << (8 * (j % 4));
   }
-  out_scale[i] = make_uint2(out[0], out[1]);
-}
-
-__global__ void alpha_kernel(const float* a_amax, const float* b_amax, const float* alpha, float* out) {
-  const float scale = *a_amax / (kE2m1Max * kE4m3Max) * (*b_amax / (kE2m1Max * kE4m3Max));
-  *out = alpha != nullptr ? scale * *alpha : scale;
+  static_cast<uint2*>(j.out_scale)[i] = make_uint2(out[0], out[1]);
 }
 
 unsigned grid_for(int64_t rows, int64_t cols) {
@@ -196,17 +204,10 @@ void mx_to_nvfp4(
         amax);
 }
 
-void nvfp4_finish(
-      const void* scale16, const unsigned* smax, int64_t rows, int64_t cols, void* out_scale, float* amax,
-      cudaStream_t stream) {
-  const int64_t n = rows * cols / kGroup;
-  finish_kernel<<<
-        static_cast<unsigned>(std::max<int64_t>((n / 8 + kThreads - 1) / kThreads, 1)), kThreads, 0, stream>>>(
-        static_cast<const uint4*>(scale16), smax, n, static_cast<uint2*>(out_scale), amax);
-}
-
-void nvfp4_alpha(const float* a_amax, const float* b_amax, const float* alpha, float* out, cudaStream_t stream) {
-  alpha_kernel<<<1, 1, 0, stream>>>(a_amax, b_amax, alpha, out);
+void nvfp4_finish(const Nvfp4Finish& a, const Nvfp4Finish* b, cudaStream_t stream) {
+  const auto blocks0 = static_cast<unsigned>(finish_blocks(a.rows, a.cols));
+  const auto blocks = blocks0 + (b != nullptr ? static_cast<unsigned>(finish_blocks(b->rows, b->cols)) : 0u);
+  finish_kernel<<<blocks, kThreads, 0, stream>>>({{a, b != nullptr ? *b : a}, blocks0});
 }
 
 void nvfp4_to_bf16(

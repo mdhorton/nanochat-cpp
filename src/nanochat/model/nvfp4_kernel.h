@@ -21,12 +21,16 @@ void mx_to_nvfp4(
 // k keeping every block scale within 448, so out_scale = ue4m3(scale16 * 2^k) (exact but for e4m3's subnormals), and
 // *amax = 6 * 448 * 2^-k for that tensor scale. scale16: rows * cols / 16 bf16 in out_scale's swizzled layout (as
 // mx_to_nvfp4's); smax: kNvfp4Slots, their max's bits. rows % 128, cols % 64.
-void nvfp4_finish(
-      const void* scale16, const unsigned* smax, int64_t rows, int64_t cols, void* out_scale, float* amax,
-      cudaStream_t stream);
+struct Nvfp4Finish {
+  const void* scale16;
+  const unsigned* smax;
+  int64_t rows, cols;
+  void* out_scale;
+  float* amax;
+};
 
-// The NVFP4 GEMM's alpha: *out = a_amax / (6 * 448) * b_amax / (6 * 448) (* *alpha when given), one thread
-void nvfp4_alpha(const float* a_amax, const float* b_amax, const float* alpha, float* out, cudaStream_t stream);
+// a, and b too when given, in one launch
+void nvfp4_finish(const Nvfp4Finish& a, const Nvfp4Finish* b, cudaStream_t stream);
 
 // NVFP4 as mx_to_nvfp4 writes it -> bf16 (rows, cols)
 void nvfp4_to_bf16(

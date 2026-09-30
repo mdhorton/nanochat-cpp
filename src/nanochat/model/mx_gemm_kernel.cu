@@ -50,13 +50,13 @@ using EpiTile = Shape<_64, _32>;
 using StrideH = cutlass::gemm::TagToStrideC_t<cutlass::layout::RowMajor>;
 
 // The transpose (N, M) row-major: e4m3, MX along M (scales in the swizzled layout with M / 128 tiles), or NVFP4 when
-// fp4.data is set. rows.data set: the values (M, N) as NVFP4 along N too. alpha: the accumulator's scale (device
-// scalar, null: 1).
+// fp4.data is set. rows.data set: the values (M, N) as NVFP4 along N too. amax: NVFP4 operands' (device scalars),
+// the accumulator's scale their tensor scales' product (null: 1).
 struct MxT {
   uint8_t* data;
   uint8_t* scale;
   nanochat::kernels::Nvfp4Out fp4, rows;
-  const float* alpha;
+  const float* amax[2];
 };
 
 constexpr int kEpiM = 64, kPitch = kEpiM + 8; // MxStoreT's subtile rows and its stage's row pitch
@@ -230,7 +230,9 @@ struct MxStoreT {
         , m0(m0)
         , n0(n0)
         , thread_idx(thread_idx)
-        , alpha(params->alpha != nullptr ? *params->alpha : 1.f) {}
+        , alpha(params->amax[0] != nullptr ? *params->amax[0] / (nanochat::kE2m1Max * nanochat::kE4m3Max) *
+                                                   (*params->amax[1] / (nanochat::kE2m1Max * nanochat::kE4m3Max))
+                                           : 1.f) {}
 
     CoordTensor tCcD; // (CPY, CPY_M, CPY_N, EPI_M, EPI_N): (m, n) relative to the thread's first element
     int thr_m, thr_n; // that element's (m, n)
@@ -468,7 +470,7 @@ const char* cutlass_mx_gemm_relu_square(
   // {{{{acc}, {h}}, {q^T}}, {scales}}
   args.epilogue.thread = {
         {{{}, {static_cast<cutlass::bfloat16_t*>(h), cutlass::make_cute_packed_stride(StrideH{}, {m, n, 1})}},
-         {static_cast<uint8_t*>(q_t), static_cast<uint8_t*>(q_t_scale), q_t_fp4, {}, nullptr}},
+         {static_cast<uint8_t*>(q_t), static_cast<uint8_t*>(q_t_scale), q_t_fp4, {}, {}}},
         {static_cast<cutlass::float_ue8m0_t*>(q_scale), one(), {}}};
   return launch<G>(args, stream);
 }
@@ -488,15 +490,15 @@ const char* cutlass_mx_gemm_relu_square_bwd(
         {{},
          {static_cast<const cutlass::bfloat16_t*>(h), cutlass::bfloat16_t(0),
           cutlass::make_cute_packed_stride(StrideH{}, {m, n, 1})},
-         {static_cast<uint8_t*>(dh_t), static_cast<uint8_t*>(dh_t_scale), dh_t_fp4, {}, nullptr}},
+         {static_cast<uint8_t*>(dh_t), static_cast<uint8_t*>(dh_t_scale), dh_t_fp4, {}, {}}},
         {static_cast<cutlass::float_ue8m0_t*>(dh_scale), one(), {}}};
   return launch<G>(args, stream);
 }
 
 const char* cutlass_nvfp4_gemm_relu_square_bwd(
-      const void* a, const void* a_scale, const void* b, const void* b_scale, const float* alpha, const void* h,
-      const Nvfp4Out& dh, void* dh_t, void* dh_t_scale, const Nvfp4Out& dh_t_fp4, int64_t M, int64_t N, int64_t K,
-      cudaStream_t stream) {
+      const void* a, const void* a_scale, const void* b, const void* b_scale, const float* a_amax, const float* b_amax,
+      const void* h, const Nvfp4Out& dh, void* dh_t, void* dh_t_scale, const Nvfp4Out& dh_t_fp4, int64_t M, int64_t N,
+      int64_t K, cudaStream_t stream) {
   using G = Nvfp4GemmReluSquareGrad;
   if (!fits(M, N, K) || K % 256 != 0 || dh.data == nullptr)
     return "cutlass_nvfp4_gemm_relu_square_bwd: M, N must be % 128, K % 256, dh NVFP4";
@@ -507,7 +509,7 @@ const char* cutlass_nvfp4_gemm_relu_square_bwd(
         {},
         {static_cast<const cutlass::bfloat16_t*>(h), cutlass::bfloat16_t(0),
          cutlass::make_cute_packed_stride(StrideH{}, {m, n, 1})},
-        {static_cast<uint8_t*>(dh_t), static_cast<uint8_t*>(dh_t_scale), dh_t_fp4, dh, alpha}};
+        {static_cast<uint8_t*>(dh_t), static_cast<uint8_t*>(dh_t_scale), dh_t_fp4, dh, {a_amax, b_amax}}};
   return launch<G>(args, stream);
 }
 

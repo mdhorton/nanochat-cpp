@@ -33,11 +33,11 @@ const char* cutlass_mx_gemm_relu_square_bwd(
       const void* a, const void* a_scale, const void* b, const void* b_scale, const void* h, void* dh, void* dh_scale,
       void* dh_t, void* dh_t_scale, const Nvfp4Out& dh_t_fp4, int64_t M, int64_t N, int64_t K, cudaStream_t stream);
 
-// cutlass_mx_gemm_relu_square_bwd with NVFP4 a, b (nvfp4_gemm_kernel.h's layout; alpha: the device fp32 product of
-// their tensor scales) and dh as NVFP4 (dh, required); dh_t as there. K % 256.
+// cutlass_mx_gemm_relu_square_bwd with NVFP4 a, b (nvfp4_gemm_kernel.h's layout, scaled by their device fp32 amaxes
+// as cutlass_nvfp4_gemm_f32) and dh as NVFP4 (dh, required); dh_t as there. K % 256.
 const char* cutlass_nvfp4_gemm_relu_square_bwd(
-      const void* a, const void* a_scale, const void* b, const void* b_scale, const float* alpha, const void* h,
-      const Nvfp4Out& dh, void* dh_t, void* dh_t_scale, const Nvfp4Out& dh_t_fp4, int64_t M, int64_t N, int64_t K,
-      cudaStream_t stream);
+      const void* a, const void* a_scale, const void* b, const void* b_scale, const float* a_amax, const float* b_amax,
+      const void* h, const Nvfp4Out& dh, void* dh_t, void* dh_t_scale, const Nvfp4Out& dh_t_fp4, int64_t M, int64_t N,
+      int64_t K, cudaStream_t stream);
 
 } // namespace nanochat::kernels

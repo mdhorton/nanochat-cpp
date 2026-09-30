@@ -23,14 +23,15 @@ const char* cutlass_nvfp4_gemm(
       int64_t N, int64_t K, cudaStream_t stream);
 
 // d (M, N) fp32 (+)= alpha * a . b^T as cutlass_nvfp4_gemm (128x128x128 pingpong). accumulate: d += (beta 1), else d =.
-// alpha: a device fp32 scalar (null: 1), e.g. the product of the operands' tensor scales.
+// alpha = a_amax / (6 * 448) * (b_amax / (6 * 448)) (* *alpha when given): device fp32 scalars, the operands' tensor
+// scales (null amaxes: 1).
 const char* cutlass_nvfp4_gemm_f32(
       const void* a, const void* a_scale, const void* b, const void* b_scale, float* d, int64_t M, int64_t N, int64_t K,
-      const float* alpha, bool accumulate, cudaStream_t stream);
+      const float* a_amax, const float* b_amax, const float* alpha, bool accumulate, cudaStream_t stream);
 
-// d (M, N) bf16 = alpha * a . b^T as cutlass_nvfp4_gemm (128x128x128 pingpong); alpha: a device fp32 scalar
+// d (M, N) bf16 = alpha * a . b^T as cutlass_nvfp4_gemm_f32 (without its *alpha)
 const char* cutlass_nvfp4_gemm_bf16(
       const void* a, const void* a_scale, const void* b, const void* b_scale, void* d, int64_t M, int64_t N, int64_t K,
-      const float* alpha, cudaStream_t stream);
+      const float* a_amax, const float* b_amax, cudaStream_t stream);
 
 } // namespace nanochat::kernels

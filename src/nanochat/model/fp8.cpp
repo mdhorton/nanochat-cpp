@@ -164,6 +164,13 @@ std::pair<kernels::MxOut, kernels::MxOut> mx_outs(const Fp8Tensor& q) {
 }
 
 void finish_fp4(Fp8Tensor& q) {
+  if (q.fp4_target.data.defined() && q.fp4_target_t.data.defined()) { // one launch
+    const auto [t, t_t] = nvfp4_finish(q.fp4_target, q.fp4_target_t);
+    q.data = t.data, q.inv_scale = t.scale, q.amax = t.amax;
+    q.data_t = t_t.data, q.inv_scale_t = t_t.scale, q.amax_t = t_t.amax;
+    q.fp4_target = {}, q.fp4_target_t = {};
+    return;
+  }
   if (q.fp4_target.data.defined()) {
     const auto t = nvfp4_finish(q.fp4_target);
     q.data = t.data, q.inv_scale = t.scale, q.amax = t.amax;

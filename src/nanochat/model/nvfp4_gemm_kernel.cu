@@ -10,12 +10,102 @@
 #include <cutlass/gemm/kernel/gemm_universal.hpp>
 #include <cutlass/util/packed_stride.hpp>
 
+#include "nanochat/model/nvfp4.cuh"
+
 namespace {
 
 using namespace cute;
+namespace fusion = cutlass::epilogue::fusion;
 
 using Cluster = Shape<_1, _1, _1>;
 using Nv = cutlass::nv_float4_t<cutlass::float_e2m1_t>;
+
+// Epilogue leaf: alpha = a_amax / (6 * 448) * (b_amax / (6 * 448)) (* *alpha), the operands' tensor scales; null
+// amaxes: 1. In the GEMM rather than a kernel of its own.
+struct Nvfp4Alpha {
+  struct SharedStorage {};
+
+  struct Arguments {
+    const float *a_amax = nullptr, *b_amax = nullptr, *alpha = nullptr;
+  };
+
+  using Params = Arguments;
+
+  template <class P>
+  static constexpr Params to_underlying_arguments(const P&, const Arguments& args, void*) {
+    return args;
+  }
+
+  template <class P>
+  static bool can_implement(const P&, const Arguments&) {
+    return true;
+  }
+
+  template <class P>
+  static size_t get_workspace_size(const P&, const Arguments&) {
+    return 0;
+  }
+
+  template <class P>
+  static cutlass::Status initialize_workspace(
+        const P&, const Arguments&, void*, cudaStream_t, cutlass::CudaHostAdapter* = nullptr) {
+    return cutlass::Status::kSuccess;
+  }
+
+  CUTLASS_HOST_DEVICE Nvfp4Alpha() {}
+
+  CUTLASS_HOST_DEVICE Nvfp4Alpha(const Params& params, const SharedStorage&)
+      : params(params) {}
+
+  Params params;
+
+  CUTLASS_DEVICE bool is_producer_load_needed() const {
+    return false;
+  }
+
+  CUTLASS_DEVICE bool is_C_load_needed() const {
+    return false;
+  }
+
+  template <class... Args>
+  CUTLASS_DEVICE auto get_producer_load_callbacks(const fusion::ProducerLoadArgs<Args...>&) {
+    return fusion::EmptyProducerLoadCallbacks{};
+  }
+
+  struct ConsumerStoreCallbacks : fusion::EmptyConsumerStoreCallbacks {
+    CUTLASS_DEVICE explicit ConsumerStoreCallbacks(float scalar)
+        : scalar(scalar) {}
+
+    float scalar;
+
+    template <class ElementAccumulator, int FragmentSize>
+    CUTLASS_DEVICE cutlass::Array<float, FragmentSize> visit(
+          const cutlass::Array<ElementAccumulator, FragmentSize>&, int, int, int) {
+      cutlass::Array<float, FragmentSize> f;
+      f.fill(scalar);
+      return f;
+    }
+  };
+
+  template <bool ReferenceSrc, class... Args>
+  CUTLASS_DEVICE auto get_consumer_store_callbacks(const fusion::ConsumerStoreArgs<Args...>&) {
+    constexpr float kNorm = nanochat::kE2m1Max * nanochat::kE4m3Max;
+    float s = params.a_amax != nullptr ? *params.a_amax / kNorm * (*params.b_amax / kNorm) : 1.f;
+    if (params.alpha != nullptr)
+      s = s * *params.alpha;
+    return ConsumerStoreCallbacks(s);
+  }
+};
+
+// D = beta * C + alpha * acc: CUTLASS's LinearCombination with Nvfp4Alpha
+template <class ElementD, class ElementC>
+using ScaledLinComb = fusion::Sm90EVT<
+      fusion::Sm90Compute<
+            cutlass::homogeneous_multiply_add, ElementD, float, cutlass::FloatRoundStyle::round_to_nearest>,
+      fusion::Sm90ScalarBroadcast<float, Stride<_0, _0, int64_t>>, fusion::Sm90SrcFetch<ElementC>,
+      fusion::Sm90EVT<
+            fusion::Sm90Compute<cutlass::multiplies, float, float, cutlass::FloatRoundStyle::round_to_nearest>,
+            Nvfp4Alpha, fusion::Sm90AccFetch>>;
 
 // ElementC void: no source (beta 0)
 template <class Tile, class Schedule, class ElementD, class ElementC = void>
@@ -24,8 +114,8 @@ struct Nvfp4Gemm {
   using Epilogue = typename cutlass::epilogue::collective::CollectiveBuilder<
         cutlass::arch::Sm120, cutlass::arch::OpClassBlockScaledTensorOp, Tile, Cluster,
         cutlass::epilogue::collective::EpilogueTileAuto, float, float, ElementC, cutlass::layout::RowMajor, kAlignD,
-        ElementD, cutlass::layout::RowMajor, kAlignD,
-        cutlass::epilogue::collective::EpilogueScheduleAuto>::CollectiveOp;
+        ElementD, cutlass::layout::RowMajor, kAlignD, cutlass::epilogue::collective::EpilogueScheduleAuto,
+        ScaledLinComb<ElementD, ElementC>>::CollectiveOp;
   using Mainloop = typename cutlass::gemm::collective::CollectiveBuilder<
         cutlass::arch::Sm120, cutlass::arch::OpClassBlockScaledTensorOp, Nv, cutlass::layout::RowMajor, 32, Nv,
         cutlass::layout::ColumnMajor, 32, float, Tile, Cluster,
@@ -38,11 +128,11 @@ struct Nvfp4Gemm {
 using Pingpong = cutlass::gemm::KernelTmaWarpSpecializedPingpongNvf4Sm120;
 using Cooperative = cutlass::gemm::KernelTmaWarpSpecializedNvf4Sm120;
 
-// d = alpha * a . b^T (+ d with accumulate); alpha: a device scalar, or null for 1
+// d = Nvfp4Alpha * a . b^T (+ d with accumulate)
 template <class G>
 const char* run(
       const void* a, const void* a_scale, const void* b, const void* b_scale, void* d, int64_t M, int64_t N, int64_t K,
-      cudaStream_t stream, const float* alpha = nullptr, bool accumulate = false) {
+      cudaStream_t stream, Nvfp4Alpha::Arguments alpha = {}, bool accumulate = false) {
   using Gemm = typename G::Gemm;
   using Mainloop = typename G::Mainloop;
   using Sf = typename Mainloop::Sm1xxBlkScaledConfig;
@@ -64,10 +154,8 @@ const char* run(
         Sf::tile_atom_to_shape_SFB(make_shape(m, n, k, 1))};
   const auto stride_d = cutlass::make_cute_packed_stride(typename Gemm::GemmKernel::StrideD{}, {m, n, 1});
   args.epilogue = {{}, static_cast<const ElementD*>(d), stride_d, static_cast<ElementD*>(d), stride_d};
-  auto& scalars = args.epilogue.thread;
-  scalars.alpha = 1.f;
-  scalars.alpha_ptr = alpha;
-  scalars.beta = accumulate ? 1.f : 0.f;
+  // {beta, C, {alpha, acc, *}, +}
+  args.epilogue.thread = {{{accumulate ? 1.f : 0.f}}, {}, {alpha, {}, {}}, {}};
   int device = 0;
   cudaGetDevice(&device);
   args.hw_info.sm_count = cutlass::KernelHardwareInfo::query_device_multiprocessor_count(device);
@@ -136,16 +224,16 @@ const char* cutlass_nvfp4_gemm(
 
 const char* cutlass_nvfp4_gemm_f32(
       const void* a, const void* a_scale, const void* b, const void* b_scale, float* d, int64_t M, int64_t N, int64_t K,
-      const float* alpha, bool accumulate, cudaStream_t stream) {
+      const float* a_amax, const float* b_amax, const float* alpha, bool accumulate, cudaStream_t stream) {
   return run<Nvfp4Gemm<Shape<_128, _128, _128>, Pingpong, float, float>>(
-        a, a_scale, b, b_scale, d, M, N, K, stream, alpha, accumulate);
+        a, a_scale, b, b_scale, d, M, N, K, stream, {a_amax, b_amax, alpha}, accumulate);
 }
 
 const char* cutlass_nvfp4_gemm_bf16(
       const void* a, const void* a_scale, const void* b, const void* b_scale, void* d, int64_t M, int64_t N, int64_t K,
-      const float* alpha, cudaStream_t stream) {
+      const float* a_amax, const float* b_amax, cudaStream_t stream) {
   return run<Nvfp4Gemm<Shape<_128, _128, _128>, Pingpong, cutlass::bfloat16_t>>(
-        a, a_scale, b, b_scale, d, M, N, K, stream, alpha);
+        a, a_scale, b, b_scale, d, M, N, K, stream, {a_amax, b_amax, nullptr});
 }
 
 } // namespace nanochat::kernels

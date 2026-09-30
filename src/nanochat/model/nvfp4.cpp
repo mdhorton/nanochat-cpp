@@ -90,16 +90,38 @@ kernels::Nvfp4Out nvfp4_out(const Nvfp4Target& t, int64_t row, int64_t col) {
         t.stochastic};
 }
 
-Nvfp4Tensor nvfp4_finish(const Nvfp4Target& t) {
+namespace {
+
+// t's output tensors and the kernel's view of both
+std::pair<Nvfp4Tensor, kernels::Nvfp4Finish> finish_args(const Nvfp4Target& t) {
   const int64_t R = t.data.size(0), C = t.data.size(1) * 2;
   Nvfp4Tensor out{
         t.data, torch::empty({R * C / 16}, t.data.options()),
         torch::empty({}, t.data.options().dtype(torch::kFloat32))};
-  kernels::nvfp4_finish(
-        t.scale16.data_ptr(), reinterpret_cast<const unsigned*>(t.smax.data_ptr<int32_t>()), R, C, out.scale.data_ptr(),
-        out.amax.data_ptr<float>(), stream());
+  const kernels::Nvfp4Finish args{t.scale16.data_ptr(),
+                                  reinterpret_cast<const unsigned*>(t.smax.data_ptr<int32_t>()),
+                                  R,
+                                  C,
+                                  out.scale.data_ptr(),
+                                  out.amax.data_ptr<float>()};
+  return {out, args};
+}
+
+} // namespace
+
+Nvfp4Tensor nvfp4_finish(const Nvfp4Target& t) {
+  const auto [out, args] = finish_args(t);
+  kernels::nvfp4_finish(args, nullptr, stream());
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   return out;
+}
+
+std::pair<Nvfp4Tensor, Nvfp4Tensor> nvfp4_finish(const Nvfp4Target& a, const Nvfp4Target& b) {
+  const auto [out_a, args_a] = finish_args(a);
+  const auto [out_b, args_b] = finish_args(b);
+  kernels::nvfp4_finish(args_a, &args_b, stream());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  return {out_a, out_b};
 }
 
 Nvfp4Tensor mx_to_nvfp4(
@@ -134,15 +156,6 @@ torch::Tensor mx_to_bf16(const torch::Tensor& data, const torch::Tensor& scale) 
   return out;
 }
 
-torch::Tensor nvfp4_alpha(const Nvfp4Tensor& a, const Nvfp4Tensor& b, const torch::Tensor& alpha) {
-  TORCH_CHECK(!alpha.defined() || (alpha.numel() == 1 && alpha.scalar_type() == torch::kFloat32));
-  auto scale = torch::empty({}, a.amax.options());
-  kernels::nvfp4_alpha(
-        a.amax.data_ptr<float>(), b.amax.data_ptr<float>(), alpha.defined() ? alpha.data_ptr<float>() : nullptr,
-        scale.data_ptr<float>(), stream());
-  return scale;
-}
-
 void nvfp4_gemm_f32(
       const Nvfp4Tensor& a, const Nvfp4Tensor& b, const torch::Tensor& out, bool accumulate,
       const torch::Tensor& alpha) {
@@ -151,10 +164,11 @@ void nvfp4_gemm_f32(
         b.data.size(1) * 2 == K && out.is_contiguous() && out.scalar_type() == torch::kFloat32 && out.size(0) == M &&
               out.size(1) == N,
         "nvfp4_gemm_f32: shape mismatch");
-  const auto scale = nvfp4_alpha(a, b, alpha);
+  TORCH_CHECK(!alpha.defined() || (alpha.numel() == 1 && alpha.scalar_type() == torch::kFloat32));
   const char* error = kernels::cutlass_nvfp4_gemm_f32(
         a.data.data_ptr(), a.scale.data_ptr(), b.data.data_ptr(), b.scale.data_ptr(), out.data_ptr<float>(), M, N, K,
-        scale.data_ptr<float>(), accumulate, stream());
+        a.amax.data_ptr<float>(), b.amax.data_ptr<float>(), alpha.defined() ? alpha.data_ptr<float>() : nullptr,
+        accumulate, stream());
   TORCH_CHECK(error == nullptr, error);
 }
 
@@ -162,10 +176,9 @@ torch::Tensor nvfp4_gemm(const Nvfp4Tensor& a, const Nvfp4Tensor& b) {
   const int64_t M = a.data.size(0), N = b.data.size(0), K = a.data.size(1) * 2;
   TORCH_CHECK(b.data.size(1) * 2 == K, "nvfp4_gemm: shape mismatch");
   auto out = torch::empty({M, N}, a.data.options().dtype(torch::kBFloat16));
-  const auto scale = nvfp4_alpha(a, b);
   const char* error = kernels::cutlass_nvfp4_gemm_bf16(
         a.data.data_ptr(), a.scale.data_ptr(), b.data.data_ptr(), b.scale.data_ptr(), out.data_ptr(), M, N, K,
-        scale.data_ptr<float>(), stream());
+        a.amax.data_ptr<float>(), b.amax.data_ptr<float>(), stream());
   TORCH_CHECK(error == nullptr, error);
   return out;
 }
