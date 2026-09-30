@@ -70,9 +70,12 @@ def main():
     parser.add_argument("--name", help="wandb run name (default: the header's run)")
     parser.add_argument("--id", help="wandb run id to resume (default: <file>.wandb-id, else a new run)")
     parser.add_argument("--mode", choices=["online", "offline"], help="wandb mode (default: wandb's, e.g. WANDB_MODE)")
+    parser.add_argument("--dir", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "cache"),
+                        help="wandb's local files go to <dir>/wandb (default: <project>/cache)")
     parser.add_argument("--every", type=int, default=1, help="log every Nth training step (base_train.py: 100)")
     parser.add_argument("--follow", action="store_true", help="keep reading new lines until the end line")
-    parser.add_argument("--pid", type=int, help="with --follow: also stop once this process (the trainer) exits")
+    parser.add_argument("--pid", type=int,
+                        help="with --follow: the trainer, whose process stats wandb records; stop once it exits")
     parser.add_argument("--poll", type=float, default=1.0, help="with --follow: seconds between reads")
     args = parser.parse_args()
 
@@ -94,8 +97,14 @@ def main():
     if run_id is None and os.path.exists(id_path):
         with open(id_path) as f:
             run_id = f.read().strip()
+    # system metrics: the trainer's process when following it; none for an old run (they'd be today's)
+    if args.pid is not None:
+        settings = wandb.Settings(x_stats_pid=args.pid)
+    else:
+        settings = wandb.Settings(x_disable_stats=not args.follow)
     run = wandb.init(project=args.project, name=args.name or header.get("run"), config=config, id=run_id,
-                     resume="allow" if run_id else None, mode=args.mode)
+                     resume="allow" if run_id else None, mode=args.mode, dir=os.path.normpath(args.dir),
+                     settings=settings)
     if run_id is None:
         with open(id_path, "w") as f:
             f.write(run.id + "\n")
