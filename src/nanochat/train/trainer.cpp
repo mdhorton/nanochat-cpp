@@ -407,6 +407,12 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
     if (o.gemm != "cublas" && o.gemm != "cutlass")
       throw std::invalid_argument("unknown gemm: " + o.gemm + " (use cublas or cutlass)");
     set_mx_gemm_backend(o.gemm == "cutlass" ? MxGemmBackend::Cutlass : MxGemmBackend::Cublas);
+    if (o.nvfp4_gemm != "auto" && o.nvfp4_gemm != "cublas" && o.nvfp4_gemm != "cutlass")
+      throw std::invalid_argument("unknown nvfp4_gemm: " + o.nvfp4_gemm + " (use auto, cublas or cutlass)");
+    set_nvfp4_gemm_backend(
+          o.nvfp4_gemm == "auto"      ? Nvfp4GemmBackend::Auto
+          : o.nvfp4_gemm == "cutlass" ? Nvfp4GemmBackend::Cutlass
+                                      : Nvfp4GemmBackend::Cublas);
     const int num_linear = model->num_linears(), num_fp8 = model->set_fp8(true);
     print(std::format(
           "FP8 training enabled ({} scaling{}) - converted {}/{} linear layers, skipped {} (too small)", o.fp8_recipe,

@@ -15,6 +15,25 @@ enum class MxGemmBackend { Cublas, Cutlass };
 void set_mx_gemm_backend(MxGemmBackend backend);
 MxGemmBackend mx_gemm_backend();
 
+// The NVFP4 GEMMs (nvfp4.h's nvfp4_gemm, nvfp4_gemm_f32): CUTLASS (nvfp4_gemm_kernel.h) or cuBLASLt. Auto: per
+// shape, whichever timed faster on its first call (cuBLASLt by >= 2%; its summation order differs, so Auto's bits
+// can change between runs). Process-wide; default Cutlass (bench_gemm --fp4: cuBLASLt 3-13% slower on sm120).
+enum class Nvfp4GemmBackend { Auto, Cutlass, Cublas };
+void set_nvfp4_gemm_backend(Nvfp4GemmBackend backend);
+Nvfp4GemmBackend nvfp4_gemm_backend();
+
+// out (M, N) bf16 or fp32 (+)= alpha * a (M, K) . b (N, K)^T with the tensor scales applied (nvfp4_gemm_f32's
+// contract; accumulate and alpha: fp32 out) through cuBLASLt: VEC16_UE4M3 block scales in CUTLASS's layout, the
+// tensor scales as a device alpha
+void nvfp4_gemm_cublas(
+      const Nvfp4Tensor& a, const Nvfp4Tensor& b, const torch::Tensor& out, bool accumulate,
+      const torch::Tensor& alpha = {});
+
+// as nvfp4_gemm_cublas, per set_nvfp4_gemm_backend
+void nvfp4_gemm_into(
+      const Nvfp4Tensor& a, const Nvfp4Tensor& b, const torch::Tensor& out, bool accumulate,
+      const torch::Tensor& alpha = {});
+
 // a (M, K) . b (N, K)^T as out_dtype: a, b contiguous e4m3 with their MX scales, as _scaled_mm(a, b.t(), a_scale,
 // b_scale). Cutlass: bf16 or fp32 out, dims % 128 (else _scaled_mm).
 torch::Tensor mx_gemm(

@@ -296,6 +296,34 @@ TEST(Nvfp4, GemmMatchesDequantized) {
   EXPECT_LT(rel_err(out, torch::mm(ma.values.to(torch::kFloat32), mb.values.to(torch::kFloat32).t())), 0.35);
 }
 
+// cuBLASLt reads the operands as CUTLASS lays them out (VEC16_UE4M3 scales, the tensor scales as a device alpha):
+// the same product up to summation order
+TEST(Nvfp4, GemmCublasMatchesCutlass) {
+  torch::manual_seed(0);
+  const auto ma = mx_of(spread(256, 512).to(torch::kBFloat16)), mb = mx_of(spread(384, 512).to(torch::kBFloat16));
+  const auto qa = mx_to_nvfp4(ma.data, ma.scale, true, true, 1), qb = mx_to_nvfp4(mb.data, mb.scale, true, false);
+  auto cutlass = torch::zeros({256, 384}, kCuda), cublas = torch::zeros({256, 384}, kCuda);
+  set_nvfp4_gemm_backend(Nvfp4GemmBackend::Cutlass);
+  nvfp4_gemm_f32(qa, qb, cutlass, false);
+  const auto cutlass_bf16 = nvfp4_gemm(qa, qb);
+  set_nvfp4_gemm_backend(Nvfp4GemmBackend::Cublas);
+  nvfp4_gemm_f32(qa, qb, cublas, false);
+  const auto cublas_bf16 = nvfp4_gemm(qa, qb);
+  set_nvfp4_gemm_backend(Nvfp4GemmBackend::Auto); // restored below
+  EXPECT_GT(cutlass.abs().max().item<float>(), 0.f);
+  EXPECT_LT(rel_err(cublas, cutlass), 1e-6);
+  EXPECT_LT(rel_err(cublas_bf16.to(torch::kFloat32), cutlass_bf16.to(torch::kFloat32)), 1e-2);
+  // accumulate with alpha
+  auto acc = torch::ones({256, 384}, kCuda);
+  nvfp4_gemm_cublas(qa, qb, acc, true, torch::full({}, 2.f, kCuda));
+  EXPECT_LT(rel_err(acc, 1 + 2 * cutlass), 1e-6);
+  // Auto picks per shape and runs
+  auto out = torch::zeros({256, 384}, kCuda);
+  nvfp4_gemm_f32(qa, qb, out, false);
+  EXPECT_LT(rel_err(out, cutlass), 1e-6);
+  set_nvfp4_gemm_backend(Nvfp4GemmBackend::Cutlass);
+}
+
 // ---------------------------------------------------------------------------------------------------------------
 // Kernels writing NVFP4 transposes (Nvfp4Target): the simulation's bits at the power-of-two tensor scale they pick.
 

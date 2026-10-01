@@ -50,4 +50,8 @@ void nvfp4_to_bf16(
 // MX as mx_to_nvfp4 reads it -> bf16 (rows, cols), exact
 void mx_to_bf16(const void* data, const void* scale, int64_t rows, int64_t cols, void* out, cudaStream_t stream);
 
+// *out = a_amax / (6 * 448) * (b_amax / (6 * 448)) (* *alpha): the NVFP4 GEMMs' alpha as a device scalar for
+// cuBLASLt (CUTLASS computes it in the epilogue, nvfp4_alpha.cuh). Null amaxes: 1.
+void nvfp4_alpha(const float* a_amax, const float* b_amax, const float* alpha, float* out, cudaStream_t stream);
+
 } // namespace nanochat::kernels

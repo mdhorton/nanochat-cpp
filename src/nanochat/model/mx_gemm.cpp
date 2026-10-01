@@ -12,6 +12,8 @@
 #include <cublasLt.h>
 
 #include "nanochat/model/mx_gemm_kernel.h"
+#include "nanochat/model/nvfp4_gemm_kernel.h"
+#include "nanochat/model/nvfp4_kernel.h"
 
 namespace nanochat {
 
@@ -342,6 +344,167 @@ void mx_gemm_f32(
     run_cutlass(out);
   else
     run_cublas(out);
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// NVFP4 GEMMs
+
+namespace {
+
+std::atomic<Nvfp4GemmBackend> nvfp4_backend{Nvfp4GemmBackend::Cutlass};
+
+// the device alphas of cuBLASLt's pointer mode: a ring per device, reused in stream order (one stream)
+float* nvfp4_alpha_slot(const torch::Device& device) {
+  constexpr int64_t kSlots = 4096;
+  static std::mutex mutex;
+  static std::map<int, torch::Tensor> rings;
+  static int64_t next = 0;
+  const std::lock_guard lock(mutex);
+  auto& t = rings[device.index()];
+  if (!t.defined())
+    t = torch::empty({kSlots}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
+  return t.data_ptr<float>() + next++ % kSlots;
+}
+
+using Nvfp4Key = std::tuple<int64_t, int64_t, int64_t, bool, bool, size_t>; // M, N, K, f32, accumulate, workspace
+std::map<Nvfp4Key, cublasLtMatmulAlgo_t> nvfp4_algos;                       // the heuristic's choice per shape
+std::map<Nvfp4Key, bool> nvfp4_cublas_faster;                               // Auto's choice per shape
+
+void nvfp4_shapes(
+      const Nvfp4Tensor& a, const Nvfp4Tensor& b, const torch::Tensor& out, bool accumulate, const torch::Tensor& alpha,
+      const char* what, int64_t& M, int64_t& N, int64_t& K, bool& f32) {
+  M = a.data.size(0), N = b.data.size(0), K = a.data.size(1) * 2;
+  f32 = out.scalar_type() == torch::kFloat32;
+  TORCH_CHECK(
+        b.data.size(1) * 2 == K && out.is_contiguous() && out.size(0) == M && out.size(1) == N &&
+              (f32 || (out.scalar_type() == torch::kBFloat16 && !accumulate && !alpha.defined())),
+        what, ": shape mismatch");
+  TORCH_CHECK(
+        !alpha.defined() || (alpha.numel() == 1 && alpha.scalar_type() == torch::kFloat32 && alpha.is_cuda()), what,
+        ": alpha must be a device fp32 scalar");
+}
+
+void nvfp4_gemm_cutlass(
+      const Nvfp4Tensor& a, const Nvfp4Tensor& b, const torch::Tensor& out, bool accumulate,
+      const torch::Tensor& alpha) {
+  int64_t M, N, K;
+  bool f32;
+  nvfp4_shapes(a, b, out, accumulate, alpha, "nvfp4_gemm_cutlass", M, N, K, f32);
+  const auto stream = at::cuda::getCurrentCUDAStream().stream();
+  const float *a_amax = a.amax.defined() ? a.amax.data_ptr<float>() : nullptr,
+              *b_amax = b.amax.defined() ? b.amax.data_ptr<float>() : nullptr;
+  check_cutlass(
+        f32 ? kernels::cutlass_nvfp4_gemm_f32(
+                    a.data.data_ptr(), a.scale.data_ptr(), b.data.data_ptr(), b.scale.data_ptr(), out.data_ptr<float>(),
+                    M, N, K, a_amax, b_amax, alpha.defined() ? alpha.data_ptr<float>() : nullptr, accumulate, stream)
+            : kernels::cutlass_nvfp4_gemm_bf16(
+                    a.data.data_ptr(), a.scale.data_ptr(), b.data.data_ptr(), b.scale.data_ptr(), out.data_ptr(), M, N,
+                    K, a_amax, b_amax, stream));
+}
+
+} // namespace
+
+void set_nvfp4_gemm_backend(Nvfp4GemmBackend b) {
+  nvfp4_backend = b;
+}
+
+Nvfp4GemmBackend nvfp4_gemm_backend() {
+  return nvfp4_backend;
+}
+
+void nvfp4_gemm_cublas(
+      const Nvfp4Tensor& a, const Nvfp4Tensor& b, const torch::Tensor& out, bool accumulate,
+      const torch::Tensor& alpha) {
+  int64_t M, N, K;
+  bool f32;
+  nvfp4_shapes(a, b, out, accumulate, alpha, "nvfp4_gemm_cublas", M, N, K, f32);
+  const auto handle = at::cuda::getCurrentCUDABlasLtHandle();
+  const auto stream = at::cuda::getCurrentCUDAStream();
+  void* workspace = at::cuda::getCUDABlasLtWorkspace();
+  const size_t ws = at::cuda::getCUDABlasLtWorkspaceSize();
+  float* alpha_dev = nvfp4_alpha_slot(out.device());
+  kernels::nvfp4_alpha(
+        a.amax.defined() ? a.amax.data_ptr<float>() : nullptr, b.amax.defined() ? b.amax.data_ptr<float>() : nullptr,
+        alpha.defined() ? alpha.data_ptr<float>() : nullptr, alpha_dev, stream.stream());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+  // column-major: D^T (N, M) = b (K-major, op T) . a^T (K-major, op N), C = D = out
+  Descriptors d;
+  check(cublasLtMatmulDescCreate(&d.desc, CUBLAS_COMPUTE_32F, CUDA_R_32F), "cublasLtMatmulDescCreate");
+  set_attr(d.desc, CUBLASLT_MATMUL_DESC_TRANSA, CUBLAS_OP_T);
+  set_attr(d.desc, CUBLASLT_MATMUL_DESC_TRANSB, CUBLAS_OP_N);
+  set_attr<int32_t>(d.desc, CUBLASLT_MATMUL_DESC_POINTER_MODE, CUBLASLT_POINTER_MODE_DEVICE);
+  set_attr<const void*>(d.desc, CUBLASLT_MATMUL_DESC_A_SCALE_POINTER, b.scale.data_ptr());
+  set_attr<const void*>(d.desc, CUBLASLT_MATMUL_DESC_B_SCALE_POINTER, a.scale.data_ptr());
+  set_attr(d.desc, CUBLASLT_MATMUL_DESC_A_SCALE_MODE, CUBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3);
+  set_attr(d.desc, CUBLASLT_MATMUL_DESC_B_SCALE_MODE, CUBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3);
+  check(cublasLtMatrixLayoutCreate(&d.la, CUDA_R_4F_E2M1, K, N, K), "cublasLtMatrixLayoutCreate");
+  check(cublasLtMatrixLayoutCreate(&d.lb, CUDA_R_4F_E2M1, K, M, K), "cublasLtMatrixLayoutCreate");
+  check(cublasLtMatrixLayoutCreate(&d.lc, f32 ? CUDA_R_32F : CUDA_R_16BF, N, M, N), "cublasLtMatrixLayoutCreate");
+
+  cublasLtMatmulAlgo_t algo;
+  const Nvfp4Key key{M, N, K, f32, accumulate, ws};
+  {
+    const std::lock_guard lock(algo_mutex);
+    auto it = nvfp4_algos.find(key);
+    if (it == nvfp4_algos.end()) {
+      check(cublasLtMatmulPreferenceCreate(&d.pref), "cublasLtMatmulPreferenceCreate");
+      check(cublasLtMatmulPreferenceSetAttribute(d.pref, CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &ws, sizeof(ws)),
+            "cublasLtMatmulPreferenceSetAttribute");
+      cublasLtMatmulHeuristicResult_t heur{};
+      int n = 0;
+      check(cublasLtMatmulAlgoGetHeuristic(handle, d.desc, d.la, d.lb, d.lc, d.lc, d.pref, 1, &heur, &n),
+            "cublasLtMatmulAlgoGetHeuristic");
+      TORCH_CHECK(
+            n > 0 && heur.state == CUBLAS_STATUS_SUCCESS, "nvfp4_gemm_cublas: no cuBLASLt algorithm for ", M, "x", N,
+            "x", K);
+      it = nvfp4_algos.emplace(key, heur.algo).first;
+    }
+    algo = it->second;
+  }
+  check(cublasLtMatmul(
+              handle, d.desc, alpha_dev, b.data.data_ptr(), d.la, a.data.data_ptr(), d.lb,
+              device_beta(accumulate, out.device()), out.data_ptr(), d.lc, out.data_ptr(), d.lc, &algo, workspace, ws,
+              stream),
+        "cublasLtMatmul");
+}
+
+void nvfp4_gemm_into(
+      const Nvfp4Tensor& a, const Nvfp4Tensor& b, const torch::Tensor& out, bool accumulate,
+      const torch::Tensor& alpha) {
+  const auto be = nvfp4_backend.load();
+  bool cublas = be == Nvfp4GemmBackend::Cublas;
+  if (be == Nvfp4GemmBackend::Auto) {
+    const Nvfp4Key key{a.data.size(0),     b.data.size(0),
+                       a.data.size(1) * 2, out.scalar_type() == torch::kFloat32,
+                       accumulate,         at::cuda::getCUDABlasLtWorkspaceSize()};
+    std::unique_lock lock(algo_mutex);
+    const auto it = nvfp4_cublas_faster.find(key);
+    if (it != nvfp4_cublas_faster.end())
+      cublas = it->second;
+    else {
+      lock.unlock();
+      const auto scratch = torch::zeros_like(out);
+      const auto stream = at::cuda::getCurrentCUDAStream().stream();
+      const float t_cutlass = time_us(
+            [&] {
+              nvfp4_gemm_cutlass(a, b, scratch, accumulate, alpha);
+            },
+            stream);
+      const float t_cublas = time_us(
+            [&] {
+              nvfp4_gemm_cublas(a, b, scratch, accumulate, alpha);
+            },
+            stream);
+      cublas = t_cublas < kCutlassMargin * t_cutlass;
+      lock.lock();
+      nvfp4_cublas_faster[key] = cublas;
+    }
+  }
+  if (cublas)
+    nvfp4_gemm_cublas(a, b, out, accumulate, alpha);
+  else
+    nvfp4_gemm_cutlass(a, b, out, accumulate, alpha);
 }
 
 } // namespace nanochat

@@ -26,6 +26,7 @@ struct TrainOptions {
   bool fp8 = true;                    // FP8 matmuls for training (eval stays bf16)
   std::string fp8_recipe = "mxfp8";   // mxfp8 or tensorwise (as Python)
   std::string gemm = "cutlass";       // MXFP8 GEMMs: cutlass or cublas (cuBLASLt)
+  std::string nvfp4_gemm = "cutlass"; // NVFP4 GEMMs: cutlass, cublas (cuBLASLt, 3-13% slower on sm120) or auto
   bool fused = true;                  // fused elementwise kernels; false: Python's op-by-op path
   int64_t cublaslt_workspace_mb = 32; // cuBLASLt workspace per stream; its split-K GEMMs need a few MB (torch: 1)
   // simulated NVFP4 (nvfp4_sim.h; slow, for numerics) for these GEMMs of the blocks' Linears: comma list of fwd, dgrad,

@@ -279,3 +279,23 @@ void mx_to_bf16(const void* data, const void* scale, int64_t rows, int64_t cols,
 } // namespace kernels
 
 } // namespace nanochat
+
+namespace nanochat::kernels {
+
+namespace {
+
+__global__ void alpha_kernel(const float* a_amax, const float* b_amax, const float* alpha, float* out) {
+  constexpr float kNorm = kE2m1Max * kE4m3Max;
+  float s = a_amax != nullptr ? *a_amax / kNorm * (*b_amax / kNorm) : 1.f;
+  if (alpha != nullptr)
+    s = s * *alpha;
+  *out = s;
+}
+
+} // namespace
+
+void nvfp4_alpha(const float* a_amax, const float* b_amax, const float* alpha, float* out, cudaStream_t stream) {
+  alpha_kernel<<<1, 1, 0, stream>>>(a_amax, b_amax, alpha, out);
+}
+
+} // namespace nanochat::kernels

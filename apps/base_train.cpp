@@ -32,6 +32,9 @@ static int run(int argc, char** argv) {
   o.fp8 = flags.boolean("fp8", o.fp8, "FP8 training (eval stays bf16); false = bf16, as Python's default");
   o.fp8_recipe = flags.str("fp8-recipe", o.fp8_recipe, "mxfp8 (32-value block scales) or tensorwise (as Python)");
   o.gemm = flags.str("gemm", o.gemm, "MXFP8 GEMMs: cutlass or cublas (cuBLASLt)");
+  o.nvfp4_gemm = flags.str(
+        "nvfp4-gemm", o.nvfp4_gemm,
+        "NVFP4 GEMMs: cutlass, cublas (cuBLASLt) or auto (per shape, whichever timed faster on its first call)");
   o.fused = flags.boolean("fused", o.fused, "fused elementwise CUDA kernels (false = op by op, as Python)");
   o.nvfp4 = flags.str(
         "nvfp4", o.nvfp4,

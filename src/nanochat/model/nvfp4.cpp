@@ -7,6 +7,7 @@
 
 #include <ATen/cuda/CUDAContext.h>
 
+#include "nanochat/model/mx_gemm.h"
 #include "nanochat/model/nvfp4_gemm_kernel.h"
 #include "nanochat/model/nvfp4_kernel.h"
 
@@ -210,11 +211,7 @@ void nvfp4_gemm_f32(
               out.size(1) == N,
         "nvfp4_gemm_f32: shape mismatch");
   TORCH_CHECK(!alpha.defined() || (alpha.numel() == 1 && alpha.scalar_type() == torch::kFloat32));
-  const char* error = kernels::cutlass_nvfp4_gemm_f32(
-        a.data.data_ptr(), a.scale.data_ptr(), b.data.data_ptr(), b.scale.data_ptr(), out.data_ptr<float>(), M, N, K,
-        a.amax.data_ptr<float>(), b.amax.data_ptr<float>(), alpha.defined() ? alpha.data_ptr<float>() : nullptr,
-        accumulate, stream());
-  TORCH_CHECK(error == nullptr, error);
+  nvfp4_gemm_into(a, b, out, accumulate, alpha);
 }
 
 void quantize_nvfp4_2d(const torch::Tensor& w, const kernels::Nvfp4Out& out, const kernels::Nvfp4Out& out_t) {
@@ -231,10 +228,7 @@ torch::Tensor nvfp4_gemm(const Nvfp4Tensor& a, const Nvfp4Tensor& b) {
   const int64_t M = a.data.size(0), N = b.data.size(0), K = a.data.size(1) * 2;
   TORCH_CHECK(b.data.size(1) * 2 == K, "nvfp4_gemm: shape mismatch");
   auto out = torch::empty({M, N}, a.data.options().dtype(torch::kBFloat16));
-  const char* error = kernels::cutlass_nvfp4_gemm_bf16(
-        a.data.data_ptr(), a.scale.data_ptr(), b.data.data_ptr(), b.scale.data_ptr(), out.data_ptr(), M, N, K,
-        a.amax.data_ptr<float>(), b.amax.data_ptr<float>(), stream());
-  TORCH_CHECK(error == nullptr, error);
+  nvfp4_gemm_into(a, b, out, false);
   return out;
 }
 

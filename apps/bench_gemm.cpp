@@ -182,6 +182,15 @@ std::pair<double, double> bench_nvfp4(
     call(c);
     errs.push_back((out.to(torch::kFloat32) - ref).abs().max().item<double>() / ref_max);
   }
+  // cuBLASLt on the same operands (tensor scales 1)
+  const auto one = torch::full({}, 6.f * 448.f, torch::TensorOptions().device(torch::kCUDA)); // amax 6 * 448: alpha 1
+  const nanochat::Nvfp4Tensor a4{a, a_scale, one}, b4{b, b_scale, one};
+  const auto cublas_call = [&] {
+    nanochat::nvfp4_gemm_cublas(a4, b4, out, false);
+  };
+  out.zero_();
+  cublas_call();
+  const double cublas_err = (out.to(torch::kFloat32) - ref).abs().max().item<double>() / ref_max;
   // timing: scales in [0.5, 2], as the data's bits move the power draw
   a_scale.random_(0x30, 0x41);
   b_scale.random_(0x30, 0x41);
@@ -199,6 +208,12 @@ std::pair<double, double> bench_nvfp4(
     std::printf(
           "  nvfp4 %-24s %8.1f us %6.0f TF/s  %.2fx mxfp8  rel err %.2g\n", k::nvfp4_gemm_config_name(c), t.ms * 1e3,
           t.tflops, cutlass_ms / t.ms, errs[c]);
+  }
+  {
+    const auto t = time_calls(cublas_call, flops);
+    std::printf(
+          "  nvfp4 %-24s %8.1f us %6.0f TF/s  %.2fx mxfp8  rel err %.2g  (%.2fx best cutlass)\n", "cublasLt",
+          t.ms * 1e3, t.tflops, cutlass_ms / t.ms, cublas_err, best / t.ms);
   }
   if (sustain_s <= 0)
     return {cutlass_ms, best};
@@ -602,6 +617,13 @@ int main(int argc, char** argv) {
       stage2_s = std::stod(next());
     else if (arg == "--dgrad")
       dgrad_s = std::stod(next());
+    else if (arg == "--nvfp4-gemm") {
+      const auto b = next();
+      nanochat::set_nvfp4_gemm_backend(
+            b == "cublas" ? nanochat::Nvfp4GemmBackend::Cublas
+            : b == "auto" ? nanochat::Nvfp4GemmBackend::Auto
+                          : nanochat::Nvfp4GemmBackend::Cutlass);
+    }
     else if (arg == "--shape") {
       int64_t m, n, k;
       if (std::sscanf(next().c_str(), "%ld,%ld,%ld", &m, &n, &k) != 3)
@@ -611,7 +633,8 @@ int main(int argc, char** argv) {
     else
       return std::fprintf(
                    stderr, "usage: bench_gemm [--tokens T] [--embd C] [--algos N] [--f32] [--shape M,N,K] "
-                           "[--torch-ws-mb MB] [--fp4] [--sustain S] [--wgrad S] [--stage2 S] [--dgrad S]\n"),
+                           "[--torch-ws-mb MB] [--fp4] [--sustain S] [--wgrad S] [--stage2 S] [--dgrad S] "
+                           "[--nvfp4-gemm cutlass|cublas|auto]\n"),
              2;
   }
   torch::manual_seed(0);
