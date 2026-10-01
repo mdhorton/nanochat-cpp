@@ -205,6 +205,7 @@ nlohmann::json options_to_json(const TrainOptions& o) {
         {"fp8_recipe", o.fp8_recipe},
         {"gemm", o.gemm},
         {"fused", o.fused},
+        {"muon_fused", o.muon_fused},
         {"nvfp4", o.nvfp4},
         {"nvfp4_rht", o.nvfp4_rht},
         {"nvfp4_sr", o.nvfp4_sr},
@@ -216,6 +217,7 @@ nlohmann::json options_to_json(const TrainOptions& o) {
         {"nvfp4_wgrad", o.nvfp4_wgrad},
         {"nvfp4_dgrad", o.nvfp4_dgrad},
         {"nvfp4_fwd", o.nvfp4_fwd},
+        {"nvfp4_four_six", o.nvfp4_four_six},
         {"nvfp4_fwd_until", o.nvfp4_fwd_until},
         {"nvfp4_until", o.nvfp4_until},
         {"nvfp4_skip_first", o.nvfp4_skip_first},
@@ -507,9 +509,24 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
     }
   } backward_scope(o.nvfp4_wgrad || o.nvfp4_dgrad ? &backward : nullptr);
 
+  if (o.nvfp4_four_six && !o.nvfp4_fwd)
+    throw std::invalid_argument("nvfp4_four_six: needs nvfp4_fwd");
+
+  struct FourSixScope {
+    explicit FourSixScope(bool on) {
+      set_nvfp4_four_six(on);
+    }
+
+    ~FourSixScope() {
+      set_nvfp4_four_six(false);
+    }
+  } four_six_scope(o.nvfp4_four_six);
+
   if (o.nvfp4_fwd) {
     const int n = model->set_nvfp4_fwd(true, o.nvfp4_skip_first, o.nvfp4_skip_last);
-    print(std::format("NVFP4 forward GEMMs for {} linear layers (16x16 weight blocks)", n));
+    print(std::format(
+          "NVFP4 forward GEMMs for {} linear layers (16x16 weight blocks{})", n,
+          o.nvfp4_four_six ? ", 4/6 scales" : ""));
   }
 
   if (o.nvfp4_wgrad)
@@ -577,6 +594,9 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
   auto optimizer = setup_optimizer(
         *model, o.unembedding_lr * bs, o.embedding_lr * bs, o.matrix_lr * bs, plan.weight_decay_scaled,
         o.scalar_lr * bs, &dist);
+  optimizer.set_fused_muon(o.muon_fused);
+  if (o.muon_fused)
+    print("Muon update: fused kernels");
   if (resuming) {
     optimizer.load_state_dict(ckpt->optimizer, ckpt->optimizer_metadata);
     ckpt->optimizer.clear();

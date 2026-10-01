@@ -21,7 +21,7 @@ void mx_to_nvfp4(
 
 // x (rows, cols) row-major fp32 (else bf16) -> NVFP4 in 16x16 blocks (one scale each, round to nearest) as producers
 // write it (fp8_kernel.h's Nvfp4Out): out along cols, and out_t (data null: none) x's transpose along rows, the same
-// values (W and W^T for forward and dgrad). rows, cols % 16.
+// values (W and W^T for forward and dgrad); out.four_six: 4/6 block scales (nvfp4.cuh) for both. rows, cols % 16.
 void quantize_nvfp4_2d(
       const void* x, bool x_f32, int64_t rows, int64_t cols, const Nvfp4Out& out, const Nvfp4Out& out_t,
       cudaStream_t stream);

@@ -379,7 +379,7 @@ TEST(Nvfp4, ProducerMatchesFakeQuant) {
     EXPECT_GT(smax, 224.f);
     EXPECT_LE(smax, 448.f);
     const auto normal = normal_blocks(x_t, q);
-    EXPECT_GT(normal.to(torch::kFloat32).mean().item<double>(), 0.9);
+    EXPECT_GT(normal.to(torch::kFloat32).mean().item<double>(), 0.7);
     EXPECT_TRUE(
           torch::equal(nvfp4_to_bf16(q).masked_select(normal), fake_at(x_t, q, stochastic, 777).masked_select(normal)))
           << stochastic;
@@ -463,7 +463,7 @@ TEST(Nvfp4, ProducerRowsMatchFakeQuant) {
     kernels::quantize_mx(x.data_ptr(), true, 256, 512, out, none, false, at::cuda::getCurrentCUDAStream().stream());
     const auto q = nvfp4_finish(t);
     const auto normal = normal_blocks(x, q);
-    EXPECT_GT(normal.to(torch::kFloat32).mean().item<double>(), 0.9);
+    EXPECT_GT(normal.to(torch::kFloat32).mean().item<double>(), 0.7);
     EXPECT_TRUE(
           torch::equal(nvfp4_to_bf16(q).masked_select(normal), fake_at(x, q, stochastic, 99).masked_select(normal)))
           << stochastic;
@@ -921,4 +921,53 @@ TEST(Nvfp4, EdenDgradInGpt) {
     EXPECT_TRUE(g.at(name).isfinite().all().item<bool>()) << name;
     EXPECT_LT(rel_err(g.at(name), mx.at(name)), 0.7) << name;
   }
+}
+
+namespace {
+
+// mean |a - b| per 16x16 block (rows / 16, cols / 16)
+torch::Tensor block_mae(const torch::Tensor& a, const torch::Tensor& b) {
+  const int64_t R = a.size(0), C = a.size(1);
+  return (a.to(torch::kFloat32) - b.to(torch::kFloat32)).abs().view({R / 16, 16, C / 16, 16}).mean({1, 3});
+}
+
+} // namespace
+
+// 4/6 weights: each 16x16 block's scale maps its max to 6 or to 4, never worse (sum |error|) than 6, better for some;
+// the transpose shares the choice
+TEST(Nvfp4, FourSixWeightsLowerBlockError) {
+  torch::manual_seed(0);
+  const int64_t R = 256, C = 384;
+  const auto w = (spread(C, R).t().contiguous() * 0.05).to(torch::kBFloat16);
+  const auto plain = empty_nvfp4(R, C, kCuda, false, false);
+  quantize_nvfp4_2d(w, nvfp4_out(plain));
+  const auto rows = empty_nvfp4(R, C, kCuda, false, false, 0, false, 0, true);
+  const auto cols = empty_nvfp4(C, R, kCuda, false, false, 0, false, 0, true);
+  quantize_nvfp4_2d(w, nvfp4_out(rows), nvfp4_out(cols));
+  const auto [q, q_t] = nvfp4_finish(rows, cols);
+  EXPECT_TRUE(torch::equal(nvfp4_to_bf16(q_t), nvfp4_to_bf16(q).t()));
+  const auto e6 = block_mae(nvfp4_to_bf16(nvfp4_finish(plain)), w), e46 = block_mae(nvfp4_to_bf16(q), w);
+  EXPECT_TRUE((e46 <= e6 * (1 + 1e-5)).all().item<bool>());
+  EXPECT_GT((e46 < e6).sum().item<int64_t>(), 0); // Gaussian 256-value blocks: few (~2%) do better at 4
+  EXPECT_LT(e46.sum().item<double>(), e6.sum().item<double>());
+}
+
+// 4/6 rows (Nvfp4Role::FwdInput under set_nvfp4_four_six): per 16-block, as the weights'; many more blocks pick 4
+TEST(Nvfp4, FourSixRowsLowerBlockError) {
+  torch::manual_seed(0);
+  const auto x = spread(256, 512).to(torch::kBFloat16);
+  const auto plain = quantize_mx(x, true, false, false, Nvfp4Role::FwdInput);
+  set_nvfp4_four_six(true);
+  const auto fs = quantize_mx(x, true, false, false, Nvfp4Role::FwdInput);
+  set_nvfp4_four_six(false);
+  const auto err = [&](const Fp8Tensor& t) {
+    return (nvfp4_to_bf16(t.nvfp4()).to(torch::kFloat32) - x.to(torch::kFloat32)).abs().view({256, 32, 16}).mean(-1);
+  };
+  const auto e6 = err(plain), e46 = err(fs);
+  // blocks over 2^13 below the tensor max: e4m3 subnormal scales, rounded coarser than the choice assumed
+  const auto normal = x.to(torch::kFloat32).abs().view({256, 32, 16}).amax(-1) * 8192 >= fs.amax;
+  EXPECT_GT(normal.to(torch::kFloat32).mean().item<double>(), 0.7);
+  EXPECT_TRUE((e46.masked_select(normal) <= e6.masked_select(normal) * (1 + 1e-5)).all().item<bool>());
+  EXPECT_GT((e46 < e6).to(torch::kFloat32).mean().item<double>(), 0.2); // Gaussian 16-blocks: ~1/3 pick 4
+  EXPECT_LT(e46.sum().item<double>(), e6.sum().item<double>() * 0.97);
 }

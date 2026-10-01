@@ -28,6 +28,7 @@ struct TrainOptions {
   std::string gemm = "cutlass";       // MXFP8 GEMMs: cutlass or cublas (cuBLASLt)
   std::string nvfp4_gemm = "cutlass"; // NVFP4 GEMMs: cutlass, cublas (cuBLASLt, 3-13% slower on sm120) or auto
   bool fused = true;                  // fused elementwise kernels; false: Python's op-by-op path
+  bool muon_fused = false;            // Muon's update in fused kernels (not bit-identical to Python's)
   int64_t cublaslt_workspace_mb = 32; // cuBLASLt workspace per stream; its split-K GEMMs need a few MB (torch: 1)
   // simulated NVFP4 (nvfp4_sim.h; slow, for numerics) for these GEMMs of the blocks' Linears: comma list of fwd, dgrad,
   // wgrad; empty: off. Needs fp8 with mxfp8, which the other GEMMs, blocks and lm_head keep.
@@ -45,6 +46,8 @@ struct TrainOptions {
   // real NVFP4 weight / input gradients for the Linears but lm_head (nvfp4.h), with nvfp4_rht / nvfp4_sr's wgrad /
   // dgrad (no rht) and seed; forward GEMMs for the blocks' Linears (16x16 weight blocks, round to nearest)
   bool nvfp4_wgrad = false, nvfp4_dgrad = false, nvfp4_fwd = false;
+  // nvfp4_fwd: 4/6 block scales (nvfp4.h's set_nvfp4_four_six) for the weights and the row-written inputs
+  bool nvfp4_four_six = false;
   // MXFP8 from a step on: the NVFP4 forward GEMMs (nvfp4_fwd_until) or all NVFP4 GEMMs (nvfp4_until), real or
   // simulated. "warmdown": its first step; a fraction of the steps; empty: never
   std::string nvfp4_fwd_until, nvfp4_until;

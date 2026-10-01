@@ -73,6 +73,26 @@ __device__ __forceinline__ uint32_t nvfp4_codes8(
   return e2m1x8_rn(a);
 }
 
+// the values of 8 e2m1 codes (as e2m1x8_rn's), exact
+__device__ __forceinline__ void e2m1x8_values(uint32_t codes, float (&q)[8]) {
+  uint32_t h[4];
+  asm("{\n"
+      " .reg .b8 b0, b1, b2, b3;\n"
+      " mov.b32 {b0, b1, b2, b3}, %4;\n"
+      " cvt.rn.f16x2.e2m1x2 %0, b0;\n"
+      " cvt.rn.f16x2.e2m1x2 %1, b1;\n"
+      " cvt.rn.f16x2.e2m1x2 %2, b2;\n"
+      " cvt.rn.f16x2.e2m1x2 %3, b3;\n"
+      "}"
+      : "=r"(h[0]), "=r"(h[1]), "=r"(h[2]), "=r"(h[3])
+      : "r"(codes));
+#pragma unroll
+  for (int k = 0; k < 4; ++k) {
+    const float2 f = __half22float2(*reinterpret_cast<const __half2*>(&h[k]));
+    q[2 * k] = f.x, q[2 * k + 1] = f.y;
+  }
+}
+
 // the tensor's encode scale: amax maps to 6 * 448
 __device__ __forceinline__ float nvfp4_encode(float tensor_amax) {
   return tensor_amax > 0.f ? kE2m1Max * kE4m3Max / tensor_amax : 0.f;
@@ -184,10 +204,50 @@ __device__ __forceinline__ float nvfp4_store16(float (&v)[16], const kernels::Nv
   return s;
 }
 
+// 4/6 (Chmiel et al. 2025, "Four Over Six"): a block's scale maps its amax m to 6 or to 4, whichever rounds the block
+// (to nearest) with the lower sum of |error|: e2m1 has nothing between 4 and 6, so blocks whose values crowd below
+// the max do better at 4. Candidates (s, to_q as nvfp4_store16's) in [0] (6) and [1] (4); the tensor scale
+// (nvfp4_finish) absorbs the larger scales, so no 256 bound is needed.
+__device__ __forceinline__ void nvfp4_four_six_scales(float m, float (&s)[2], float (&to_q)[2]) {
+  s[0] = nvfp4_round_scale(nvfp4_div6(m)), s[1] = nvfp4_round_scale(m * .25f);
+#pragma unroll
+  for (int k = 0; k < 2; ++k)
+    to_q[k] = s[k] > 0.f ? nvfp4_rcp(s[k]) : 0.f;
+}
+
+// sum |v * to_q - e2m1(v * to_q)| over 8 values (round to nearest), in e2m1 units
+__device__ __forceinline__ float nvfp4_err8(const float* v, float to_q) {
+  float a[8], q[8], e = 0.f;
+#pragma unroll
+  for (int k = 0; k < 8; ++k)
+    a[k] = v[k] * to_q;
+  e2m1x8_values(e2m1x8_rn(a), q);
+#pragma unroll
+  for (int k = 0; k < 8; ++k)
+    e += fabsf(a[k] - q[k]);
+  return e;
+}
+
+// the 4/6 choice (true: 4) from the block's errors e (in e2m1 units, reduced over the block) at its scales s; ties: 6
+__device__ __forceinline__ bool nvfp4_pick_four(const float (&s)[2], const float (&e)[2]) {
+  return s[1] * e[1] < s[0] * e[0];
+}
+
 // nvfp4_store8's stores, the block's amax m given (no rht)
 __device__ __forceinline__ float nvfp4_store8_amax(
       const float (&v)[8], float m, const kernels::Nvfp4Out& o, int64_t row, int64_t col) {
-  const float s = nvfp4_round_scale(nvfp4_div6(m)), to_q = s > 0.f ? nvfp4_rcp(s) : 0.f;
+  float s = nvfp4_round_scale(nvfp4_div6(m)), to_q = s > 0.f ? nvfp4_rcp(s) : 0.f;
+  if (o.four_six) {
+    float cs[2], ct[2], e[2];
+    nvfp4_four_six_scales(m, cs, ct);
+#pragma unroll
+    for (int k = 0; k < 2; ++k) {
+      e[k] = nvfp4_err8(v, ct[k]);
+      e[k] += __shfl_xor_sync(0xffffffff, e[k], 1);
+    }
+    const bool four = nvfp4_pick_four(cs, e);
+    s = four ? cs[1] : cs[0], to_q = four ? ct[1] : ct[0];
+  }
   const int64_t i = row * o.ld + col;
   *reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(o.data) + i / 2) = nvfp4_pack8(v, to_q, o, o.index0 + i);
   if (col % 16 == 0)
@@ -211,26 +271,6 @@ __device__ __forceinline__ float nvfp4_store8(float (&v)[8], const kernels::Nvfp
 constexpr float kEdenValMax = 6.f / (17.f / 16 * 0.93f);
 // each operand's share of H64's normalization (1 / sqrt(64)), so the product carries the orthonormal rotation
 constexpr float kEdenMul = 1.f / 8;
-
-// the values of 8 e2m1 codes (as e2m1x8_rn's), exact
-__device__ __forceinline__ void e2m1x8_values(uint32_t codes, float (&q)[8]) {
-  uint32_t h[4];
-  asm("{\n"
-      " .reg .b8 b0, b1, b2, b3;\n"
-      " mov.b32 {b0, b1, b2, b3}, %4;\n"
-      " cvt.rn.f16x2.e2m1x2 %0, b0;\n"
-      " cvt.rn.f16x2.e2m1x2 %1, b1;\n"
-      " cvt.rn.f16x2.e2m1x2 %2, b2;\n"
-      " cvt.rn.f16x2.e2m1x2 %3, b3;\n"
-      "}"
-      : "=r"(h[0]), "=r"(h[1]), "=r"(h[2]), "=r"(h[3])
-      : "r"(codes));
-#pragma unroll
-  for (int k = 0; k < 4; ++k) {
-    const float2 f = __half22float2(*reinterpret_cast<const __half2*>(&h[k]));
-    q[2 * k] = f.x, q[2 * k + 1] = f.y;
-  }
-}
 
 // MS-EDEN store of one 64-group of row `row` from col (% 64) by 8 lanes (lane % 8 = k holding values 8k .. 8k + 7):
 // x . diag(signs) . H64 / 8 (H64 = H8 over the values x H8 over the lanes, Sylvester order over the value index), each

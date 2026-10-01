@@ -50,11 +50,12 @@ struct Nvfp4Target {
   uint64_t seed = 0;
   bool eden = false; // MS-EDEN rows (kernels::Nvfp4Out's eden): the scales' rounding from seed
   uint64_t eden_signs = 0;
+  bool four_six = false; // 4/6 block scales (kernels::Nvfp4Out's four_six; round to nearest only)
 };
 
 Nvfp4Target empty_nvfp4(
       int64_t R, int64_t C, const torch::TensorOptions& options, bool rht, bool stochastic, uint64_t seed = 0,
-      bool eden = false, uint64_t eden_signs = 0);
+      bool eden = false, uint64_t eden_signs = 0, bool four_six = false);
 
 // The kernels' view of t from (row, col) on; row % 128, col % 64.
 kernels::Nvfp4Out nvfp4_out(const Nvfp4Target& t, int64_t row = 0, int64_t col = 0);
@@ -101,6 +102,11 @@ Nvfp4Target nvfp4_target(
 
 // Whether dgrad GEMMs take MS-EDEN operands (nvfp4_backward()'s eden_dgrad)
 bool nvfp4_eden_dgrad();
+
+// Process-wide: forward operands (Nvfp4Role::FwdInput) with 4/6 block scales (Nvfp4Target's four_six): the weights'
+// 16x16 blocks and the inputs written as rows (not the relu² epilogue's)
+void set_nvfp4_four_six(bool on);
+bool nvfp4_four_six();
 
 // Fresh random signs for a dgrad GEMM's rotation (from nvfp4_backward()'s seed), drawn when its weight is quantized
 uint64_t nvfp4_eden_signs();

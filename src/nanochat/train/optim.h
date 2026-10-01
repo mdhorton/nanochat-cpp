@@ -39,6 +39,11 @@ public:
 
   void step();
 
+  // Muon's update in fused CUDA kernels (muon_kernel.h; not bit-identical to the op path, which is Python's)
+  void set_fused_muon(bool on) {
+    fused_muon_ = on;
+  }
+
   // Instead of Module::zero_grad(true): AdamW grads to none, Muon grads the zeroed rows of their group's stack.
   void zero_grad();
 
@@ -96,6 +101,7 @@ private:
   }
 
   Dist* dist_;
+  bool fused_muon_ = false;
   std::vector<OptimGroup> groups_;
   std::vector<std::vector<AdamWState>> adamw_states_; // per group, per param
   std::vector<MuonState> muon_states_;                // per group

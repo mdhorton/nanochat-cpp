@@ -3,6 +3,7 @@
 #include <ATen/cuda/CUDAContext.h>
 
 #include "nanochat/train/adamw_kernel.h"
+#include "nanochat/train/muon_kernel.h"
 
 #include <array>
 #include <cmath>
@@ -138,6 +139,42 @@ void muon_update(
   auto update = lr * g;
   auto decay = ((lr * wd) * stacked_params) * mask;
   stacked_params.sub_(update + decay);
+}
+
+// muon_update in fused kernels (muon_kernel.h), Polar Express's polynomial in the GEMMs' alpha / beta. fp32 CUDA
+// stacks, contiguous.
+void muon_update_fused(
+      const torch::Tensor& grads, const torch::Tensor& params, const torch::Tensor& momentum_buffer,
+      const torch::Tensor& second_momentum_buffer, float momentum, float lr, float wd, float beta2, int ns_steps) {
+  for (const auto& t : {grads, params, momentum_buffer, second_momentum_buffer})
+    TORCH_CHECK(
+          t.is_cuda() && t.is_contiguous() && t.scalar_type() == torch::kFloat32,
+          "muon_update_fused: expected contiguous fp32 CUDA tensors");
+  const int64_t k = params.size(0), m = params.size(1), n = params.size(2);
+  const auto stream = at::cuda::getCurrentCUDAStream().stream();
+  auto X = torch::empty({k, m, n}, params.options().dtype(torch::kBFloat16));
+  auto scratch = torch::empty({std::max(k * m, kernels::muon_post_scratch(k, m, n))}, params.options());
+  kernels::muon_pre(
+        grads.data_ptr<float>(), momentum_buffer.data_ptr<float>(), X.data_ptr(), scratch.data_ptr<float>(), k, m, n,
+        momentum, stream);
+  const bool tall = m > n;
+  for (int i = 0; i < ns_steps; ++i) {
+    const auto [a, b, c] = kPolarExpressCoeffs[i];
+    if (tall) {
+      const auto A = at::bmm(X.mT(), X);
+      X = at::baddbmm(X, X, at::baddbmm(A, A, A, b, c), a, 1);
+    }
+    else {
+      const auto A = at::bmm(X, X.mT());
+      X = at::baddbmm(X, at::baddbmm(A, A, A, b, c), X, a, 1);
+    }
+  }
+  kernels::muon_post(
+        X.data_ptr(), params.data_ptr<float>(), second_momentum_buffer.data_ptr<float>(), scratch.data_ptr<float>(), k,
+        m, n, lr, wd, beta2, stream);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  for (const auto& t : {params, momentum_buffer, second_momentum_buffer})
+    t.unsafeGetTensorImpl()->bump_version();
 }
 
 } // namespace
@@ -304,10 +341,17 @@ void MuonAdamW::compute_muon(
     owned = torch::stack(std::vector<torch::Tensor>(params.begin() + start, params.begin() + start + num_owned));
     // tall matrices get a larger lr
     const double lr = group.lr * std::pow(std::max(1.0, static_cast<double>(m) / static_cast<double>(n)), 0.5);
-    muon_update(
-          pending.grads[0].slice(0, 0, num_owned), owned, state.momentum_buffer.slice(0, 0, num_owned),
-          state.second_momentum_buffer.slice(0, 0, num_owned), cpu_scalar(group.momentum), cpu_scalar(lr),
-          cpu_scalar(group.weight_decay), cpu_scalar(group.beta2), group.ns_steps, red_dim);
+    if (fused_muon_ && owned.is_cuda())
+      muon_update_fused(
+            pending.grads[0].slice(0, 0, num_owned), owned, state.momentum_buffer.slice(0, 0, num_owned),
+            state.second_momentum_buffer.slice(0, 0, num_owned), static_cast<float>(group.momentum),
+            static_cast<float>(lr), static_cast<float>(group.weight_decay), static_cast<float>(group.beta2),
+            group.ns_steps);
+    else
+      muon_update(
+            pending.grads[0].slice(0, 0, num_owned), owned, state.momentum_buffer.slice(0, 0, num_owned),
+            state.second_momentum_buffer.slice(0, 0, num_owned), cpu_scalar(group.momentum), cpu_scalar(lr),
+            cpu_scalar(group.weight_decay), cpu_scalar(group.beta2), group.ns_steps, red_dim);
   }
   if (!pending.stacked.defined()) { // one rank: the updated stack maps onto the params
     gathers.push_back({{}, owned, &params});

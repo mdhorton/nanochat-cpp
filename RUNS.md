@@ -98,11 +98,16 @@ Run 30: GPU0 is about 5-10% slower. This gives a few extra micro-steps to GPU1 s
 | 36  |   71,108 | 4.484975 | 1.332725 |  17.0g | 21.18m | --nvfp4-wgrad --nvfp4-dgrad --nvfp4-fwd --nvfp4-fwd-until=warmdown |
 | 37  |   71,049 | 4.413067 | 1.308297 |  17.0g | 21.86m | run 33 with --seed=43                                             |
 | 38  |   70,238 | 4.411165 | 1.307771 |  17.0g | 22.13m | run 34 with --seed=43                                             |
+| 39  |   71,441 | 4.424313 | 1.311929 |  16.8g | 21.69m | run 33 with --muon-fused                                          |
 
 Run 36: NVFP4 forward for steps 0-34 (80,457 tok/s), MXFP8 forward from the warmdown at step 35 (71,160 tok/s).
 
 Runs 37-38: the seed (init + stochastic rounding, same data order) moves bpb by 0.024 at 100 steps, so only same-seed
 pairs compare. EDEN vs SR dgrad: -0.0017 (seed 42), -0.0005 (seed 43) for -1.2% tok/s.
+
+Run 39: fused Muon, +0.3% tok/s, -0.020 bpb vs run 33 at the same seed. Not bit-identical, so at d24 the trajectory
+diverges like a seed change: medium-d12 seed pairs (cache/metrics/muon) show the fused update +0.0028 (seed 42) and
++0.0023 (seed 43) worse.
 
 # full run @d12
 

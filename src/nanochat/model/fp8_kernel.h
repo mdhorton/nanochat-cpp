@@ -44,7 +44,8 @@ struct Nvfp4Out {
   // eden: MS-EDEN rows (nvfp4.cuh's nvfp4_eden_store8, row stores of whole 64-groups only): each 64 values of a row
   // times diag(eden_signs) . H64 / 8, values to nearest, each block scale times its group's ||x||² / <x, q>, rounded
   // stochastically (seed)
-  bool rht, stochastic, eden;
+  // four_six: 4/6 block scales (nvfp4.cuh's nvfp4_four_six): row stores (nvfp4_store8) and quantize_nvfp4_2d only
+  bool rht, stochastic, eden, four_six;
 };
 
 // MXFP8 (OCP MX) E4M3: one power-of-two (e8m0) scale per 32 consecutive values of a row, the smallest with

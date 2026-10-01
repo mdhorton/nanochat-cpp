@@ -36,6 +36,8 @@ static int run(int argc, char** argv) {
         "nvfp4-gemm", o.nvfp4_gemm,
         "NVFP4 GEMMs: cutlass, cublas (cuBLASLt) or auto (per shape, whichever timed faster on its first call)");
   o.fused = flags.boolean("fused", o.fused, "fused elementwise CUDA kernels (false = op by op, as Python)");
+  o.muon_fused = flags.boolean(
+        "muon-fused", o.muon_fused, "Muon's update in fused CUDA kernels (not bit-identical to Python's op path)");
   o.nvfp4 = flags.str(
         "nvfp4", o.nvfp4,
         "simulated NVFP4 (slow, for numerics) for these GEMMs of the blocks' Linears: comma list of fwd, dgrad, wgrad "
@@ -70,6 +72,10 @@ static int run(int argc, char** argv) {
         "nvfp4-fwd", o.nvfp4_fwd,
         "real NVFP4 forward GEMMs (CUTLASS) for the blocks' Linears: 16x16 weight blocks (dgrad sees the same weight), "
         "round to nearest");
+  o.nvfp4_four_six = flags.boolean(
+        "nvfp4-4over6", o.nvfp4_four_six,
+        "nvfp4-fwd: 4/6 block scales (each 16-block's max to 6 or 4, the lower error) for the weights and the inputs "
+        "written as rows (norm, attention; not relu^2's)");
   o.nvfp4_fwd_until = flags.str(
         "nvfp4-fwd-until", o.nvfp4_fwd_until,
         "nvfp4, nvfp4-fwd: forward GEMMs MXFP8 from this step on: warmdown (its start) or a fraction of the steps "

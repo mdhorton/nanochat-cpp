@@ -16,6 +16,7 @@ namespace nanochat {
 namespace {
 
 std::atomic<const Nvfp4Backward*> backward_options{nullptr};
+std::atomic<bool> four_six_fwd{false};
 std::atomic<uint64_t> seed_counter{1};
 
 cudaStream_t stream() {
@@ -106,9 +107,10 @@ void lease_smax(Nvfp4Target& t, const torch::Device& device) {
 
 Nvfp4Target empty_nvfp4(
       int64_t R, int64_t C, const torch::TensorOptions& options, bool rht, bool stochastic, uint64_t seed, bool eden,
-      uint64_t eden_signs) {
+      uint64_t eden_signs, bool four_six) {
   TORCH_CHECK(R % 128 == 0 && C % 64 == 0, "empty_nvfp4: R % 128, C % 64");
   TORCH_CHECK(!eden || (!rht && !stochastic), "empty_nvfp4: MS-EDEN has its own rounding");
+  TORCH_CHECK(!four_six || (!rht && !stochastic && !eden), "empty_nvfp4: 4/6 rounds to nearest");
   Nvfp4Target t{
         .data = torch::empty({R, C / 2}, options.dtype(torch::kUInt8)),
         .scale16 = torch::empty({R * C / 16}, options.dtype(torch::kInt16)),
@@ -116,7 +118,8 @@ Nvfp4Target empty_nvfp4(
         .stochastic = stochastic,
         .seed = seed,
         .eden = eden,
-        .eden_signs = eden_signs};
+        .eden_signs = eden_signs,
+        .four_six = four_six};
   lease_smax(t, options.device());
   return t;
 }
@@ -137,7 +140,8 @@ kernels::Nvfp4Out nvfp4_out(const Nvfp4Target& t, int64_t row, int64_t col) {
         .epoch = t.epoch,
         .rht = t.rht,
         .stochastic = t.stochastic,
-        .eden = t.eden};
+        .eden = t.eden,
+        .four_six = t.four_six};
 }
 
 namespace {
@@ -247,6 +251,14 @@ uint64_t nvfp4_eden_signs() {
   return z ^ (z >> 31);
 }
 
+void set_nvfp4_four_six(bool on) {
+  four_six_fwd = on;
+}
+
+bool nvfp4_four_six() {
+  return four_six_fwd;
+}
+
 void set_nvfp4_backward(const Nvfp4Backward* options) {
   backward_options = options;
 }
@@ -258,7 +270,7 @@ const Nvfp4Backward* nvfp4_backward() {
 Nvfp4Target nvfp4_target(
       int64_t R, int64_t C, const torch::TensorOptions& options, Nvfp4Role role, uint64_t eden_signs) {
   if (role == Nvfp4Role::FwdInput)
-    return empty_nvfp4(R, C, options, false, false);
+    return empty_nvfp4(R, C, options, false, false, 0, false, 0, nvfp4_four_six());
   const auto* o = nvfp4_backward();
   if (o == nullptr || role == Nvfp4Role::None)
     return {};

@@ -154,7 +154,20 @@ __global__ void quantize_2d_kernel(
 #pragma unroll
   for (int o = 1; o < kGroup; o *= 2)
     m = fmaxf(m, __shfl_xor_sync(0xffffffff, m, o));
-  const float s = nvfp4_round_scale(nvfp4_div6(m)), to_q = s > 0.f ? nvfp4_rcp(s) : 0.f;
+  float s = nvfp4_round_scale(nvfp4_div6(m)), to_q = s > 0.f ? nvfp4_rcp(s) : 0.f;
+  if (out.four_six) { // the block's errors over its 16 rows
+    float cs[2], ct[2], e[2];
+    nvfp4_four_six_scales(m, cs, ct);
+#pragma unroll
+    for (int k = 0; k < 2; ++k) {
+      e[k] = nvfp4_err8(row, ct[k]) + nvfp4_err8(row + 8, ct[k]);
+#pragma unroll
+      for (int o = 1; o < kGroup; o *= 2)
+        e[k] += __shfl_xor_sync(0xffffffff, e[k], o);
+    }
+    const bool four = nvfp4_pick_four(cs, e);
+    s = four ? cs[1] : cs[0], to_q = four ? ct[1] : ct[0];
+  }
   if (active) {
     const auto store = [&](const kernels::Nvfp4Out& o, const float* v, int64_t r, int64_t c) {
       const int64_t j = r * o.ld + c;

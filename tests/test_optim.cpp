@@ -121,3 +121,66 @@ TEST(OptimGolden, StepsMatchPython) {
     }
   }
 }
+
+// The fused Muon update (set_fused_muon) tracks the op path over a few steps with momentum, NorMuon state and cautious
+// weight decay. Without Polar Express the paths differ only by rounding (the bf16 scaling, the norms' order); with it,
+// by Polar Express's bf16 noise vs fp64: the op path ~2-6% at these shapes, 11% at 4x12; the fused GEMM form ~half.
+class FusedMuon : public testing::TestWithParam<int> {};
+
+TEST_P(FusedMuon, MatchesOpPath) {
+  const int ns_steps = GetParam();
+  const auto opts = torch::TensorOptions().device(torch::kCUDA);
+  for (const auto& [m, n] : std::vector<std::pair<int64_t, int64_t>>{{256, 64}, {64, 256}, {128, 128}, {4, 12}}) {
+    const double tol = ns_steps == 0 ? 1e-2 : m * n < 1024 ? 0.2 : 8e-2;
+    torch::manual_seed(0);
+    std::vector<torch::Tensor> ps, qs;
+    for (int j = 0; j < 3; ++j) {
+      ps.push_back((torch::randn({m, n}, opts) * 0.02).requires_grad_());
+      qs.push_back(ps.back().detach().clone().requires_grad_());
+    }
+    const auto group = [&](std::vector<torch::Tensor> params) {
+      return OptimGroup{
+            .kind = OptimGroup::Kind::Muon,
+            .name = "muon",
+            .params = std::move(params),
+            .lr = 0.02,
+            .initial_lr = 0.02,
+            .weight_decay = 0.2,
+            .beta2 = 0.95,
+            .ns_steps = ns_steps};
+    };
+    MuonAdamW ref({group(ps)}), fused({group(qs)});
+    fused.set_fused_muon(true);
+    for (int step = 0; step < 4; ++step) {
+      ref.zero_grad();
+      fused.zero_grad();
+      std::vector<torch::Tensor> before;
+      for (int j = 0; j < 3; ++j) {
+        const auto g = torch::randn({m, n}, opts) * (j + 1);
+        torch::NoGradGuard no_grad;
+        ps[j].mutable_grad().copy_(g);
+        qs[j].mutable_grad().copy_(g);
+        before.push_back(ps[j].detach().clone());
+      }
+      ref.step();
+      fused.step();
+      for (int j = 0; j < 3; ++j) {
+        const auto d_ref = ps[j].detach() - before[j], d_fused = qs[j].detach() - before[j];
+        const double rel = ((d_fused - d_ref).norm() / d_ref.norm()).item<double>();
+        EXPECT_LT(rel, tol) << m << "x" << n << " step " << step << " param " << j;
+        // keep the two runs on the same params, so errors don't compound
+        torch::NoGradGuard no_grad;
+        qs[j].copy_(ps[j]);
+      }
+    }
+    st::Metadata meta_ref, meta_fused;
+    const auto s_ref = ref.state_dict(meta_ref), s_fused = fused.state_dict(meta_fused);
+    for (const auto* key : {"state.0.momentum_buffer", "state.0.second_momentum_buffer"}) {
+      const auto& a = s_ref.at(key);
+      const double rel = ((s_fused.at(key) - a).norm() / a.norm()).item<double>();
+      EXPECT_LT(rel, key[8] == 'm' ? 1e-6 : 2 * tol) << m << "x" << n << " " << key;
+    }
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(Optim, FusedMuon, testing::Values(0, 5));
