@@ -133,7 +133,8 @@ torch::Tensor LinearImpl::forward(const torch::Tensor& x) {
   auto out_shape = input.sizes().vec();
   out_shape.back() = weight.size(0);
   if (nvfp4 != nullptr)
-    return nvfp4_sim_matmul(input.reshape({-1, input.size(-1)}), weight, *nvfp4).reshape(out_shape);
+    return nvfp4_sim_matmul(input.reshape({-1, input.size(-1)}), weight, *nvfp4, nvfp4_id, nvfp4_eden)
+          .reshape(out_shape);
   return fp8_matmul(input.reshape({-1, input.size(-1)}), weight, &fp8_cache, fp8_recipe, nvfp4_fwd).reshape(out_shape);
 }
 
@@ -518,13 +519,22 @@ void GPTImpl::set_fp8_recipe(Fp8Recipe recipe) {
       linear->fp8_recipe = recipe;
 }
 
-int GPTImpl::set_nvfp4(const Nvfp4Options* options, int64_t skip_first, int64_t skip_last) {
+int GPTImpl::set_nvfp4(
+      const Nvfp4Options* options, int64_t skip_first, int64_t skip_last, const std::vector<std::string>& eden_skip) {
+  const auto skipped = [&](const std::string& name) {
+    for (const auto& s : eden_skip)
+      if (name == s || (name.size() > s.size() && name.ends_with("." + s)))
+        return true;
+    return false;
+  };
   int n = 0;
   for (int64_t i = 0; i < config_.n_layer; ++i) {
     const bool on = options != nullptr && i >= skip_first && i < config_.n_layer - skip_last;
-    for (const auto& m : transformer->h[i]->modules(false))
-      if (auto* linear = dynamic_cast<LinearImpl*>(m.get()); linear != nullptr && linear->fp8) {
+    for (const auto& item : transformer->h[i]->named_modules("", false))
+      if (auto* linear = dynamic_cast<LinearImpl*>(item.value().get()); linear != nullptr && linear->fp8) {
         linear->nvfp4 = on ? options : nullptr;
+        linear->nvfp4_id = n;
+        linear->nvfp4_eden = !skipped(item.key());
         n += on;
       }
   }

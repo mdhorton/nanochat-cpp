@@ -104,14 +104,18 @@ void lease_smax(Nvfp4Target& t, const torch::Device& device) {
 } // namespace
 
 Nvfp4Target empty_nvfp4(
-      int64_t R, int64_t C, const torch::TensorOptions& options, bool rht, bool stochastic, uint64_t seed) {
+      int64_t R, int64_t C, const torch::TensorOptions& options, bool rht, bool stochastic, uint64_t seed, bool eden,
+      uint64_t eden_signs) {
   TORCH_CHECK(R % 128 == 0 && C % 64 == 0, "empty_nvfp4: R % 128, C % 64");
+  TORCH_CHECK(!eden || (!rht && !stochastic), "empty_nvfp4: MS-EDEN has its own rounding");
   Nvfp4Target t{
         .data = torch::empty({R, C / 2}, options.dtype(torch::kUInt8)),
         .scale16 = torch::empty({R * C / 16}, options.dtype(torch::kInt16)),
         .rht = rht,
         .stochastic = stochastic,
-        .seed = seed};
+        .seed = seed,
+        .eden = eden,
+        .eden_signs = eden_signs};
   lease_smax(t, options.device());
   return t;
 }
@@ -119,17 +123,20 @@ Nvfp4Target empty_nvfp4(
 kernels::Nvfp4Out nvfp4_out(const Nvfp4Target& t, int64_t row, int64_t col) {
   TORCH_CHECK(row % 128 == 0 && col % 64 == 0, "nvfp4_out: row % 128, col % 64");
   const int64_t ld = t.data.size(1) * 2, i = row * ld + col;
+  TORCH_CHECK(t.data.numel() * 2 < (int64_t{1} << 31), "nvfp4_out: tensors below 2^31 values");
   return {
-        static_cast<uint8_t*>(t.data.data_ptr()) + i / 2,
-        ld,
-        static_cast<int16_t*>(t.scale16.data_ptr()) + ((row / 128) * (ld / 64) + col / 64) * 512,
-        t.smax,
-        i,
-        t.seed,
-        nvfp4_hadamard_signs(),
-        t.epoch,
-        t.rht,
-        t.stochastic};
+        .data = static_cast<uint8_t*>(t.data.data_ptr()) + i / 2,
+        .scale16 = static_cast<int16_t*>(t.scale16.data_ptr()) + ((row / 128) * (ld / 64) + col / 64) * 512,
+        .smax = t.smax,
+        .seed = t.seed,
+        .eden_signs = t.eden_signs,
+        .ld = static_cast<int32_t>(ld),
+        .index0 = static_cast<int32_t>(i),
+        .rht_signs = nvfp4_hadamard_signs(),
+        .epoch = t.epoch,
+        .rht = t.rht,
+        .stochastic = t.stochastic,
+        .eden = t.eden};
 }
 
 namespace {
@@ -231,45 +238,19 @@ torch::Tensor nvfp4_gemm(const Nvfp4Tensor& a, const Nvfp4Tensor& b) {
   return out;
 }
 
-std::pair<Nvfp4Tensor, Nvfp4Tensor> mx_to_nvfp4_eden(
-      const torch::Tensor& a, const torch::Tensor& a_scale, const torch::Tensor& b, const torch::Tensor& b_scale,
-      const std::array<uint32_t, 4>& signs, uint64_t seed_a, uint64_t seed_b) {
-  check_mx(a, a_scale);
-  check_mx(b, b_scale);
-  const int64_t K = a.size(1);
-  TORCH_CHECK(b.size(1) == K, "mx_to_nvfp4_eden: K mismatch");
-  const auto ta = empty_nvfp4(a.size(0), K, a.options(), false, false);
-  const auto tb = empty_nvfp4(b.size(0), K, b.options(), false, false);
-  kernels::mx_to_nvfp4_eden(
-        a.data_ptr(), a_scale.data_ptr(), a.size(0), K, signs.data(), 1.f / 16, seed_a, nvfp4_out(ta), stream());
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
-  kernels::mx_to_nvfp4_eden(
-        b.data_ptr(), b_scale.data_ptr(), b.size(0), K, signs.data(), 1.f / 8, seed_b, nvfp4_out(tb), stream());
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
-  return nvfp4_finish(ta, tb);
+bool nvfp4_eden_dgrad() {
+  const auto* o = nvfp4_backward();
+  return o != nullptr && o->dgrad && o->eden_dgrad;
 }
 
-bool nvfp4_eden_dgrad(int64_t K) {
+uint64_t nvfp4_eden_signs() {
   const auto* o = nvfp4_backward();
-  return o != nullptr && o->dgrad && o->eden_dgrad && K % 256 == 0;
-}
-
-std::pair<Nvfp4Tensor, Nvfp4Tensor> nvfp4_eden_operands(
-      const torch::Tensor& a, const torch::Tensor& a_scale, const torch::Tensor& b, const torch::Tensor& b_scale) {
-  const auto* o = nvfp4_backward();
-  TORCH_CHECK(o != nullptr && o->eden_dgrad, "nvfp4_eden_operands: needs eden_dgrad on");
-  // the signs: splitmix64 of a fresh seed
-  uint64_t x = next_seed(*o);
-  std::array<uint32_t, 4> signs{};
-  for (int i = 0; i < 4; i += 2) {
-    uint64_t z = x += 0x9e3779b97f4a7c15ull;
-    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ull;
-    z = (z ^ (z >> 27)) * 0x94d049bb133111ebull;
-    z ^= z >> 31;
-    signs[i] = static_cast<uint32_t>(z), signs[i + 1] = static_cast<uint32_t>(z >> 32);
-  }
-  const uint64_t seed_a = next_seed(*o);
-  return mx_to_nvfp4_eden(a, a_scale, b, b_scale, signs, seed_a, next_seed(*o));
+  TORCH_CHECK(o != nullptr && o->eden_dgrad, "nvfp4_eden_signs: needs eden_dgrad on");
+  // splitmix64 of a fresh seed
+  uint64_t z = next_seed(*o) + 0x9e3779b97f4a7c15ull;
+  z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ull;
+  z = (z ^ (z >> 27)) * 0x94d049bb133111ebull;
+  return z ^ (z >> 31);
 }
 
 void set_nvfp4_backward(const Nvfp4Backward* options) {
@@ -280,15 +261,18 @@ const Nvfp4Backward* nvfp4_backward() {
   return backward_options;
 }
 
-Nvfp4Target nvfp4_target(int64_t R, int64_t C, const torch::TensorOptions& options, Nvfp4Role role) {
+Nvfp4Target nvfp4_target(
+      int64_t R, int64_t C, const torch::TensorOptions& options, Nvfp4Role role, uint64_t eden_signs) {
   if (role == Nvfp4Role::FwdInput)
     return empty_nvfp4(R, C, options, false, false);
   const auto* o = nvfp4_backward();
   if (o == nullptr || role == Nvfp4Role::None)
     return {};
   const bool wgrad = role == Nvfp4Role::WgradInput || role == Nvfp4Role::WgradGrad;
-  if (!(wgrad ? o->wgrad : o->dgrad && !o->eden_dgrad))
+  if (!(wgrad ? o->wgrad : o->dgrad))
     return {};
+  if (!wgrad && o->eden_dgrad)
+    return empty_nvfp4(R, C, options, false, false, next_seed(*o), true, eden_signs);
   const bool sr = role == Nvfp4Role::WgradGrad ? o->sr : role == Nvfp4Role::DgradGrad && o->sr_dgrad;
   return empty_nvfp4(R, C, options, wgrad && o->rht, sr, sr ? next_seed(*o) : 0);
 }

@@ -95,6 +95,29 @@ TEST(Nvfp4, EdenRotationIsOrthonormal) {
   const auto h = nvfp4_eden_rotation(torch::kCUDA, 1);
   EXPECT_LT((torch::mm(h, h.t()) - torch::eye(128, kCuda)).abs().max().item<float>(), 1e-5);
   EXPECT_FALSE(torch::equal(h, nvfp4_eden_rotation(torch::kCUDA, 1))); // fresh signs per call
+  // other groups, and fixed signs: the same seed gives the same rotation
+  const auto h64 = nvfp4_eden_rotation(torch::kCUDA, 5, 64, false);
+  EXPECT_LT((torch::mm(h64, h64.t()) - torch::eye(64, kCuda)).abs().max().item<float>(), 1e-5);
+  EXPECT_TRUE(torch::equal(h64, nvfp4_eden_rotation(torch::kCUDA, 5, 64, false)));
+  EXPECT_FALSE(torch::equal(h64, nvfp4_eden_rotation(torch::kCUDA, 6, 64, false)));
+}
+
+// With a 64-group rotation, each 64-group's <x.h, dequantized> is ||x.h||² in expectation
+TEST(Nvfp4, EdenGroup64IsUnbiased) {
+  torch::manual_seed(0);
+  const int64_t R = 64, C = 1024, G = 64;
+  const auto x = torch::randn({R, C}, kCuda);
+  const auto h = nvfp4_eden_rotation(torch::kCUDA, 0, G);
+  const auto xh = torch::matmul(x.view({R, C / G, G}), h);
+  const auto norm2 = (xh * xh).sum(-1);
+  auto mean = torch::zeros_like(norm2);
+  const int n = 64;
+  for (int i = 0; i < n; ++i) {
+    const auto q = nvfp4_eden(x, h);
+    mean += (xh * (q.values.to(torch::kFloat32) * q.scale).view({R, C / G, G})).sum(-1) / norm2 / n;
+  }
+  EXPECT_LT((mean - 1).abs().max().item<float>(), 0.04);
+  EXPECT_LT((mean - 1).mean().abs().item<float>(), 0.003);
 }
 
 // Each 128-group's <x.h, dequantized> is ||x.h||² in expectation (within one e4m3 scale step per call)
@@ -152,8 +175,9 @@ TEST(Nvfp4, SimMatmulNearBf16) {
   const auto ref = run(nullptr);
   const Nvfp4Options fp4, mx{.fwd = false, .dgrad = false, .wgrad = false},
         rht{.rht_fwd = true, .rht_dgrad = true, .sr_dgrad = false, .seed = 7},
-        eden{.eden_dgrad = true, .eden_wgrad = true, .seed = 3};
-  const auto a = run(&fp4), b = run(&mx), c = run(&rht), e = run(&eden);
+        eden{.eden_dgrad = true, .eden_wgrad = true, .seed = 3},
+        eden64{.eden_dgrad = true, .eden_wgrad = true, .eden_group = 64, .eden_fixed_signs = true, .seed = 3};
+  const auto a = run(&fp4), b = run(&mx), c = run(&rht), e = run(&eden), e64 = run(&eden64);
   EXPECT_TRUE(torch::equal(e[0], a[0])); // forward unchanged
   for (int i = 0; i < 3; ++i) {
     EXPECT_EQ(e[i].scalar_type(), ref[i].scalar_type()) << i;
@@ -168,6 +192,10 @@ TEST(Nvfp4, SimMatmulNearBf16) {
     EXPECT_GT(rel_err(c[i], ref[i]), 0.02) << i;
     EXPECT_LT(rel_err(b[i], ref[i]), 0.05) << i;
     EXPECT_LT(rel_err(b[i], ref[i]), rel_err(a[i], ref[i]) / 2) << i;
+    if (i > 0) {
+      EXPECT_LT(rel_err(e64[i], ref[i]), 0.2) << i;
+      EXPECT_GT(rel_err(e64[i], ref[i]), 0.02) << i;
+    }
   }
 }
 
@@ -198,6 +226,12 @@ TEST(Nvfp4, GptSetNvfp4) {
   EXPECT_NEAR(loss.item<float>(), std::log(1000.0), 0.5);
   loss.backward();
   EXPECT_TRUE(h[1]->as<BlockImpl>()->attn->c_q->weight.grad().isfinite().all().item<bool>());
+  // eden_skip: by the module name's last parts; ids distinct
+  EXPECT_EQ(model->set_nvfp4(&o, 1, 1, {"c_fc", "mlp.c_proj"}), 2 * 6);
+  EXPECT_FALSE(h[1]->as<BlockImpl>()->mlp->c_fc->nvfp4_eden);
+  EXPECT_FALSE(h[1]->as<BlockImpl>()->mlp->c_proj->nvfp4_eden);
+  EXPECT_TRUE(h[1]->as<BlockImpl>()->attn->c_proj->nvfp4_eden);
+  EXPECT_NE(h[1]->as<BlockImpl>()->attn->c_q->nvfp4_id, h[2]->as<BlockImpl>()->attn->c_q->nvfp4_id);
   EXPECT_EQ(model->set_nvfp4(nullptr), 0);
 }
 
@@ -418,7 +452,8 @@ TEST(Nvfp4, GemmBf16MatchesF32) {
   EXPECT_TRUE(torch::equal(nvfp4_gemm(qa, qb), out.to(torch::kBFloat16)));
 }
 
-// The NVFP4 relu^2 dgrad GEMM's epilogue (dh rows and transpose) vs nvfp4_gemm then quantize_mx's kernel: bit for bit
+// The NVFP4 relu^2 dgrad GEMM's epilogue (dh rows and transpose) vs nvfp4_gemm then quantize_mx's kernel: bit for
+// bit, with the rows stochastic (NVFP4 dgrad) or MS-EDEN
 TEST(Nvfp4, ReluSquareBwdEpilogueNvfp4) {
   torch::manual_seed(0);
   const CutlassScope scope;
@@ -429,20 +464,24 @@ TEST(Nvfp4, ReluSquareBwdEpilogueNvfp4) {
   const auto u8 = [](const Nvfp4Tensor& t) {
     return torch::cat({t.data.flatten(), t.scale.flatten(), t.amax.view({1}).view(torch::kUInt8)});
   };
-  const auto run = [&](bool fused) {
-    const auto rows = empty_nvfp4(M, N, kCuda, false, true, 11), cols = empty_nvfp4(N, M, kCuda, true, true, 12);
-    kernels::MxOut out{}, out_t{};
-    out.fp4 = nvfp4_out(rows), out_t.fp4 = nvfp4_out(cols);
-    if (fused)
-      EXPECT_TRUE(nvfp4_gemm_relu_square_bwd(a, b, h, out, out_t));
-    else
-      kernels::quantize_mx_relu_square_bwd(
-            nvfp4_gemm(a, b).data_ptr(), h.data_ptr(), M, N, out, out_t, at::cuda::getCurrentCUDAStream().stream());
-    return std::pair{u8(nvfp4_finish(rows)), u8(nvfp4_finish(cols))};
-  };
-  const auto f = run(true), u = run(false);
-  EXPECT_TRUE(torch::equal(f.first, u.first));
-  EXPECT_TRUE(torch::equal(f.second, u.second));
+  for (const bool eden : {false, true}) {
+    const auto run = [&](bool fused) {
+      const auto rows = eden ? empty_nvfp4(M, N, kCuda, false, false, 11, true, 0x9e3779b97f4a7c15ull)
+                             : empty_nvfp4(M, N, kCuda, false, true, 11);
+      const auto cols = empty_nvfp4(N, M, kCuda, true, true, 12);
+      kernels::MxOut out{}, out_t{};
+      out.fp4 = nvfp4_out(rows), out_t.fp4 = nvfp4_out(cols);
+      if (fused)
+        EXPECT_TRUE(nvfp4_gemm_relu_square_bwd(a, b, h, out, out_t));
+      else
+        kernels::quantize_mx_relu_square_bwd(
+              nvfp4_gemm(a, b).data_ptr(), h.data_ptr(), M, N, out, out_t, at::cuda::getCurrentCUDAStream().stream());
+      return std::pair{u8(nvfp4_finish(rows)), u8(nvfp4_finish(cols))};
+    };
+    const auto f = run(true), u = run(false);
+    EXPECT_TRUE(torch::equal(f.first, u.first)) << "eden " << eden;
+    EXPECT_TRUE(torch::equal(f.second, u.second)) << "eden " << eden;
+  }
 }
 
 // set_nvfp4_backward: the blocks' weight gradients go NVFP4, lm_head's stays MXFP8 (same bits)
@@ -662,19 +701,19 @@ TEST(Nvfp4, FwdInGpt) {
 }
 
 // ---------------------------------------------------------------------------------------------------------------
-// NVFP4 dgrad with MS-EDEN (mx_to_nvfp4_eden): both operands from MX, one rotation along K.
+// NVFP4 dgrad with MS-EDEN: the producers write both operands rotated along K in 64-groups by the GEMM's signs.
 
 namespace {
 
-// diag(signs) . H128 (entries +-1), fp32
-torch::Tensor eden_rotation(const std::array<uint32_t, 4>& signs) {
+// diag(signs) . H64 (entries +-1), fp32
+torch::Tensor eden_rotation(uint64_t signs) {
   auto h = torch::ones({1, 1});
-  for (int n = 1; n < 128; n *= 2)
+  for (int n = 1; n < 64; n *= 2)
     h = torch::cat({torch::cat({h, h}, 1), torch::cat({h, -h}, 1)}, 0);
-  std::vector<float> s(128);
-  for (int i = 0; i < 128; ++i)
-    s[i] = (signs[i / 32] >> (i % 32)) & 1u ? -1.f : 1.f;
-  return (torch::tensor(s).view({128, 1}) * h).to(torch::kCUDA);
+  std::vector<float> s(64);
+  for (int i = 0; i < 64; ++i)
+    s[i] = (signs >> i) & 1u ? -1.f : 1.f;
+  return (torch::tensor(s).view({64, 1}) * h).to(torch::kCUDA);
 }
 
 // rows a little apart in magnitude (block scales stay normal in e4m3)
@@ -682,64 +721,106 @@ torch::Tensor mild(int64_t R, int64_t C) {
   return torch::randn({R, C}, kCuda) * torch::exp(torch::randn({R, 1}, kCuda) * 0.5);
 }
 
-std::array<uint32_t, 4> random_signs() {
-  const auto r = torch::randint(0, 1ll << 32, {4}, torch::kInt64);
-  return {
-        static_cast<uint32_t>(r[0].item<int64_t>()), static_cast<uint32_t>(r[1].item<int64_t>()),
-        static_cast<uint32_t>(r[2].item<int64_t>()), static_cast<uint32_t>(r[3].item<int64_t>())};
+uint64_t random_signs() {
+  const auto r = torch::randint(0, 1ll << 32, {2}, torch::kInt64);
+  return static_cast<uint64_t>(r[0].item<int64_t>()) << 32 | static_cast<uint64_t>(r[1].item<int64_t>());
 }
+
+// x (R, C) bf16 or fp32 as a producer writes an MS-EDEN operand (quantize_mx's rows), finished
+Nvfp4Tensor eden_rows(const torch::Tensor& x, uint64_t signs, uint64_t seed) {
+  const auto t = empty_nvfp4(x.size(0), x.size(1), x.options(), false, false, seed, true, signs);
+  kernels::MxOut out{};
+  out.fp4 = nvfp4_out(t);
+  quantize_mx_into(x, false, out, {});
+  return nvfp4_finish(t);
+}
+
+constexpr float kEdenMul = 1.f / 8; // nvfp4.cuh's
 
 } // namespace
 
-// Each 128-group's <x.h, dequantized> is ||x.h||² within a scale step, and on average over seeds (as the simulation's
-// EdenCorrectionIsUnbiased); the tensor scale a power of two; a's values scaled 2^-4, b's 2^-3
-TEST(Nvfp4, EdenOperandsAreUnbiased) {
+// Each 64-group's <x.h, dequantized> is ||x.h||² within a scale step, and on average over seeds (as the simulation's
+// EdenGroup64IsUnbiased); the tensor scale a power of two; the values scaled by 1/8
+TEST(Nvfp4, EdenRowsAreUnbiased) {
   torch::manual_seed(0);
   at::globalContext().setFloat32MatmulPrecision("highest");
   const int64_t R = 128, C = 1024;
-  const auto m = mx_of(mild(R, C).to(torch::kBFloat16));
-  const auto signs = random_signs();
-  const auto xh = torch::matmul(m.values.to(torch::kFloat32).view({R, C / 128, 128}), eden_rotation(signs));
+  const auto x = mild(R, C).to(torch::kBFloat16);
+  const uint64_t signs = random_signs();
+  const auto xh = torch::matmul(x.to(torch::kFloat32).view({R, C / 64, 64}), eden_rotation(signs));
   const auto norm2 = (xh * xh).sum(-1);
   auto mean = torch::zeros_like(norm2);
   const int n = 64;
   for (int i = 0; i < n; ++i) {
-    const auto [a, b] = mx_to_nvfp4_eden(m.data, m.scale, m.data, m.scale, signs, 2 * i, 2 * i + 1);
-    const float k = std::log2(2688.f / a.amax.item<float>());
+    const auto q = eden_rows(x, signs, static_cast<uint64_t>(i));
+    const float k = std::log2(2688.f / q.amax.item<float>());
     EXPECT_EQ(k, std::round(k));
-    for (const auto& [q, mul] : {std::pair{a, 1.f / 16}, std::pair{b, 1.f / 8}}) {
-      const auto deq = nvfp4_to_bf16(q).to(torch::kFloat32).view({R, C / 128, 128}) / mul;
-      const auto ratio = (xh * deq).sum(-1) / norm2;
-      EXPECT_LT((ratio - 1).abs().max().item<float>(), 0.13) << i;
-      mean += ratio / (2 * n);
-    }
+    const auto deq = nvfp4_to_bf16(q).to(torch::kFloat32).view({R, C / 64, 64}) / kEdenMul;
+    const auto ratio = (xh * deq).sum(-1) / norm2;
+    EXPECT_LT((ratio - 1).abs().max().item<float>(), 0.2) << i;
+    mean += ratio / n;
   }
-  EXPECT_LT((mean - 1).abs().max().item<float>(), 0.03);
-  EXPECT_LT((mean - 1).mean().abs().item<float>(), 0.002);
+  EXPECT_LT((mean - 1).abs().max().item<float>(), 0.04);
+  EXPECT_LT((mean - 1).mean().abs().item<float>(), 0.003);
 }
 
-// The GEMM of MS-EDEN operands: the simulation's error per estimate, and estimates average towards the exact product
+// The GEMM of MS-EDEN operands: the simulation's error per estimate (64-groups), and estimates average towards the
+// exact product
 TEST(Nvfp4, EdenGemmAveragesToExact) {
   torch::manual_seed(0);
   at::globalContext().setFloat32MatmulPrecision("highest");
-  const auto ma = mx_of(mild(128, 1024).to(torch::kBFloat16)), mb = mx_of(mild(256, 1024) * 0.05);
-  const auto exact = torch::mm(ma.values.to(torch::kFloat32), mb.values.to(torch::kFloat32).t());
+  const auto xa = mild(128, 1024).to(torch::kBFloat16), xb = mild(256, 1024) * 0.05;
+  const auto exact = torch::mm(xa.to(torch::kFloat32), xb.t());
   auto sum = torch::zeros_like(exact);
   double real = 0, sim = 0;
   const int n = 64;
   for (int i = 0; i < n; ++i) {
-    const auto [a, b] = mx_to_nvfp4_eden(ma.data, ma.scale, mb.data, mb.scale, random_signs(), 2 * i, 2 * i + 1);
-    const auto est = nvfp4_gemm(a, b).to(torch::kFloat32);
+    const uint64_t signs = random_signs();
+    const auto est = nvfp4_gemm(eden_rows(xa, signs, 2 * i), eden_rows(xb, signs, 2 * i + 1)).to(torch::kFloat32);
     real += rel_err(est, exact) / n;
     sum += est;
-    const auto h = nvfp4_eden_rotation(torch::kCUDA);
-    const auto qa = nvfp4_eden(ma.values, h), qb = nvfp4_eden(mb.values, h);
+    const auto h = nvfp4_eden_rotation(torch::kCUDA, 0, 64);
+    const auto qa = nvfp4_eden(xa, h), qb = nvfp4_eden(xb, h);
     sim += rel_err(at::mm(qa.values, qb.values.t(), torch::kFloat32) * (qa.scale * qb.scale), exact) / n;
   }
   EXPECT_LT(real, 0.2);
   EXPECT_GT(real, 0.8 * sim);
   EXPECT_LT(real, 1.25 * sim);
   EXPECT_LT(rel_err(sum / n, exact), 0.25 * real);
+}
+
+// A weight's dgrad operand under eden_dgrad: its transpose MS-EDEN along out with the weight's signs (the gradient's
+// producers get them from the weight), kept while the weight is unchanged
+TEST(Nvfp4, EdenWeightTranspose) {
+  torch::manual_seed(0);
+  const Nvfp4Backward o{.wgrad = false, .dgrad = true, .eden_dgrad = true, .seed = 9};
+  const auto w = mild(256, 512) * 0.05; // (out, in)
+  Fp8WeightCache cache;
+  cache.enabled = true;
+  set_nvfp4_backward(&o);
+  const auto q = quantize_fp8_weight(w, &cache, Fp8Recipe::Mx, true, false);
+  const auto again = quantize_fp8_weight(w, &cache, Fp8Recipe::Mx, true, false);
+  set_nvfp4_backward(nullptr);
+  EXPECT_TRUE(q.fp4_t());
+  EXPECT_FALSE(q.fp4());
+  EXPECT_NE(q.eden_signs, 0);
+  EXPECT_EQ(again.eden_signs, q.eden_signs);
+  EXPECT_EQ(again.data_t.data_ptr(), q.data_t.data_ptr());
+  // data_t (in, out) dequantized ~ w^T . rot / 8 per 64-group along out
+  const auto xh = torch::matmul(
+        w.t().contiguous().view({512, 4, 64}), eden_rotation(static_cast<uint64_t>(q.eden_signs)));
+  const auto deq = nvfp4_to_bf16(q.nvfp4_t()).to(torch::kFloat32).view({512, 4, 64}) / kEdenMul;
+  const auto ratio = (xh * deq).sum(-1) / (xh * xh).sum(-1);
+  EXPECT_LT((ratio - 1).abs().max().item<float>(), 0.2);
+  EXPECT_LT(rel_err(deq, xh), 0.3);
+  // without MS-EDEN: 1D blocks along out, round to nearest, no signs
+  const Nvfp4Backward sr{.wgrad = false, .dgrad = true};
+  set_nvfp4_backward(&sr);
+  const auto p = quantize_fp8_weight(w, &cache, Fp8Recipe::Mx, true, false);
+  set_nvfp4_backward(nullptr);
+  EXPECT_TRUE(p.fp4_t());
+  EXPECT_EQ(p.eden_signs, 0);
+  EXPECT_LT(rel_err(nvfp4_to_bf16(p.nvfp4_t()).to(torch::kFloat32), w.t()), 0.3);
 }
 
 // eden_dgrad: every dgrad GEMM but lm_head's (upstream of all: the last c_proj's weight gradient keeps its bits
@@ -802,7 +883,7 @@ TEST(Nvfp4, EdenDgradInGpt) {
       }
     }
   }
-  // with the NVFP4 forward (its weights' transposes MX for MS-EDEN)
+  // with the NVFP4 forward (its weights' transposes MS-EDEN, not the forward's 16x16 blocks)
   const CutlassScope scope;
   model->set_nvfp4_fwd(true);
   const Nvfp4Backward o{.dgrad = true, .eden_dgrad = true};

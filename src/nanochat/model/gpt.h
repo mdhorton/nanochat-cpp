@@ -69,6 +69,8 @@ public:
   Fp8Recipe fp8_recipe = Fp8Recipe::Tensorwise;
   Fp8WeightCache fp8_cache; // enabled by GPT's set_fused
   const Nvfp4Options* nvfp4 = nullptr;
+  int64_t nvfp4_id = 0;   // index among the simulated Linears (set_nvfp4)
+  bool nvfp4_eden = true; // false: the simulated backward GEMMs keep rht / sr under MS-EDEN
   bool nvfp4_fwd = false;
 };
 
@@ -207,7 +209,10 @@ public:
   // Simulated NVFP4 (nvfp4_sim.h) for the FP8 Linears of blocks [first, n_layer - skip_last) (options: null = off;
   // must outlive the model's use). The attention and MLP of those blocks then run their Linears one by one. Returns
   // the number of Linears switched.
-  int set_nvfp4(const Nvfp4Options* options, int64_t skip_first = 0, int64_t skip_last = 0);
+  // eden_skip: Linears (module name or its last parts, e.g. c_fc, mlp.c_proj) kept on rht / sr under MS-EDEN.
+  int set_nvfp4(
+        const Nvfp4Options* options, int64_t skip_first = 0, int64_t skip_last = 0,
+        const std::vector<std::string>& eden_skip = {});
   // Real NVFP4 forward GEMMs (LinearImpl's nvfp4_fwd) for the FP8 Linears of blocks [first, n_layer - skip_last).
   // Returns the number of Linears switched on.
   int set_nvfp4_fwd(bool enabled, int64_t skip_first = 0, int64_t skip_last = 0);

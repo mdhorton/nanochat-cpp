@@ -47,6 +47,15 @@ static int run(int argc, char** argv) {
         "nvfp4-eden", o.nvfp4_eden,
         "nvfp4: GEMMs with Quartet II's MS-EDEN operands, replacing their rht / sr (dgrad, wgrad; empty = none); "
         "nvfp4-dgrad: dgrad (real)");
+  o.nvfp4_eden_group = flags.i64(
+        "nvfp4-eden-group", o.nvfp4_eden_group, "nvfp4-eden (simulated): rotation / correction group (power of 2)");
+  o.nvfp4_eden_fixed_signs = flags.boolean(
+        "nvfp4-eden-fixed-signs", o.nvfp4_eden_fixed_signs,
+        "nvfp4-eden (simulated): rotation signs fixed per step (per Linear and GEMM) instead of per GEMM call");
+  o.nvfp4_eden_skip = flags.str(
+        "nvfp4-eden-skip", o.nvfp4_eden_skip,
+        "nvfp4-eden (simulated): Linears kept on rht / sr, comma list of module names or their last parts (c_fc, "
+        "mlp.c_proj, ...; empty = none)");
   o.nvfp4_weight_2d = flags.boolean("nvfp4-weight-2d", o.nvfp4_weight_2d, "nvfp4: 16x16 weight blocks (without rht)");
   o.nvfp4_wgrad = flags.boolean(
         "nvfp4-wgrad", o.nvfp4_wgrad,

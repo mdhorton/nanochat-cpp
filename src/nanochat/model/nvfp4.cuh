@@ -207,6 +207,88 @@ __device__ __forceinline__ float nvfp4_store8(float (&v)[8], const kernels::Nvfp
   return nvfp4_store8_amax(v, m, o, row, col);
 }
 
+// MS-EDEN (Quartet II; nvfp4_sim.h's nvfp4_eden): block maxima map a little above 6, so the largest values saturate
+constexpr float kEdenValMax = 6.f / (17.f / 16 * 0.93f);
+// each operand's share of H64's normalization (1 / sqrt(64)), so the product carries the orthonormal rotation
+constexpr float kEdenMul = 1.f / 8;
+
+// the values of 8 e2m1 codes (as e2m1x8_rn's), exact
+__device__ __forceinline__ void e2m1x8_values(uint32_t codes, float (&q)[8]) {
+  uint32_t h[4];
+  asm("{\n"
+      " .reg .b8 b0, b1, b2, b3;\n"
+      " mov.b32 {b0, b1, b2, b3}, %4;\n"
+      " cvt.rn.f16x2.e2m1x2 %0, b0;\n"
+      " cvt.rn.f16x2.e2m1x2 %1, b1;\n"
+      " cvt.rn.f16x2.e2m1x2 %2, b2;\n"
+      " cvt.rn.f16x2.e2m1x2 %3, b3;\n"
+      "}"
+      : "=r"(h[0]), "=r"(h[1]), "=r"(h[2]), "=r"(h[3])
+      : "r"(codes));
+#pragma unroll
+  for (int k = 0; k < 4; ++k) {
+    const float2 f = __half22float2(*reinterpret_cast<const __half2*>(&h[k]));
+    q[2 * k] = f.x, q[2 * k + 1] = f.y;
+  }
+}
+
+// MS-EDEN store of one 64-group of row `row` from col (% 64) by 8 lanes (lane % 8 = k holding values 8k .. 8k + 7):
+// x . diag(signs) . H64 / 8 (H64 = H8 over the values x H8 over the lanes, Sylvester order over the value index), each
+// lane pair's block scale from its max / kEdenValMax, values to nearest, the scale times the group's ||a||² / <a, q>
+// (in block units), rounded stochastically to 3 mantissa bits. Both lanes of a pair return the block scale.
+__device__ __forceinline__ float nvfp4_eden_store8(
+      float (&v)[8], const kernels::Nvfp4Out& o, int64_t row, int64_t col) {
+  const int lane = static_cast<int>(threadIdx.x % 8);
+  const uint32_t bits = static_cast<uint32_t>(o.eden_signs >> (8 * lane));
+#pragma unroll
+  for (int i = 0; i < 8; ++i)
+    v[i] *= (bits >> i) & 1u ? -kEdenMul : kEdenMul;
+#pragma unroll
+  for (int h = 1; h < 8; h *= 2)
+#pragma unroll
+    for (int i = 0; i < 8; i += 2 * h)
+#pragma unroll
+      for (int j = i; j < i + h; ++j) {
+        const float a = v[j], b = v[j + h];
+        v[j] = a + b, v[j + h] = a - b;
+      }
+#pragma unroll
+  for (int h = 1; h < 8; h *= 2)
+#pragma unroll
+    for (int i = 0; i < 8; ++i) {
+      const float p = __shfl_xor_sync(0xffffffff, v[i], h);
+      v[i] = lane & h ? p - v[i] : v[i] + p;
+    }
+  float m = 0.f;
+#pragma unroll
+  for (int i = 0; i < 8; ++i)
+    m = fmaxf(m, fabsf(v[i]));
+  m = fmaxf(m, __shfl_xor_sync(0xffffffff, m, 1));
+  const float s = nvfp4_round_scale(m * (1.f / kEdenValMax)), to_q = s > 0.f ? nvfp4_rcp(s) : 0.f;
+  float a[8], q[8], num = 0.f, den = 0.f;
+#pragma unroll
+  for (int i = 0; i < 8; ++i)
+    a[i] = v[i] * to_q;
+  const uint32_t codes = e2m1x8_rn(a);
+  e2m1x8_values(codes, q);
+#pragma unroll
+  for (int i = 0; i < 8; ++i)
+    num = fmaf(a[i], a[i], num), den = fmaf(a[i], q[i], den);
+#pragma unroll
+  for (int h = 1; h < 8; h *= 2) {
+    num += __shfl_xor_sync(0xffffffff, num, h);
+    den += __shfl_xor_sync(0xffffffff, den, h);
+  }
+  const float cs = s * (den > 0.f ? num / den : 1.f);
+  const int64_t i = row * o.ld + col;
+  const uint32_t r = nvfp4_random(o.seed, (o.index0 + i) / 16);
+  const float sr = __uint_as_float((__float_as_uint(cs) + (r & 0xfffffu)) & 0xfff00000u);
+  *reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(o.data) + i / 2) = codes;
+  if (col % 16 == 0)
+    nvfp4_store_scale(o, row, col, sr);
+  return sr;
+}
+
 __device__ __forceinline__ unsigned nvfp4_slot() {
   return (blockIdx.x + blockIdx.y * gridDim.x) % kernels::kNvfp4Slots;
 }

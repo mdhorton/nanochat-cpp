@@ -81,6 +81,7 @@ torch::autograd::variable_list fp8_qkv(
 struct Fp8Tensor {
   torch::Tensor data, data_t, inv_scale, inv_scale_t, amax, amax_t;
   Nvfp4Target fp4_target, fp4_target_t;
+  int64_t eden_signs = 0; // a weight's: its dgrad GEMM's rotation (data_t MS-EDEN; the gradient's producers share it)
 
   const torch::Tensor& inv_t() const {
     return inv_scale_t.defined() ? inv_scale_t : inv_scale;
@@ -107,20 +108,22 @@ struct Fp8Tensor {
 Fp8Tensor quantize_fp8(const torch::Tensor& x, torch::ScalarType dtype, bool fused = true);
 
 // MXFP8 e4m3 of a contiguous 2D bf16 or fp32 x, rows and cols % 128; rows / cols: write data / data_t.
-// relu_square: of bf16(relu(x)^2). role / role_t: data / data_t as NVFP4 when that role's GEMM is (nvfp4_target).
+// relu_square: of bf16(relu(x)^2). role / role_t: data / data_t as NVFP4 when that role's GEMM is (nvfp4_target;
+// eden_signs: a dgrad role's).
 Fp8Tensor quantize_mx(
       const torch::Tensor& x, bool rows = true, bool cols = true, bool relu_square = false,
-      Nvfp4Role role = Nvfp4Role::None, Nvfp4Role role_t = Nvfp4Role::None);
+      Nvfp4Role role = Nvfp4Role::None, Nvfp4Role role_t = Nvfp4Role::None, int64_t eden_signs = 0);
 
 inline bool mx_fits(int64_t rows, int64_t cols) {
   return rows % 128 == 0 && cols % 128 == 0;
 }
 
 // Uninitialized MX buffers for a (R, C) tensor, dims % 128; rows / cols: allocate data / data_t with their scales.
-// role / role_t: an NVFP4 fp4_target / fp4_target_t instead, when that role's GEMM is (nvfp4_target).
+// role / role_t: an NVFP4 fp4_target / fp4_target_t instead, when that role's GEMM is (nvfp4_target; eden_signs: a
+// dgrad role's).
 Fp8Tensor empty_mx(
       int64_t R, int64_t C, const torch::TensorOptions& options, bool rows = true, bool cols = true,
-      Nvfp4Role role = Nvfp4Role::None, Nvfp4Role role_t = Nvfp4Role::None);
+      Nvfp4Role role = Nvfp4Role::None, Nvfp4Role role_t = Nvfp4Role::None, int64_t eden_signs = 0);
 
 // The kernels' views of q's buffers (null data where not allocated; the fp4 targets' when set).
 std::pair<kernels::MxOut, kernels::MxOut> mx_outs(const Fp8Tensor& q);
@@ -137,16 +140,16 @@ kernels::MxOut mx_out(const torch::Tensor& data, const torch::Tensor& scale, int
 // quantize_mx of x into given buffers (e.g. mx_out views of a larger tensor).
 void quantize_mx_into(const torch::Tensor& x, bool relu_square, kernels::MxOut out, kernels::MxOut out_t);
 
-// Merged q/k/v weights under MX: {w_cat (n, C), w_cat^T, their scales, their NVFP4 amaxes (else undefined)}, from
-// cache (optional) while unchanged. fp4: w_cat NVFP4 in 16x16 blocks, as quantize_fp8_weight's. With NVFP4 dgrad,
-// w_cat^T is NVFP4 (the same blocks with fp4, else Nvfp4Role::DgradWeight).
+// Merged q/k/v weights under MX: {w_cat (n, C), w_cat^T, their scales, their NVFP4 amaxes (else undefined), the
+// MS-EDEN signs (CPU int64, 0 without)}, from cache (optional) while unchanged. fp4: w_cat NVFP4 in 16x16 blocks, as
+// quantize_fp8_weight's. With NVFP4 dgrad, w_cat^T is NVFP4 (the same blocks with fp4, else Nvfp4Role::DgradWeight).
 std::vector<torch::Tensor> mx_qkv_weights(
       const torch::Tensor& wq, const torch::Tensor& wk, const torch::Tensor& wv, Fp8WeightCache* cache,
       bool fp4 = false);
 
 // A weight's e4m3 copy (tensorwise or Mx), from cache (optional) while w is unchanged. fp4 (Mx): data NVFP4 in 16x16
 // blocks (quantize_nvfp4_2d). fp4_t (Mx, with NVFP4 dgrad on): data_t NVFP4 instead, the same blocks with fp4, else
-// Nvfp4Role::DgradWeight.
+// Nvfp4Role::DgradWeight (MS-EDEN with fresh eden_signs under eden_dgrad).
 Fp8Tensor quantize_fp8_weight(
       const torch::Tensor& w, Fp8WeightCache* cache, Fp8Recipe recipe = Fp8Recipe::Tensorwise, bool fp4_t = false,
       bool fp4 = false);

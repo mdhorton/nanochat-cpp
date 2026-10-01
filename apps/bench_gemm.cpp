@@ -494,7 +494,8 @@ std::pair<double, double> bench_dgrad(int64_t T, int64_t C, double seconds) {
           },
           1);
   }
-  // the MLP c_proj's dX with relu^2's backward: dh rows (dgrad) and transpose (wgrad, NVFP4 either way)
+  // the MLP c_proj's dX with relu^2's backward: dh rows (dgrad) and transpose (wgrad, NVFP4 either way); then with
+  // MS-EDEN rows (the operands' and dh's), timed against the NVFP4 rows
   {
     const auto go = torch::randn({T, C}, opts), w_t = torch::randn({4 * C, C}, opts) * 0.05;
     const auto h = torch::randn({T, 4 * C}, opts);
@@ -502,11 +503,19 @@ std::pair<double, double> bench_dgrad(int64_t T, int64_t C, double seconds) {
     nanochat::set_nvfp4_backward(&both);
     const auto g4 = nanochat::quantize_mx(go, true, false, false, Nvfp4Role::DgradGrad);
     const auto w4 = nanochat::quantize_mx(w_t, true, false, false, Nvfp4Role::DgradWeight);
-    const auto run = [&](bool fp4) {
+    const nanochat::Nvfp4Backward eden{.dgrad = true, .eden_dgrad = true};
+    nanochat::set_nvfp4_backward(&eden);
+    const int64_t signs = static_cast<int64_t>(nanochat::nvfp4_eden_signs());
+    const auto g4e = nanochat::quantize_mx(go, true, false, false, Nvfp4Role::DgradGrad, Nvfp4Role::None, signs);
+    const auto w4e = nanochat::quantize_mx(w_t, true, false, false, Nvfp4Role::DgradWeight, Nvfp4Role::None, signs);
+    nanochat::set_nvfp4_backward(nullptr);
+    const auto run = [&](bool fp4, bool is_eden = false) {
       auto q = nanochat::empty_mx(
-            T, 4 * C, opts, true, true, fp4 ? Nvfp4Role::DgradGrad : Nvfp4Role::None, Nvfp4Role::WgradGrad);
+            T, 4 * C, opts, true, true, fp4 ? Nvfp4Role::DgradGrad : Nvfp4Role::None, Nvfp4Role::WgradGrad, signs);
       const auto [out, out_t] = nanochat::mx_outs(q);
-      if (fp4)
+      if (is_eden)
+        nanochat::nvfp4_gemm_relu_square_bwd(g4e.nvfp4(), w4e.nvfp4(), h, out, out_t);
+      else if (fp4)
         nanochat::nvfp4_gemm_relu_square_bwd(g4.nvfp4(), w4.nvfp4(), h, out, out_t);
       else
         nanochat::mx_gemm_relu_square_bwd(
@@ -522,6 +531,24 @@ std::pair<double, double> bench_dgrad(int64_t T, int64_t C, double seconds) {
             run(true);
           },
           1);
+    // NVFP4 rows (sr) vs MS-EDEN rows: both under eden_dgrad for the targets, the NVFP4 case's operands sr's
+    {
+      nanochat::set_nvfp4_backward(&both);
+      const double sr = sustained_ms(
+            [&] {
+              run(true);
+            },
+            seconds);
+      nanochat::set_nvfp4_backward(&eden);
+      const double ed = sustained_ms(
+            [&] {
+              run(true, true);
+            },
+            seconds);
+      nanochat::set_nvfp4_backward(nullptr);
+      std::printf(
+            "%-30s | sr %7.1f us | eden  %7.1f us | %.2fx\n", "relu^2 dX rows sr vs eden", sr * 1e3, ed * 1e3, sr / ed);
+    }
   }
   // the output gradients (T, C) of attention's and the MLP's c_proj (qkv's comes from the attention kernels)
   const auto x = torch::randn({T, C}, opts);

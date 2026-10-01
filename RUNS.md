@@ -85,6 +85,25 @@ Run 29: The GPU allows minor adjustments to its clock via undervolting. This rai
 Run 30: GPU0 is about 5-10% slower. This gives a few extra micro-steps to GPU1 so that it's waiting less.
 `--rank-micro-steps=126,130` enabled by default going forward.
 
+# quick runs @ d24, 100 iterations
+
+`--depth=24 --device-batch-size=2 --rank-micro-steps=126,130 --num-iterations=100 --eval-tokens=4194304 --eval-every=-1 --save=false`
+
+| run | toks/sec |     loss |      bpb | memory |   time | notes                                                             |
+|-----|---------:|---------:|---------:|-------:|-------:|-------------------------------------------------------------------|
+| 32  |   58,627 | 4.471248 | 1.328176 |  17.6g | 26.43m | mxfp8 baseline                                                    |
+| 33  |   71,226 | 4.482675 | 1.331916 |  17.0g | 21.80m | --nvfp4-wgrad --nvfp4-dgrad                                       |
+| 34  |   70,307 | 4.477348 | 1.330228 |  17.0g | 22.12m | --nvfp4-wgrad --nvfp4-dgrad --nvfp4-eden=dgrad                    |
+| 35  |   80,441 | 4.488634 | 1.333021 |  16.7g | 19.30m | --nvfp4-wgrad --nvfp4-dgrad --nvfp4-fwd                           |
+| 36  |   71,108 | 4.484975 | 1.332725 |  17.0g | 21.18m | --nvfp4-wgrad --nvfp4-dgrad --nvfp4-fwd --nvfp4-fwd-until=warmdown |
+| 37  |   71,049 | 4.413067 | 1.308297 |  17.0g | 21.86m | run 33 with --seed=43                                             |
+| 38  |   70,238 | 4.411165 | 1.307771 |  17.0g | 22.13m | run 34 with --seed=43                                             |
+
+Run 36: NVFP4 forward for steps 0-34 (80,457 tok/s), MXFP8 forward from the warmdown at step 35 (71,160 tok/s).
+
+Runs 37-38: the seed (init + stochastic rounding, same data order) moves bpb by 0.024 at 100 steps, so only same-seed
+pairs compare. EDEN vs SR dgrad: -0.0017 (seed 42), -0.0005 (seed 43) for -1.2% tok/s.
+
 # full run @d12
 
 `--depth=12 --device-batch-size=8`

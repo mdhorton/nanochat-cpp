@@ -66,10 +66,11 @@ __device__ __forceinline__ void mx_store8(
 }
 
 // o's 8 values of row `row` from col, 4 lanes per 32 (lane ^ 1, lane ^ 2): MX, or NVFP4 (lane pairs per 16; returns
-// the block scale, 0 for MX)
+// the block scale, 0 for MX). MS-EDEN (o.fp4.eden): 8 lanes per 64 (lanes 8k .. 8k + 7 holding one row's col .. col
+// + 63, in order), as the row stores below lay them out.
 __device__ __forceinline__ float mx_store8_lanes(float (&v)[8], const MxOutDev& o, int64_t row, int64_t col) {
   if (o.fp4.data != nullptr)
-    return nvfp4_store8(v, o.fp4, row, col);
+    return o.fp4.eden ? nvfp4_eden_store8(v, o.fp4, row, col) : nvfp4_store8(v, o.fp4, row, col);
   float m = 0.f;
 #pragma unroll
   for (int k = 0; k < 8; ++k)

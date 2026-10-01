@@ -209,6 +209,9 @@ nlohmann::json options_to_json(const TrainOptions& o) {
         {"nvfp4_rht", o.nvfp4_rht},
         {"nvfp4_sr", o.nvfp4_sr},
         {"nvfp4_eden", o.nvfp4_eden},
+        {"nvfp4_eden_group", o.nvfp4_eden_group},
+        {"nvfp4_eden_fixed_signs", o.nvfp4_eden_fixed_signs},
+        {"nvfp4_eden_skip", o.nvfp4_eden_skip},
         {"nvfp4_weight_2d", o.nvfp4_weight_2d},
         {"nvfp4_wgrad", o.nvfp4_wgrad},
         {"nvfp4_dgrad", o.nvfp4_dgrad},
@@ -439,6 +442,17 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
   const auto eden = gemms(o.nvfp4_eden, "nvfp4-eden", false);
   if (o.nvfp4.empty() && (eden[2] || (eden[1] && !o.nvfp4_dgrad)))
     throw std::invalid_argument("nvfp4_eden: simulated (--nvfp4), or real for dgrad (--nvfp4-dgrad)");
+  const bool eden_sim = !o.nvfp4.empty() && (eden[1] || eden[2]);
+  if (!eden_sim && (o.nvfp4_eden_group != 128 || o.nvfp4_eden_fixed_signs || !o.nvfp4_eden_skip.empty()))
+    throw std::invalid_argument("nvfp4_eden_group / nvfp4_eden_fixed_signs / nvfp4_eden_skip: simulated MS-EDEN only");
+  if (o.nvfp4_eden_group < 16 || (o.nvfp4_eden_group & (o.nvfp4_eden_group - 1)) != 0)
+    throw std::invalid_argument("nvfp4_eden_group: a power of 2, >= 16");
+  std::vector<std::string> eden_skip;
+  for (size_t pos = 0; !o.nvfp4_eden_skip.empty() && pos <= o.nvfp4_eden_skip.size();) {
+    const size_t comma = std::min(o.nvfp4_eden_skip.find(',', pos), o.nvfp4_eden_skip.size());
+    eden_skip.push_back(o.nvfp4_eden_skip.substr(pos, comma - pos));
+    pos = comma + 1;
+  }
   if (!o.nvfp4.empty()) {
     const auto on = gemms(o.nvfp4, "nvfp4", true);
     nvfp4 = {
@@ -452,13 +466,19 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
           .sr_wgrad = sr[2],
           .eden_dgrad = eden[1],
           .eden_wgrad = eden[2],
+          .eden_group = o.nvfp4_eden_group,
+          .eden_fixed_signs = o.nvfp4_eden_fixed_signs,
           .weight_2d = o.nvfp4_weight_2d,
           .seed = static_cast<uint64_t>(o.seed)};
-    const int n = model->set_nvfp4(&nvfp4, o.nvfp4_skip_first, o.nvfp4_skip_last);
+    const int n = model->set_nvfp4(&nvfp4, o.nvfp4_skip_first, o.nvfp4_skip_last, eden_skip);
     print(std::format(
           "Simulated NVFP4 for {} ({} linear layers; rht {}, sr {}, eden {}, 2d weights {}, seed {})", o.nvfp4, n,
           o.nvfp4_rht.empty() ? "none" : o.nvfp4_rht, o.nvfp4_sr.empty() ? "none" : o.nvfp4_sr,
           o.nvfp4_eden.empty() ? "none" : o.nvfp4_eden, nvfp4.weight_2d, nvfp4.seed));
+    if (eden_sim)
+      print(std::format(
+            "  MS-EDEN group {}, signs {}, skipped Linears: {}", nvfp4.eden_group,
+            nvfp4.eden_fixed_signs ? "per step" : "per GEMM", o.nvfp4_eden_skip.empty() ? "none" : o.nvfp4_eden_skip));
   }
 
   // real NVFP4 backward GEMMs, process-wide until train returns
@@ -610,6 +630,7 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
   optimizer.zero_grad();                         // the Muon grads are views of the optimizer's stacks
   while (true) {
     const bool last_step = step == N;
+    nvfp4.step = step;
     const double flops_so_far = static_cast<double>(flops_per_token * plan.total_batch_size) *
                                 static_cast<double>(step);
 

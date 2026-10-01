@@ -34,6 +34,11 @@ struct TrainOptions {
   std::string nvfp4_rht = "wgrad";      // GEMMs with a random Hadamard transform along K
   std::string nvfp4_sr = "dgrad,wgrad"; // GEMMs whose gradient operand rounds stochastically
   std::string nvfp4_eden; // GEMMs with MS-EDEN operands (dgrad, wgrad), instead of their rht / sr; real: dgrad
+  // simulated MS-EDEN ablations: the rotation / correction group, signs fixed per step (per Linear and GEMM) instead
+  // of per GEMM call, and Linears (comma list: c_fc, mlp.c_proj, ...) kept on rht / sr
+  int64_t nvfp4_eden_group = 128;
+  bool nvfp4_eden_fixed_signs = false;
+  std::string nvfp4_eden_skip;
   bool nvfp4_weight_2d = true;
   int64_t nvfp4_skip_first = 0, nvfp4_skip_last = 0; // blocks kept MXFP8 (sim: all GEMMs; nvfp4_fwd: forward)
   // real NVFP4 weight / input gradients for the Linears but lm_head (nvfp4.h), with nvfp4_rht / nvfp4_sr's wgrad /

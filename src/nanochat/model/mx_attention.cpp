@@ -123,6 +123,7 @@ public:
       ctx->saved_data["weights"] = std::vector{wq, wk, wv}; // backward writes their .grad itself
     ctx->saved_data["scale"] = scale;
     ctx->saved_data["head_dim"] = head_dim;
+    ctx->saved_data["signs"] = wf[6].item<int64_t>();
     ctx->saved_data["w_gate_dtype"] = static_cast<int64_t>(w_gate.defined() ? w_gate.scalar_type() : x.scalar_type());
     if (!quantize_attention)
       return {q, k, v};
@@ -150,7 +151,7 @@ public:
     const bool grads_direct = ctx->saved_data.count("weights") != 0;
     auto g = empty_mx(
           N, n, qkv.options(), true, true, w_t.scalar_type() == torch::kUInt8 ? Nvfp4Role::DgradGrad : Nvfp4Role::None,
-          grads_direct ? Nvfp4Role::WgradGrad : Nvfp4Role::None);
+          grads_direct ? Nvfp4Role::WgradGrad : Nvfp4Role::None, ctx->saved_data["signs"].toInt());
     const auto part = [&](int64_t col) {
       kernels::MxOut out{}, out_t{};
       if (g.fp4_target.data.defined())
@@ -189,11 +190,6 @@ public:
     torch::Tensor dx;
     if (g.fp4())
       dx = nvfp4_gemm(g.nvfp4(), {w_t, w_scale_t, w_amax});
-    else if (nvfp4_eden_dgrad(n)) {
-      TORCH_CHECK(dtype == torch::kBFloat16, "NVFP4 dgrad: bf16 gradients only");
-      const auto [a, b] = nvfp4_eden_operands(g.data, g.inv_scale, w_t, w_scale_t);
-      dx = nvfp4_gemm(a, b);
-    }
     else
       dx = mx_gemm(g.data, g.inv_scale, w_t, w_scale_t, dtype);
     torch::Tensor dw;

@@ -19,15 +19,6 @@ void mx_to_nvfp4(
       const void* data, const void* scale, int64_t rows, int64_t cols, const float* hadamard, bool stochastic,
       uint64_t seed, void* out, void* out_scale, float* amax, cudaStream_t stream);
 
-// MX (rows, cols) as mx_to_nvfp4 reads it -> MS-EDEN NVFP4 (nvfp4_sim.h's nvfp4_eden) into out, as producers write it:
-// each 128 values of a row times diag(signs) . H128 (Walsh-Hadamard, entries +-1) and mul, block scales from their max
-// / 6.07, values rounded to nearest, then each block scale times its 128-group's ||x||² / <x, q>, rounded
-// stochastically (seed) to e4m3's 3 mantissa bits. signs: 4 words, value i's in word i / 32's bit i % 32. rows % 128,
-// cols % 128.
-void mx_to_nvfp4_eden(
-      const void* data, const void* scale, int64_t rows, int64_t cols, const uint32_t* signs, float mul, uint64_t seed,
-      const Nvfp4Out& out, cudaStream_t stream);
-
 // x (rows, cols) row-major fp32 (else bf16) -> NVFP4 in 16x16 blocks (one scale each, round to nearest) as producers
 // write it (fp8_kernel.h's Nvfp4Out): out along cols, and out_t (data null: none) x's transpose along rows, the same
 // values (W and W^T for forward and dgrad). rows, cols % 16.

@@ -62,15 +62,107 @@ struct MxT {
 
 constexpr int kEpiM = 64, kPitch = kEpiM + 8; // MxStoreT's subtile rows and its stage's row pitch
 
-// mx_store_subtile's body: p must not alias the stores
+// MxStoreT's MS-EDEN row store of one staged 64x64 subtile (origin (m, n)): a lane pair per row, each 32 values
+// (columns 16 half + 32 i + j), with nvfp4_eden_store8's rotation (H64's stages over the index bits in the same
+// order), rounding and group sums (8-value runs, then pairs, then halves: the same bits as quantize_mx's). Out of
+// line as mx_store_subtile. Returns smax updated.
+__device__ __noinline__ float eden_rows_subtile(
+      const MxT* __restrict__ params, const cutlass::bfloat16_t* stage, int t, int64_t m, int64_t n, float smax) {
+  const nanochat::kernels::Nvfp4Out rows = params->rows;
+  const int r = t / 2, half = t % 2;
+  float f[2][16];
+  CUTLASS_PRAGMA_UNROLL
+  for (int i = 0; i < 2; ++i) {
+    const cutlass::bfloat16_t* s = stage + (half + 2 * i) * 16 * kPitch + r;
+    CUTLASS_PRAGMA_UNROLL
+    for (int j = 0; j < 16; ++j)
+      f[i][j] = static_cast<float>(s[j * kPitch]);
+  }
+  // x . diag(signs) / 8, then H64: index bits 0-3 within a thread's block, bit 4 across the lane pair, bit 5 across
+  // its two blocks
+  CUTLASS_PRAGMA_UNROLL
+  for (int i = 0; i < 2; ++i) {
+    const uint32_t bits = static_cast<uint32_t>(rows.eden_signs >> ((half + 2 * i) * 16)) & 0xffffu;
+    CUTLASS_PRAGMA_UNROLL
+    for (int j = 0; j < 16; ++j)
+      f[i][j] *= (bits >> j) & 1u ? -nanochat::kEdenMul : nanochat::kEdenMul;
+    CUTLASS_PRAGMA_UNROLL
+    for (int h = 1; h < 16; h *= 2)
+      CUTLASS_PRAGMA_UNROLL
+    for (int a = 0; a < 16; a += 2 * h)
+      CUTLASS_PRAGMA_UNROLL
+    for (int j = a; j < a + h; ++j) {
+      const float x = f[i][j], y = f[i][j + h];
+      f[i][j] = x + y, f[i][j + h] = x - y;
+    }
+  }
+  CUTLASS_PRAGMA_UNROLL
+  for (int i = 0; i < 2; ++i)
+    CUTLASS_PRAGMA_UNROLL
+  for (int j = 0; j < 16; ++j) {
+    const float p = __shfl_xor_sync(0xffffffff, f[i][j], 1);
+    f[i][j] = half ? p - f[i][j] : f[i][j] + p;
+  }
+  CUTLASS_PRAGMA_UNROLL
+  for (int j = 0; j < 16; ++j) {
+    const float x = f[0][j], y = f[1][j];
+    f[0][j] = x + y, f[1][j] = x - y;
+  }
+  // each block's scale and codes, and the group's ||a||², <a, q> in block units
+  float s[2], num[2], den[2];
+  uint2 codes[2];
+  CUTLASS_PRAGMA_UNROLL
+  for (int i = 0; i < 2; ++i) {
+    float mx = 0.f;
+    CUTLASS_PRAGMA_UNROLL
+    for (int j = 0; j < 16; ++j)
+      mx = fmaxf(mx, fabsf(f[i][j]));
+    s[i] = nanochat::nvfp4_round_scale(mx * (1.f / nanochat::kEdenValMax));
+    const float to_q = s[i] > 0.f ? nanochat::nvfp4_rcp(s[i]) : 0.f;
+    float run_num[2], run_den[2];
+    uint32_t c[2];
+    CUTLASS_PRAGMA_UNROLL
+    for (int k = 0; k < 2; ++k) {
+      float a[8], q[8];
+      CUTLASS_PRAGMA_UNROLL
+      for (int j = 0; j < 8; ++j)
+        a[j] = f[i][8 * k + j] * to_q;
+      c[k] = nanochat::e2m1x8_rn(a);
+      nanochat::e2m1x8_values(c[k], q);
+      run_num[k] = 0.f, run_den[k] = 0.f;
+      CUTLASS_PRAGMA_UNROLL
+      for (int j = 0; j < 8; ++j)
+        run_num[k] = fmaf(a[j], a[j], run_num[k]), run_den[k] = fmaf(a[j], q[j], run_den[k]);
+    }
+    codes[i] = make_uint2(c[0], c[1]);
+    num[i] = run_num[0] + run_num[1], den[i] = run_den[0] + run_den[1];
+    num[i] += __shfl_xor_sync(0xffffffff, num[i], 1);
+    den[i] += __shfl_xor_sync(0xffffffff, den[i], 1);
+  }
+  const float gnum = num[0] + num[1], gden = den[0] + den[1];
+  const float corr = gden > 0.f ? gnum / gden : 1.f;
+  CUTLASS_PRAGMA_UNROLL
+  for (int i = 0; i < 2; ++i) {
+    const int64_t row = m + r, col = n + (half + 2 * i) * 16, idx = row * rows.ld + col;
+    const uint32_t rnd = nanochat::nvfp4_random(rows.seed, (rows.index0 + idx) / 16);
+    const float sr = __uint_as_float((__float_as_uint(s[i] * corr) + (rnd & 0xfffffu)) & 0xfff00000u);
+    *reinterpret_cast<uint2*>(static_cast<uint8_t*>(rows.data) + idx / 2) = codes[i];
+    nanochat::nvfp4_store_scale(rows, row, col, sr);
+    smax = fmaxf(smax, sr);
+  }
+  return smax;
+}
+
+// mx_store_subtile's body: p must not alias the stores. store_rows false: rows done already (eden_rows_subtile).
 template <int kEpiN>
 CUTLASS_DEVICE float2 mx_store_subtile_body(
-      const MxT& p, const cutlass::bfloat16_t* stage, int t, int64_t M, int64_t m, int64_t n, float2 smax) {
+      const MxT& p, const cutlass::bfloat16_t* stage, int t, int64_t M, int64_t m, int64_t n, float2 smax,
+      bool store_rows = true) {
   constexpr int kP = kEpiN / 32;
   const nanochat::kernels::Nvfp4Out rows = p.rows, fp4 = p.fp4; // loaded up front: one latency
   // lanes 4c .. 4c + 3: column c's 16-row quarters; lanes 4c, 4c + 1 hold block 0, 4c + 2, 4c + 3 block 1
   const int col = t / 4, quarter = t % 4;
-  if (rows.data != nullptr) {
+  if (store_rows && rows.data != nullptr) {
     // row r's columns 16 half .. 16 half + 15: a warp reads 32 consecutive rows at a time, conflict-free
     const int r = t % kEpiM, half = t / kEpiM;
     float f[kP][16];
@@ -137,11 +229,18 @@ CUTLASS_DEVICE float2 mx_store_subtile_body(
 // 32 columns' and rows' blocks, loading them all first. smax: (fp4's, rows') so far, returned updated. params: 64x64
 // copies them all, which the compiler then passes in uniform registers; that spills in the 64x32 kernels, so restrict
 // instead (the stores can't change params, so they aren't reloaded after each).
-template <int kEpiN>
+// kEden: the rows are MS-EDEN (eden_rows_subtile; a separate instantiation, so the other keeps its registers)
+template <int kEpiN, bool kEden = false>
 __device__ __noinline__ float2 mx_store_subtile(
       const MxT* __restrict__ params, const cutlass::bfloat16_t* stage, int t, int64_t M, int64_t m, int64_t n,
       float2 smax) {
-  if constexpr (kEpiN == 64) {
+  if constexpr (kEden) {
+    static_assert(kEpiN == 64, "MS-EDEN rows: 64-groups");
+    smax.y = eden_rows_subtile(params, stage, t, m, n, smax.y);
+    const MxT p = *params;
+    return mx_store_subtile_body<kEpiN>(p, stage, t, M, m, n, smax, false);
+  }
+  else if constexpr (kEpiN == 64) {
     const MxT p = *params;
     return mx_store_subtile_body<kEpiN>(p, stage, t, M, m, n, smax);
   }
@@ -151,14 +250,15 @@ __device__ __noinline__ float2 mx_store_subtile(
 }
 
 // Epilogue node: returns Fn(alpha, its children's values) per element (bf16) and writes their transpose quantized
-// along M (as quantize_mx's out_t), and with rows the values as NVFP4 along N. Each 64 x kEpiN subtile (the
-// collective's EpiTile) is staged in smem transposed; each of the 128 threads then quantizes 16 rows of kEpiN / 32
-// columns, lane pairs sharing a 32-row block's amax (NVFP4: one 16-value block each), and for rows 16 columns of
-// kEpiN / 32 rows. Pingpong: one warpgroup per tile, the two warpgroups' epilogues serialized.
-template <int FragmentSize, class Fn, int kEpiN = 32>
+// along M (as quantize_mx's out_t), and with rows the values as NVFP4 along N (kEdenRows: MS-EDEN when rows.eden). Each
+// 64 x kEpiN subtile (the collective's EpiTile) is staged in smem transposed; each of the 128 threads then quantizes 16
+// rows of kEpiN / 32 columns, lane pairs sharing a 32-row block's amax (NVFP4: one 16-value block each), and for rows
+// 16 columns of kEpiN / 32 rows. Pingpong: one warpgroup per tile, the two warpgroups' epilogues serialized.
+template <int FragmentSize, class Fn, int kEpiN = 32, bool kEdenRows = false>
 struct MxStoreT {
   static constexpr int kThreads = 128;
   static_assert(kEpiN % 32 == 0, "32 columns x 4 quarters = 128 threads");
+  static_assert(!kEdenRows || kEpiN == 64, "MS-EDEN rows: 64-groups");
 
   // [subtile parity][col][row], rows padded to 72: conflict-free fragment writes and 16 B quarter reads. The collective
   // syncs the warpgroup before reduce, so a subtile's stage is complete there, and its readers are done before the
@@ -265,9 +365,17 @@ struct MxStoreT {
 
     template <class STensor, class SyncFn, class VTensor>
     CUTLASS_DEVICE void reduce(STensor&&, const SyncFn&, int epi_m, int epi_n, bool, VTensor) {
-      const float2 r = mx_store_subtile<kEpiN>(
-            params, stage + (epi_m & 1) * kStage, thread_idx % kThreads, M, m0 + epi_m * kEpiM, n0 + epi_n * kEpiN,
-            make_float2(smax, smax_rows));
+      const cutlass::bfloat16_t* buf = stage + (epi_m & 1) * kStage;
+      const int t = thread_idx % kThreads;
+      const int64_t m = m0 + epi_m * kEpiM, n = n0 + epi_n * kEpiN;
+      float2 r;
+      if constexpr (kEdenRows)
+        if (params->rows.eden)
+          r = mx_store_subtile<kEpiN, true>(params, buf, t, M, m, n, make_float2(smax, smax_rows));
+        else
+          r = mx_store_subtile<kEpiN>(params, buf, t, M, m, n, make_float2(smax, smax_rows));
+      else
+        r = mx_store_subtile<kEpiN>(params, buf, t, M, m, n, make_float2(smax, smax_rows));
       smax = r.x, smax_rows = r.y;
     }
 
@@ -352,7 +460,8 @@ using Nvfp4GemmReluSquareGrad = Kernel<
             cutlass::arch::Sm120, cutlass::arch::OpClassBlockScaledTensorOp, Tile, Cluster, EpiTile64, float, float,
             void, cutlass::layout::RowMajor, 8, void, cutlass::layout::RowMajor, 8,
             cutlass::epilogue::collective::EpilogueScheduleAuto,
-            fusion::Sm90EVT<MxStoreT<4, ReluSquareGrad, 64>, fusion::Sm90AccFetch, HLoadT<EpiTile64>>>::CollectiveOp,
+            fusion::Sm90EVT<MxStoreT<4, ReluSquareGrad, 64, true>, fusion::Sm90AccFetch, HLoadT<EpiTile64>>>::
+            CollectiveOp,
       Nv, 32, cutlass::gemm::KernelTmaWarpSpecializedPingpongNvf4Sm120>;
 
 // The forward's with NVFP4 operands: h = the accumulator times the tensor scales (Nvfp4Alpha), stored by TMA; no D,
