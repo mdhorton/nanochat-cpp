@@ -228,6 +228,13 @@ void quantize_nvfp4_2d(const torch::Tensor& w, const kernels::Nvfp4Out& out, con
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
+torch::Tensor nvfp4_weight_values(const torch::Tensor& w_in) {
+  const auto w = w_in.contiguous();
+  const auto t = empty_nvfp4(w.size(0), w.size(1), w.options(), false, false, 0, false, 0, nvfp4_four_six());
+  quantize_nvfp4_2d(w, nvfp4_out(t, 0, 0), {});
+  return nvfp4_to_bf16(nvfp4_finish(t));
+}
+
 torch::Tensor nvfp4_gemm(const Nvfp4Tensor& a, const Nvfp4Tensor& b) {
   const int64_t M = a.data.size(0), N = b.data.size(0), K = a.data.size(1) * 2;
   TORCH_CHECK(b.data.size(1) * 2 == K, "nvfp4_gemm: shape mismatch");

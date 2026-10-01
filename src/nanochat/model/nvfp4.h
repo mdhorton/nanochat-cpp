@@ -115,6 +115,10 @@ uint64_t nvfp4_eden_signs();
 // e.g. nvfp4_out views of targets
 void quantize_nvfp4_2d(const torch::Tensor& w, const kernels::Nvfp4Out& out, const kernels::Nvfp4Out& out_t = {});
 
+// w (R, C) fp32 or bf16 (R % 128, C % 64) as the forward GEMMs see it (16x16 blocks, nvfp4_four_six()), dequantized
+// to bf16 (exact)
+torch::Tensor nvfp4_weight_values(const torch::Tensor& w);
+
 // bf16 (M, N) = a (M, K) . b (N, K)^T with the tensor scales applied (M, N % 128, K % 256)
 torch::Tensor nvfp4_gemm(const Nvfp4Tensor& a, const Nvfp4Tensor& b);
 

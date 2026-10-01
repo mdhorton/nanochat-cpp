@@ -84,6 +84,11 @@ static int run(int argc, char** argv) {
         "nvfp4-until", o.nvfp4_until,
         "nvfp4, nvfp4-*: all GEMMs MXFP8 from this step on: warmdown (its start) or a fraction of the steps (empty = "
         "never)");
+  o.nvfp4_osci_every = flags.i64(
+        "nvfp4-osci-every", o.nvfp4_osci_every,
+        "measure the NVFP4 forward weights' oscillation over the nvfp4-osci-window steps after every N-th (0 = off; "
+        "without nvfp4-fwd: all FP8 block Linears, as a control)");
+  o.nvfp4_osci_window = flags.i64("nvfp4-osci-window", o.nvfp4_osci_window, "nvfp4-osci-every: steps tracked");
   o.nvfp4_skip_first = flags.i64(
         "nvfp4-skip-first", o.nvfp4_skip_first, "nvfp4, nvfp4-fwd: first blocks kept MXFP8 (nvfp4-fwd: forward only)");
   o.nvfp4_skip_last = flags.i64(

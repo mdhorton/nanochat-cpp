@@ -51,6 +51,9 @@ struct TrainOptions {
   // MXFP8 from a step on: the NVFP4 forward GEMMs (nvfp4_fwd_until) or all NVFP4 GEMMs (nvfp4_until), real or
   // simulated. "warmdown": its first step; a fraction of the steps; empty: never
   std::string nvfp4_fwd_until, nvfp4_until;
+  // NVFP4 forward weights' oscillation (nvfp4_osci.h), measured over the nvfp4_osci_window steps after every
+  // nvfp4_osci_every-th (0: off)
+  int64_t nvfp4_osci_every = 0, nvfp4_osci_window = 50;
   // training horizon: the first one set wins
   int64_t num_iterations = -1;
   double target_flops = -1, target_param_data_ratio = 8; // Python: 12; speedrun.sh uses 8

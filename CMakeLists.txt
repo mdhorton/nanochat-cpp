@@ -92,6 +92,7 @@ add_library(nanochat_train
         src/nanochat/train/dataloader.cpp
         src/nanochat/train/dist.cpp
         src/nanochat/train/loss_eval.cpp
+        src/nanochat/train/nvfp4_osci.cpp
         src/nanochat/train/muon_kernel.cu
         src/nanochat/train/optim.cpp
         src/nanochat/train/safetensors.cpp

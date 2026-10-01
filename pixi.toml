@@ -69,8 +69,8 @@ quick-d24 = { cmd = "cmake-build-pixi/base_train $D24_BASE $QUICK_BASE --num-ite
 medium-d12 = { cmd = "cmake-build-pixi/base_train $D12_BASE $QUICK_BASE --num-iterations=100 --run=medium-d12", depends-on = ["build"] }
 medium-d24 = { cmd = "cmake-build-pixi/base_train $D24_BASE $QUICK_BASE --num-iterations=30  --run=medium-d24", depends-on = ["build"] }
 
-full-d12 = { cmd = "cmake-build-pixi/base_train $D12_BASE --run=full-d12", depends-on = ["build"] }
-full-d24 = { cmd = "cmake-build-pixi/base_train $D24_BASE --run=full-d24", depends-on = ["build"] }
+full-d12 = { cmd = "cmake-build-pixi/base_train $D12_BASE --wandb", depends-on = ["build"] }
+full-d24 = { cmd = "cmake-build-pixi/base_train $D24_BASE --wandb", depends-on = ["build"] }
 
 profile-d12 = { cmd = "tools/profile.sh d12 $D12_BASE", depends-on = ["build"] }
 profile-d24 = { cmd = "tools/profile.sh d24 $D24_BASE", depends-on = ["build"] }

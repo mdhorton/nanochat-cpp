@@ -28,6 +28,7 @@
 #include "nanochat/train/dataloader.h"
 #include "nanochat/train/dist.h"
 #include "nanochat/train/loss_eval.h"
+#include "nanochat/train/nvfp4_osci.h"
 #include "nanochat/train/optim.h"
 
 extern char** environ;
@@ -220,6 +221,8 @@ nlohmann::json options_to_json(const TrainOptions& o) {
         {"nvfp4_four_six", o.nvfp4_four_six},
         {"nvfp4_fwd_until", o.nvfp4_fwd_until},
         {"nvfp4_until", o.nvfp4_until},
+        {"nvfp4_osci_every", o.nvfp4_osci_every},
+        {"nvfp4_osci_window", o.nvfp4_osci_window},
         {"nvfp4_skip_first", o.nvfp4_skip_first},
         {"nvfp4_skip_last", o.nvfp4_skip_last},
         {"num_iterations", o.num_iterations},
@@ -651,6 +654,17 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
   bool nvfp4_fwd_on = o.nvfp4_fwd || nvfp4.fwd, nvfp4_on = nvfp4_real || !o.nvfp4.empty();
   if (!o.nvfp4_fwd_until.empty() && !nvfp4_fwd_on)
     throw std::invalid_argument("nvfp4_fwd_until: needs NVFP4 forward GEMMs");
+  // the blocks' NVFP4-forward Linears (all FP8 ones without nvfp4_fwd, as a control), rank 0
+  std::optional<Nvfp4OsciMonitor> osci;
+  if (o.nvfp4_osci_every > 0 && master) {
+    std::vector<std::pair<std::string, torch::Tensor>> ws;
+    for (const auto& block : *model->transformer->h)
+      for (const auto& item : block->named_modules("", false))
+        if (const auto* linear = dynamic_cast<const LinearImpl*>(item.value().get());
+            linear != nullptr && linear->fp8 && (linear->nvfp4_fwd || !o.nvfp4_fwd))
+          ws.emplace_back(item.key(), linear->weight);
+    osci.emplace(std::move(ws), o.nvfp4_osci_every, o.nvfp4_osci_window);
+  }
   double total_dt = 0; // every step of this run, incl. the first 11 that total_training_time skips
   std::optional<NvtxProcessRange> profile_range; // nsys --nvtx-capture=profile, ncu --nvtx-include profile
   optimizer.zero_grad();                         // the Muon grads are views of the optimizer's stacks
@@ -803,6 +817,31 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
              {"train/epoch", ls.epoch}});
     if (callbacks.on_step)
       callbacks.on_step({step, train_loss_f, lrm, dt});
+    if (osci)
+      if (const auto r = osci->after_step(step)) {
+        const auto pct = [](double x) {
+          return 100 * x;
+        };
+        const auto& all = (*r)["all"];
+        std::string kinds;
+        for (const auto& [kind, v] : r->items())
+          if (v.is_object() && kind != "all")
+            kinds += std::format(" {} {:.2f}%", kind, pct(v["osc"]));
+        print(std::format(
+              "Step {:05d} | NVFP4 weight oscillation, steps {}-{} (lrm {:.2f}-{:.2f}): moved {:.2f}% | osc {:.2f}% | "
+              "r8 {:.3f}% | flips {:.2f} | back q {:.1f}% w {:.1f}% | osc by kind:{}",
+              step, (*r)["first"].get<int64_t>(), step, schedules.lr_multiplier((*r)["first"].get<int64_t>()), lrm,
+              pct(all["moved"]), pct(all["osc"]), pct(all["r8"]), all["flips"].get<double>(), pct(all["back_q"]),
+              pct(all["back_w"]), kinds));
+        if (metrics) {
+          nlohmann::json m{{"step", step}};
+          for (const auto& [kind, v] : r->items())
+            if (v.is_object())
+              for (const auto& [stat, x] : v.items())
+                m["osci/" + kind + "/" + stat] = x;
+          metrics->log(m);
+        }
+      }
     ++step;
   }
   if (metrics)
