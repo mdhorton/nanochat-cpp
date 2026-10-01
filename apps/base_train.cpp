@@ -43,6 +43,10 @@ static int run(int argc, char** argv) {
   o.nvfp4_sr = flags.str(
         "nvfp4-sr", o.nvfp4_sr,
         "nvfp4: GEMMs whose gradient operand rounds stochastically (dgrad, wgrad; empty = none)");
+  o.nvfp4_eden = flags.str(
+        "nvfp4-eden", o.nvfp4_eden,
+        "nvfp4: GEMMs with Quartet II's MS-EDEN operands, replacing their rht / sr (dgrad, wgrad; empty = none); "
+        "nvfp4-dgrad: dgrad (real)");
   o.nvfp4_weight_2d = flags.boolean("nvfp4-weight-2d", o.nvfp4_weight_2d, "nvfp4: 16x16 weight blocks (without rht)");
   o.nvfp4_wgrad = flags.boolean(
         "nvfp4-wgrad", o.nvfp4_wgrad,
@@ -54,6 +58,14 @@ static int run(int argc, char** argv) {
         "nvfp4-fwd", o.nvfp4_fwd,
         "real NVFP4 forward GEMMs (CUTLASS) for the blocks' Linears: 16x16 weight blocks (dgrad sees the same weight), "
         "round to nearest");
+  o.nvfp4_fwd_until = flags.str(
+        "nvfp4-fwd-until", o.nvfp4_fwd_until,
+        "nvfp4, nvfp4-fwd: forward GEMMs MXFP8 from this step on: warmdown (its start) or a fraction of the steps "
+        "(empty = never)");
+  o.nvfp4_until = flags.str(
+        "nvfp4-until", o.nvfp4_until,
+        "nvfp4, nvfp4-*: all GEMMs MXFP8 from this step on: warmdown (its start) or a fraction of the steps (empty = "
+        "never)");
   o.nvfp4_skip_first = flags.i64(
         "nvfp4-skip-first", o.nvfp4_skip_first, "nvfp4, nvfp4-fwd: first blocks kept MXFP8 (nvfp4-fwd: forward only)");
   o.nvfp4_skip_last = flags.i64(

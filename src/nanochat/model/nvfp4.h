@@ -1,9 +1,11 @@
 // NVFP4 GEMMs: the operands in NVFP4, multiplied by CUTLASS's NVFP4 GEMM (nvfp4_gemm_kernel.h), with NVIDIA's recipe:
 // for wgrad a 16-point random Hadamard transform along K (tokens), stochastic rounding of the gradient (wgrad and
 // dgrad), and for forward 16x16 weight blocks, so dgrad sees the same weight. The kernels that quantize the operands
-// write them as NVFP4 directly (Nvfp4Target); others' MXFP8 operands are converted (mx_to_nvfp4, wgrad only).
+// write them as NVFP4 directly (Nvfp4Target); others' MXFP8 operands are converted (mx_to_nvfp4, wgrad only; dgrad with
+// MS-EDEN, mx_to_nvfp4_eden).
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <utility>
@@ -68,8 +70,9 @@ void nvfp4_gemm_f32(
 struct Nvfp4Backward {
   bool wgrad = true, dgrad = false; // the Linears' weight / input gradient GEMMs in NVFP4
   bool rht = true, sr = true;       // wgrad: Hadamard on both operands; stochastic rounding of the gradient
-  bool sr_dgrad = true; // dgrad: stochastic rounding of the gradient (no Hadamard; weights round to nearest)
-  uint64_t seed = 0;    // stochastic rounding's
+  bool sr_dgrad = true;    // dgrad: stochastic rounding of the gradient (no Hadamard; weights round to nearest)
+  bool eden_dgrad = false; // dgrad: MS-EDEN operands instead (nvfp4_eden_operands, from MX)
+  uint64_t seed = 0;       // stochastic rounding's
 };
 
 // Process-wide: the Linears' backward GEMMs (but lm_head's) in NVFP4 per options; null (default): MXFP8. options must
@@ -96,6 +99,21 @@ void quantize_nvfp4_2d(const torch::Tensor& w, const kernels::Nvfp4Out& out, con
 
 // bf16 (M, N) = a (M, K) . b (N, K)^T with the tensor scales applied (M, N % 128, K % 256)
 torch::Tensor nvfp4_gemm(const Nvfp4Tensor& a, const Nvfp4Tensor& b);
+
+// MS-EDEN (Quartet II; nvfp4_sim.h's nvfp4_eden) for a GEMM's MX operands a (M, K), b (N, K)
+// (kernels::mx_to_nvfp4_eden): one rotation along K from signs, a's values times 2^-4 and b's 2^-3 so the Hadamard's
+// 128 cancels in the product; the scales' stochastic rounding from seed_a / seed_b. M, N, K % 128.
+std::pair<Nvfp4Tensor, Nvfp4Tensor> mx_to_nvfp4_eden(
+      const torch::Tensor& a, const torch::Tensor& a_scale, const torch::Tensor& b, const torch::Tensor& b_scale,
+      const std::array<uint32_t, 4>& signs, uint64_t seed_a, uint64_t seed_b);
+
+// Whether dgrad GEMMs with this K take MS-EDEN operands (nvfp4_backward()'s eden_dgrad, K % 256); their producers then
+// write MX
+bool nvfp4_eden_dgrad(int64_t K);
+
+// mx_to_nvfp4_eden with fresh signs and seeds (nvfp4_backward()'s)
+std::pair<Nvfp4Tensor, Nvfp4Tensor> nvfp4_eden_operands(
+      const torch::Tensor& a, const torch::Tensor& a_scale, const torch::Tensor& b, const torch::Tensor& b_scale);
 
 // out (n, C) fp32 (+)= alpha * go_t (n, N) . in_t (C, N)^T in NVFP4. Each operand NVFP4 already (data, scale, amax), or
 // MX (amax undefined) converted per nvfp4_backward() (then set).

@@ -110,10 +110,10 @@ std::vector<torch::Tensor> cached(
   return cache != nullptr ? cache->get(kind, weights, make) : make();
 }
 
-// whether Mx weights' transposes are NVFP4 (for NVFP4 dgrad)
+// whether Mx weights' transposes are NVFP4 (for NVFP4 dgrad; MX for MS-EDEN's)
 bool fp4_weights_t() {
   const auto* o = nvfp4_backward();
-  return o != nullptr && o->dgrad;
+  return o != nullptr && o->dgrad && !o->eden_dgrad;
 }
 
 int64_t mx_kind(bool fp4_t, bool fp4) {
@@ -277,15 +277,20 @@ torch::Tensor mm_forward(const Fp8Tensor& in, const Fp8Tensor& w, torch::ScalarT
   return at::_scaled_mm(in.data, w.data.t(), in.inv_scale, w.inv_scale, {}, {}, out_dtype, true);
 }
 
-// grad_input = grad_output @ weight; w_t: forward's transpose (w_amax: NVFP4's)
+// grad_input = grad_output @ weight; w_t: forward's transpose (w_amax: NVFP4's). MX operands go MS-EDEN NVFP4 when
+// nvfp4_eden_dgrad.
 torch::Tensor mm_grad_input(
       const Fp8Tensor& go, const torch::Tensor& w_t, const torch::Tensor& w_inv, const torch::Tensor& w_amax,
       torch::ScalarType out_dtype) {
   const bool fp4 = w_t.scalar_type() == torch::kUInt8;
   TORCH_CHECK(go.fp4() == fp4, "NVFP4 dgrad: both operands or neither");
-  if (fp4) {
-    TORCH_CHECK(out_dtype == torch::kBFloat16, "NVFP4 dgrad: bf16 gradients only");
+  const bool eden = !fp4 && is_mx(go) && nvfp4_eden_dgrad(w_t.size(1));
+  TORCH_CHECK(!(fp4 || eden) || out_dtype == torch::kBFloat16, "NVFP4 dgrad: bf16 gradients only");
+  if (fp4)
     return nvfp4_gemm(go.nvfp4(), {w_t, w_inv, w_amax});
+  if (eden) {
+    const auto [a, b] = nvfp4_eden_operands(go.data, go.inv_scale, w_t, w_inv);
+    return nvfp4_gemm(a, b);
   }
   if (is_mx(go))
     return mx_gemm(go.data, go.inv_scale, w_t, w_inv, out_dtype);
@@ -413,8 +418,8 @@ public:
             h.size(0), h.size(1), h.options(), true, true, go.fp4() ? Nvfp4Role::DgradGrad : Nvfp4Role::None,
             fc_params.empty() ? Nvfp4Role::None : Nvfp4Role::WgradGrad);
       const auto [out, out_t] = mx_outs(dhq);
-      // CUTLASS: the dgrad GEMM's epilogue does it all
-      const bool fused = dtype == torch::kBFloat16 &&
+      // CUTLASS: the dgrad GEMM's epilogue does it all (not with MS-EDEN: its NVFP4 epilogue writes NVFP4 rows)
+      const bool fused = dtype == torch::kBFloat16 && (go.fp4() || !nvfp4_eden_dgrad(s[7].size(1))) &&
                          (go.fp4() ? nvfp4_gemm_relu_square_bwd(go.nvfp4(), {s[7], s[8], s[12]}, h, out, out_t)
                                    : mx_gemm_relu_square_bwd(
                                            go.data, go.inv_scale, s[7], s[8], h, dhq.data, dhq.inv_scale, dhq.data_t,

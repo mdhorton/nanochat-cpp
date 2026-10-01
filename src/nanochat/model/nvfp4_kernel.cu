@@ -136,6 +136,96 @@ __global__ void mx_to_bf16_kernel(const uint8_t* data, const uint8_t* scale, int
     o[i] = __float2bfloat16_rn(v[i]);
 }
 
+// MS-EDEN's block maxima map a little above 6 (Quartet II's, as nvfp4_sim.cpp), so the largest values saturate
+constexpr float kEdenValMax = 6.f / (17.f / 16 * 0.93f);
+
+// the values of 8 e2m1 codes (as e2m1x8_rn's), exact
+__device__ __forceinline__ void e2m1x8_values(uint32_t codes, float (&q)[8]) {
+  uint32_t h[4];
+  asm("{\n"
+      " .reg .b8 b0, b1, b2, b3;\n"
+      " mov.b32 {b0, b1, b2, b3}, %4;\n"
+      " cvt.rn.f16x2.e2m1x2 %0, b0;\n"
+      " cvt.rn.f16x2.e2m1x2 %1, b1;\n"
+      " cvt.rn.f16x2.e2m1x2 %2, b2;\n"
+      " cvt.rn.f16x2.e2m1x2 %3, b3;\n"
+      "}"
+      : "=r"(h[0]), "=r"(h[1]), "=r"(h[2]), "=r"(h[3])
+      : "r"(codes));
+#pragma unroll
+  for (int k = 0; k < 4; ++k) {
+    const float2 f = __half22float2(*reinterpret_cast<const __half2*>(&h[k]));
+    q[2 * k] = f.x, q[2 * k + 1] = f.y;
+  }
+}
+
+// kernels::mx_to_nvfp4_eden: a thread per 16 values, 8 lanes per 128-group
+__global__ void eden_kernel(
+      const uint8_t* data, const uint8_t* scale, int64_t rows, int64_t cols, const uint4 signs, float mul,
+      uint64_t seed, const kernels::Nvfp4Out out) {
+  Group grp;
+  const bool active = group_of(rows, cols, grp);
+  float v[kGroup] = {};
+  if (active)
+    load_mx16(data, scale, cols, grp, nullptr, v);
+  // x . diag(signs) . H128 with H128 = H8 (over the lanes) x H16 (over a thread's values), Sylvester order
+  const int lane = static_cast<int>(threadIdx.x % 8);
+  const uint32_t bits = (lane < 4 ? (lane < 2 ? signs.x : signs.y) : (lane < 6 ? signs.z : signs.w)) >>
+                        (16 * (lane % 2));
+#pragma unroll
+  for (int i = 0; i < kGroup; ++i)
+    v[i] *= (bits >> i) & 1u ? -mul : mul;
+#pragma unroll
+  for (int h = 1; h < kGroup; h *= 2)
+#pragma unroll
+    for (int i = 0; i < kGroup; i += 2 * h)
+#pragma unroll
+      for (int j = i; j < i + h; ++j) {
+        const float a = v[j], b = v[j + h];
+        v[j] = a + b, v[j + h] = a - b;
+      }
+#pragma unroll
+  for (int h = 1; h < 8; h *= 2)
+#pragma unroll
+    for (int i = 0; i < kGroup; ++i) {
+      const float p = __shfl_xor_sync(0xffffffff, v[i], h);
+      v[i] = lane & h ? p - v[i] : v[i] + p;
+    }
+  float m = 0.f;
+#pragma unroll
+  for (int i = 0; i < kGroup; ++i)
+    m = fmaxf(m, fabsf(v[i]));
+  const float s = nvfp4_round_scale(m * (1.f / kEdenValMax)), to_q = s > 0.f ? nvfp4_rcp(s) : 0.f;
+  // values to nearest, then the group's ||a||² and <a, q> in e2m1 units
+  float a[2][8], q[8], num = 0.f, den = 0.f;
+  uint32_t codes[2];
+#pragma unroll
+  for (int k = 0; k < 2; ++k) {
+#pragma unroll
+    for (int i = 0; i < 8; ++i)
+      a[k][i] = v[8 * k + i] * to_q;
+    codes[k] = e2m1x8_rn(a[k]);
+    e2m1x8_values(codes[k], q);
+#pragma unroll
+    for (int i = 0; i < 8; ++i)
+      num = fmaf(a[k][i], a[k][i], num), den = fmaf(a[k][i], q[i], den);
+  }
+#pragma unroll
+  for (int h = 1; h < 8; h *= 2) {
+    num += __shfl_xor_sync(0xffffffff, num, h);
+    den += __shfl_xor_sync(0xffffffff, den, h);
+  }
+  // the corrected scale, rounded stochastically to 3 mantissa bits (at any exponent: nvfp4_finish's shift is exact)
+  const float cs = s * (den > 0.f ? num / den : 1.f);
+  const float sr = __uint_as_float((__float_as_uint(cs) + (nvfp4_random(seed, grp.g) & 0xfffffu)) & 0xfff00000u);
+  if (active) {
+    *reinterpret_cast<uint2*>(static_cast<uint8_t*>(out.data) + (grp.row * out.ld + grp.col) / 2) = make_uint2(
+          codes[0], codes[1]);
+    nvfp4_store_scale(out, grp.row, grp.col, sr);
+  }
+  nvfp4_smax_block(out, active ? sr : 0.f);
+}
+
 // 16 threads per 16x16 block: thread i reads the block's row i and column i, and writes them to out and out_t
 template <class T>
 __global__ void quantize_2d_kernel(
@@ -238,6 +328,16 @@ void mx_to_nvfp4(
   quantize_kernel<<<grid_for(rows, cols), kThreads, 0, stream>>>(
         d, s, rows, cols, hadamard, stochastic, seed, static_cast<uint8_t*>(out), static_cast<uint8_t*>(out_scale),
         amax);
+}
+
+void mx_to_nvfp4_eden(
+      const void* data, const void* scale, int64_t rows, int64_t cols, const uint32_t* signs, float mul, uint64_t seed,
+      const Nvfp4Out& out, cudaStream_t stream) {
+  if (rows * cols == 0)
+    return;
+  eden_kernel<<<grid_for(rows, cols), kThreads, 0, stream>>>(
+        static_cast<const uint8_t*>(data), static_cast<const uint8_t*>(scale), rows, cols,
+        make_uint4(signs[0], signs[1], signs[2], signs[3]), mul, seed, out);
 }
 
 void quantize_nvfp4_2d(

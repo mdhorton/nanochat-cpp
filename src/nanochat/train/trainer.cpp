@@ -208,10 +208,13 @@ nlohmann::json options_to_json(const TrainOptions& o) {
         {"nvfp4", o.nvfp4},
         {"nvfp4_rht", o.nvfp4_rht},
         {"nvfp4_sr", o.nvfp4_sr},
+        {"nvfp4_eden", o.nvfp4_eden},
         {"nvfp4_weight_2d", o.nvfp4_weight_2d},
         {"nvfp4_wgrad", o.nvfp4_wgrad},
         {"nvfp4_dgrad", o.nvfp4_dgrad},
         {"nvfp4_fwd", o.nvfp4_fwd},
+        {"nvfp4_fwd_until", o.nvfp4_fwd_until},
+        {"nvfp4_until", o.nvfp4_until},
         {"nvfp4_skip_first", o.nvfp4_skip_first},
         {"nvfp4_skip_last", o.nvfp4_skip_last},
         {"num_iterations", o.num_iterations},
@@ -433,6 +436,9 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
     throw std::invalid_argument("nvfp4 (simulated) and nvfp4_wgrad / nvfp4_dgrad / nvfp4_fwd (real) are exclusive");
   if (o.nvfp4_dgrad && rht[1])
     throw std::invalid_argument("nvfp4_dgrad: no rht (simulated only)");
+  const auto eden = gemms(o.nvfp4_eden, "nvfp4-eden", false);
+  if (o.nvfp4.empty() && (eden[2] || (eden[1] && !o.nvfp4_dgrad)))
+    throw std::invalid_argument("nvfp4_eden: simulated (--nvfp4), or real for dgrad (--nvfp4-dgrad)");
   if (!o.nvfp4.empty()) {
     const auto on = gemms(o.nvfp4, "nvfp4", true);
     nvfp4 = {
@@ -444,13 +450,15 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
           .rht_wgrad = rht[2],
           .sr_dgrad = sr[1],
           .sr_wgrad = sr[2],
+          .eden_dgrad = eden[1],
+          .eden_wgrad = eden[2],
           .weight_2d = o.nvfp4_weight_2d,
           .seed = static_cast<uint64_t>(o.seed)};
     const int n = model->set_nvfp4(&nvfp4, o.nvfp4_skip_first, o.nvfp4_skip_last);
     print(std::format(
-          "Simulated NVFP4 for {} ({} linear layers; rht {}, sr {}, 2d weights {}, seed {})", o.nvfp4, n,
-          o.nvfp4_rht.empty() ? "none" : o.nvfp4_rht, o.nvfp4_sr.empty() ? "none" : o.nvfp4_sr, nvfp4.weight_2d,
-          nvfp4.seed));
+          "Simulated NVFP4 for {} ({} linear layers; rht {}, sr {}, eden {}, 2d weights {}, seed {})", o.nvfp4, n,
+          o.nvfp4_rht.empty() ? "none" : o.nvfp4_rht, o.nvfp4_sr.empty() ? "none" : o.nvfp4_sr,
+          o.nvfp4_eden.empty() ? "none" : o.nvfp4_eden, nvfp4.weight_2d, nvfp4.seed));
   }
 
   // real NVFP4 backward GEMMs, process-wide until train returns
@@ -460,6 +468,7 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
         .rht = rht[2],
         .sr = sr[2],
         .sr_dgrad = sr[1],
+        .eden_dgrad = o.nvfp4_dgrad && eden[1],
         .seed = static_cast<uint64_t>(o.seed)};
 
   struct BackwardScope {
@@ -480,7 +489,9 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
   if (o.nvfp4_wgrad)
     print(std::format("NVFP4 weight gradients (rht {}, sr {}, seed {})", backward.rht, backward.sr, backward.seed));
   if (o.nvfp4_dgrad)
-    print(std::format("NVFP4 input gradients (sr {}, seed {})", backward.sr_dgrad, backward.seed));
+    print(std::format(
+          "NVFP4 input gradients ({}, seed {})",
+          backward.eden_dgrad ? "MS-EDEN" : std::format("sr {}", backward.sr_dgrad), backward.seed));
 
   const auto checkpoint_dir = o.base_dir / "base_checkpoints" /
                               (o.run == "dummy" ? "d" + std::to_string(o.depth) : o.run);
@@ -575,6 +586,25 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
   }
 
   const int64_t N = plan.num_iterations;
+  // nvfp4_fwd_until / nvfp4_until -> the first MXFP8 step (N: never)
+  const auto until_step = [&](const std::string& until, const char* what) -> int64_t {
+    if (until.empty())
+      return N;
+    if (o.nvfp4.empty() && !nvfp4_real)
+      throw std::invalid_argument(std::format("{}: needs nvfp4 or nvfp4_wgrad / nvfp4_dgrad / nvfp4_fwd", what));
+    if (until == "warmdown")
+      return N - static_cast<int64_t>(std::nearbyint(o.warmdown_ratio * static_cast<double>(N)));
+    size_t end = 0;
+    const double f = std::stod(until, &end);
+    if (end != until.size() || f < 0 || f > 1)
+      throw std::invalid_argument(std::format("{}: {} (use warmdown or a fraction in [0, 1])", what, until));
+    return static_cast<int64_t>(std::nearbyint(f * static_cast<double>(N)));
+  };
+  const int64_t nvfp4_off = until_step(o.nvfp4_until, "nvfp4_until");
+  const int64_t nvfp4_fwd_off = std::min(until_step(o.nvfp4_fwd_until, "nvfp4_fwd_until"), nvfp4_off);
+  bool nvfp4_fwd_on = o.nvfp4_fwd || nvfp4.fwd, nvfp4_on = nvfp4_real || !o.nvfp4.empty();
+  if (!o.nvfp4_fwd_until.empty() && !nvfp4_fwd_on)
+    throw std::invalid_argument("nvfp4_fwd_until: needs NVFP4 forward GEMMs");
   double total_dt = 0; // every step of this run, incl. the first 11 that total_training_time skips
   std::optional<NvtxProcessRange> profile_range; // nsys --nvtx-capture=profile, ncu --nvtx-include profile
   optimizer.zero_grad();                         // the Muon grads are views of the optimizer's stacks
@@ -630,6 +660,19 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
 
     if (last_step)
       break;
+
+    // NVFP4 GEMMs back to MXFP8 (between steps: the operands' formats are chosen per GEMM)
+    if (nvfp4_fwd_on && step >= nvfp4_fwd_off) {
+      nvfp4.fwd = nvfp4_fwd_on = false;
+      model->set_nvfp4_fwd(false);
+      print(std::format("Step {:05d} | NVFP4 forward GEMMs off (MXFP8)", step));
+    }
+    if (nvfp4_on && step >= nvfp4_off) {
+      nvfp4_on = false;
+      model->set_nvfp4(nullptr);
+      set_nvfp4_backward(nullptr);
+      print(std::format("Step {:05d} | NVFP4 GEMMs off (MXFP8)", step));
+    }
 
     if (o.profile_start >= 0 && (step == o.profile_start || step == o.profile_start + o.profile_steps)) {
       torch::cuda::synchronize();

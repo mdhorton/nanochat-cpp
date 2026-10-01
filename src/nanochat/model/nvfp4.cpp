@@ -231,6 +231,47 @@ torch::Tensor nvfp4_gemm(const Nvfp4Tensor& a, const Nvfp4Tensor& b) {
   return out;
 }
 
+std::pair<Nvfp4Tensor, Nvfp4Tensor> mx_to_nvfp4_eden(
+      const torch::Tensor& a, const torch::Tensor& a_scale, const torch::Tensor& b, const torch::Tensor& b_scale,
+      const std::array<uint32_t, 4>& signs, uint64_t seed_a, uint64_t seed_b) {
+  check_mx(a, a_scale);
+  check_mx(b, b_scale);
+  const int64_t K = a.size(1);
+  TORCH_CHECK(b.size(1) == K, "mx_to_nvfp4_eden: K mismatch");
+  const auto ta = empty_nvfp4(a.size(0), K, a.options(), false, false);
+  const auto tb = empty_nvfp4(b.size(0), K, b.options(), false, false);
+  kernels::mx_to_nvfp4_eden(
+        a.data_ptr(), a_scale.data_ptr(), a.size(0), K, signs.data(), 1.f / 16, seed_a, nvfp4_out(ta), stream());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  kernels::mx_to_nvfp4_eden(
+        b.data_ptr(), b_scale.data_ptr(), b.size(0), K, signs.data(), 1.f / 8, seed_b, nvfp4_out(tb), stream());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  return nvfp4_finish(ta, tb);
+}
+
+bool nvfp4_eden_dgrad(int64_t K) {
+  const auto* o = nvfp4_backward();
+  return o != nullptr && o->dgrad && o->eden_dgrad && K % 256 == 0;
+}
+
+std::pair<Nvfp4Tensor, Nvfp4Tensor> nvfp4_eden_operands(
+      const torch::Tensor& a, const torch::Tensor& a_scale, const torch::Tensor& b, const torch::Tensor& b_scale) {
+  const auto* o = nvfp4_backward();
+  TORCH_CHECK(o != nullptr && o->eden_dgrad, "nvfp4_eden_operands: needs eden_dgrad on");
+  // the signs: splitmix64 of a fresh seed
+  uint64_t x = next_seed(*o);
+  std::array<uint32_t, 4> signs{};
+  for (int i = 0; i < 4; i += 2) {
+    uint64_t z = x += 0x9e3779b97f4a7c15ull;
+    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ull;
+    z = (z ^ (z >> 27)) * 0x94d049bb133111ebull;
+    z ^= z >> 31;
+    signs[i] = static_cast<uint32_t>(z), signs[i + 1] = static_cast<uint32_t>(z >> 32);
+  }
+  const uint64_t seed_a = next_seed(*o);
+  return mx_to_nvfp4_eden(a, a_scale, b, b_scale, signs, seed_a, next_seed(*o));
+}
+
 void set_nvfp4_backward(const Nvfp4Backward* options) {
   backward_options = options;
 }
@@ -246,7 +287,7 @@ Nvfp4Target nvfp4_target(int64_t R, int64_t C, const torch::TensorOptions& optio
   if (o == nullptr || role == Nvfp4Role::None)
     return {};
   const bool wgrad = role == Nvfp4Role::WgradInput || role == Nvfp4Role::WgradGrad;
-  if (!(wgrad ? o->wgrad : o->dgrad))
+  if (!(wgrad ? o->wgrad : o->dgrad && !o->eden_dgrad))
     return {};
   const bool sr = role == Nvfp4Role::WgradGrad ? o->sr : role == Nvfp4Role::DgradGrad && o->sr_dgrad;
   return empty_nvfp4(R, C, options, wgrad && o->rht, sr, sr ? next_seed(*o) : 0);

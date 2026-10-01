@@ -104,14 +104,3 @@ Run 30: GPU0 is about 5-10% slower. This gives a few extra micro-steps to GPU1 s
 |    | toks/sec | loss | bpb | memory | time | notes |
 |----|---------:|-----:|----:|-------:|-----:|-------|
 | 25 |          |      |     |        |      |       |
-
-# nvfp4
-
-1.436141 (baseline)
-1.442035 --nvfp4=fwd,dgrad,wgrad  
-1.442549 --nvfp4=fwd,dgrad        
-1.443382 --nvfp4=fwd,dgrad,wgrad --nvfp4-skip-last=2
-
-1.436142 (baseline)
-1.439150 --nvfp4=dgrad,wgrad
-1.439393 --nvfp4=fwd

@@ -186,8 +186,16 @@ public:
       quantize_mx_into(dv, false, v_out, v_out_t);
 
     finish_fp4(g);
-    auto dx = g.fp4() ? nvfp4_gemm(g.nvfp4(), {w_t, w_scale_t, w_amax})
-                      : mx_gemm(g.data, g.inv_scale, w_t, w_scale_t, dtype);
+    torch::Tensor dx;
+    if (g.fp4())
+      dx = nvfp4_gemm(g.nvfp4(), {w_t, w_scale_t, w_amax});
+    else if (nvfp4_eden_dgrad(n)) {
+      TORCH_CHECK(dtype == torch::kBFloat16, "NVFP4 dgrad: bf16 gradients only");
+      const auto [a, b] = nvfp4_eden_operands(g.data, g.inv_scale, w_t, w_scale_t);
+      dx = nvfp4_gemm(a, b);
+    }
+    else
+      dx = mx_gemm(g.data, g.inv_scale, w_t, w_scale_t, dtype);
     torch::Tensor dw;
     if (grads_direct)
       mx_grad_weights(

@@ -33,11 +33,15 @@ struct TrainOptions {
   std::string nvfp4;
   std::string nvfp4_rht = "wgrad";      // GEMMs with a random Hadamard transform along K
   std::string nvfp4_sr = "dgrad,wgrad"; // GEMMs whose gradient operand rounds stochastically
+  std::string nvfp4_eden; // GEMMs with MS-EDEN operands (dgrad, wgrad), instead of their rht / sr; real: dgrad
   bool nvfp4_weight_2d = true;
   int64_t nvfp4_skip_first = 0, nvfp4_skip_last = 0; // blocks kept MXFP8 (sim: all GEMMs; nvfp4_fwd: forward)
   // real NVFP4 weight / input gradients for the Linears but lm_head (nvfp4.h), with nvfp4_rht / nvfp4_sr's wgrad /
   // dgrad (no rht) and seed; forward GEMMs for the blocks' Linears (16x16 weight blocks, round to nearest)
   bool nvfp4_wgrad = false, nvfp4_dgrad = false, nvfp4_fwd = false;
+  // MXFP8 from a step on: the NVFP4 forward GEMMs (nvfp4_fwd_until) or all NVFP4 GEMMs (nvfp4_until), real or
+  // simulated. "warmdown": its first step; a fraction of the steps; empty: never
+  std::string nvfp4_fwd_until, nvfp4_until;
   // training horizon: the first one set wins
   int64_t num_iterations = -1;
   double target_flops = -1, target_param_data_ratio = 8; // Python: 12; speedrun.sh uses 8

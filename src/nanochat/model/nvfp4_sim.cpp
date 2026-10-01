@@ -1,8 +1,13 @@
 #include "nanochat/model/nvfp4_sim.h"
 
 #include <atomic>
+#include <cmath>
+#include <map>
+#include <mutex>
 
+#include <ATen/CPUGeneratorImpl.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/CUDAGeneratorImpl.h>
 
 #include "nanochat/model/fp8.h"
 #include "nanochat/model/mx_gemm.h"
@@ -22,6 +27,34 @@ std::atomic<uint64_t> seed_counter{1};
 torch::Tensor mx_matmul(const torch::Tensor& a, const torch::Tensor& b, torch::ScalarType dtype) {
   const auto aq = quantize_mx(a, true, false), bq = quantize_mx(b, true, false);
   return mx_gemm(aq.data, aq.inv_scale, bq.data, bq.inv_scale, dtype);
+}
+
+// 2D (M, K) x (N, K) -> (M, N) fp32, with MS-EDEN operands sharing one rotation along K
+torch::Tensor eden_matmul(const torch::Tensor& a, const torch::Tensor& b, uint64_t seed) {
+  const auto h = nvfp4_eden_rotation(a.device(), seed);
+  const auto qa = nvfp4_eden(a, h, seed), qb = nvfp4_eden(b, h, seed);
+  return at::mm(qa.values, qb.values.t(), torch::kFloat32) * (qa.scale * qb.scale);
+}
+
+// |a| -> nearest FP4 magnitude (saturating), ties to the even mantissa: each threshold overrides the ones above
+torch::Tensor e2m1_rn(const torch::Tensor& a) {
+  auto q = torch::full_like(a, 6.f);
+  q = torch::where(a <= 5, 4.f, q);
+  q = torch::where(a < 3.5, 3.f, q);
+  q = torch::where(a <= 2.5, 2.f, q);
+  q = torch::where(a < 1.75, 1.5f, q);
+  q = torch::where(a <= 1.25, 1.f, q);
+  q = torch::where(a < .75, .5f, q);
+  return torch::where(a <= .25, 0.f, q);
+}
+
+// the e4m3 value `step` codes from positive e4m3 codes, within [0, 448]
+torch::Tensor e4m3_step(const torch::Tensor& bits, int step) {
+  return (bits.to(torch::kInt16) + step)
+        .clamp(0, 0x7e)
+        .to(torch::kUInt8)
+        .view(torch::kFloat8_e4m3fn)
+        .to(torch::kFloat32);
 }
 
 class Nvfp4SimMatmul : public torch::autograd::Function<Nvfp4SimMatmul> {
@@ -47,6 +80,8 @@ public:
     torch::Tensor dx;
     if (!o->dgrad)
       dx = mx_matmul(go, weight.t().contiguous(), dtype);
+    else if (o->eden_dgrad)
+      dx = eden_matmul(go, weight.t().contiguous(), o->seed).to(dtype);
     else {
       // W^T (in, out), quantized along out
       torch::Tensor w_t;
@@ -64,6 +99,8 @@ public:
     torch::Tensor dw;
     if (!o->wgrad)
       dw = mx_matmul(go_t, in_t, torch::kFloat32);
+    else if (o->eden_wgrad)
+      dw = eden_matmul(go_t, in_t, o->seed);
     else {
       if (o->rht_wgrad)
         go_t = nvfp4_rht(go_t), in_t = nvfp4_rht(in_t);
@@ -103,6 +140,66 @@ torch::Tensor nvfp4_rht(const torch::Tensor& x) {
   TORCH_CHECK(x.dim() == 2 && x.size(1) % 16 == 0, "nvfp4_rht: expected 2D with cols % 16");
   const int64_t R = x.size(0), C = x.size(1);
   return torch::matmul(x.to(torch::kFloat32).reshape({R, C / 16, 16}), nvfp4_hadamard(x.device())).reshape({R, C});
+}
+
+Nvfp4Eden nvfp4_eden(const torch::Tensor& x, const torch::Tensor& h, uint64_t seed) {
+  torch::NoGradGuard no_grad;
+  TORCH_CHECK(
+        x.dim() == 2 && x.size(1) % 128 == 0 && h.dim() == 2 && h.size(0) == 128 && h.size(1) == 128,
+        "nvfp4_eden: expected 2D with cols % 128 and a 128x128 rotation");
+  // Quartet II's backward: block maxima map a little above 6, and tensor-scaled block scales stay <= 256, leaving
+  // e4m3 room for the correction
+  constexpr float val_max = 6 / (17.f / 16 * 0.93f), scale_max = 255.99f;
+  const int64_t R = x.size(0), C = x.size(1);
+  const auto xh = torch::matmul(x.to(torch::kFloat32).view({R, C / 128, 128}), h).view({R, C / 16, 16});
+  const auto amax = xh.abs().amax();
+  const auto scale = torch::where(amax > 0, amax / (scale_max * val_max), torch::ones_like(amax));
+  // block scales, e4m3 round to nearest (0 -> 1)
+  auto s = (xh.abs().amax(-1, true) / val_max / scale).to(torch::kFloat8_e4m3fn).to(torch::kFloat32);
+  s = torch::where(s > 0, s, torch::ones_like(s));
+  const auto xs = xh / (s * scale);
+  const auto q = torch::sign(xs) * e2m1_rn(xs.abs());
+  // each 128-group's ||xs||² / <xs, q> times its block scales
+  const auto group_sum = [&](const torch::Tensor& t) {
+    return t.view({R, C / 128, 128}).sum(-1, true);
+  };
+  const auto num = group_sum(xs * xs), den = group_sum(xs * q);
+  const auto corr = torch::where(den > 0, num / den, torch::ones_like(den));
+  const auto cs = (s.view({R, C / 128, 8}) * corr).clamp_max(448).view({R, C / 16, 1});
+  // stochastic rounding to one of the two nearest e4m3 values
+  const auto bits = cs.to(torch::kFloat8_e4m3fn).view(torch::kUInt8);
+  const auto nearest = e4m3_step(bits, 0);
+  const auto above = nearest > cs;
+  const auto up = torch::where(above, nearest, e4m3_step(bits, 1));
+  const auto down = torch::where(above, e4m3_step(bits, -1), nearest);
+  const auto p_up = torch::where(up > down, (cs - down) / (up - down), torch::zeros_like(cs));
+  auto gen = at::cuda::detail::createCUDAGenerator(x.device().index());
+  {
+    const std::lock_guard lock(gen.mutex());
+    gen.set_current_seed(seed_counter++ + (seed << 40));
+  }
+  const auto s_sr = torch::where(torch::rand(cs.sizes(), gen, cs.options()) < p_up, up, down);
+  return {(q * s_sr).view({R, C}).to(torch::kBFloat16), scale};
+}
+
+torch::Tensor nvfp4_eden_rotation(const torch::Device& device, uint64_t seed) {
+  static std::mutex mutex;
+  static std::map<int, torch::Tensor> cache;
+  torch::Tensor h;
+  {
+    const std::lock_guard lock(mutex);
+    auto& c = cache[device.index()];
+    if (!c.defined()) {
+      auto m = torch::ones({1, 1});
+      for (int n = 1; n < 128; n *= 2)
+        m = torch::cat({torch::cat({m, m}, 1), torch::cat({m, -m}, 1)}, 0);
+      c = (m / std::sqrt(128.)).to(device);
+    }
+    h = c;
+  }
+  // signs before the Hadamard (diag(s) . H): after it they'd cancel in the product, quantization being sign-symmetric
+  auto gen = at::make_generator<at::CPUGeneratorImpl>(seed_counter++ + (seed << 40));
+  return (torch::randint(0, 2, {128, 1}, gen, torch::kFloat32) * 2 - 1).to(device) * h;
 }
 
 torch::Tensor nvfp4_sim_matmul(
