@@ -17,8 +17,7 @@ Clone project and install the dependencies. Does not require root. Everything is
 
 ```bash
 git clone https://github.com/mdhorton/nanochat-cpp.git
-cd nanochat-cpp
-mkdir external
+cd nanochat-cpp && mkdir external
 (cd external && git clone https://github.com/NVIDIA/cutlass.git) 
 (cd external && git clone https://github.com/karpathy/nanochat.git) 
 ```

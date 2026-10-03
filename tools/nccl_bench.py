@@ -46,13 +46,15 @@ def pcie_links(gpus, stop, peak):
 
 
 def parse(text):
+    # size count type redop root | oop time algbw busbw #wrong | ip time algbw busbw #wrong
+    half = r"\s+[\d.]+\s+([\d.]+)\s+([\d.]+)\s+(\S+)"  # time (algbw) (busbw) (#wrong)
+    row = re.compile(r"^\s*(\d+)\s+\d+\s+[a-z]\w*\s+\w+\s+-?\d+" + half + half + r"\s*$")
     rows = []
     for l in text.splitlines():
-        f = l.split()
-        # size count type redop root | oop time algbw busbw #wrong | ip time algbw busbw #wrong
-        if len(f) >= 13 and f[0].isdigit():
-            wrong = [int(x) if x.isdigit() else 0 for x in (f[-5], f[-1])]
-            rows.append({"bytes": int(f[0]), "busbw": float(f[-6]), "busbw_ip": float(f[-2]), "wrong": sum(wrong)})
+        if m := row.match(l):  # NCCL INFO lines can start with digits too
+            size, _, busbw, w1, _, busbw_ip, w2 = m.groups()
+            wrong = sum(int(w) if w.isdigit() else 0 for w in (w1, w2))
+            rows.append({"bytes": int(size), "busbw": float(busbw), "busbw_ip": float(busbw_ip), "wrong": wrong})
     avg = re.search(r"Avg bus bandwidth\s*:\s*([\d.]+)", text)
     oob = re.search(r"Out of bounds values\s*:\s*(\d+)", text)
     return {
@@ -143,7 +145,7 @@ def main():
     if not a.dry_run:
         b.out.joinpath("topo.txt").write_text(sh(["nvidia-smi", "topo", "-m"]))
         print(sh(["nvidia-smi", "topo", "-m"]))
-    print("env:", " ".join(f"{k}={v}" for k, v in sorted(os.environ.items()) if k.startswith("NCCL_")) or "-")
+    print("env:", " ".join(f"{k}={v}" for k, v in sorted(os.environ.items()) if k.startswith("NCCL_") and k != "NCCL_VERSION") or "-")
 
     # 1. transport: each P2P level x collective, all GPUs.
     links = {}
@@ -200,7 +202,7 @@ def main():
             print(f"  gpu{i} {l['bus']}: gen {l['gen']}/{l['gen_max']} x{l['width']}/{l['width_max']}")
     nccl = next((r["nccl"] for r in b.results if r["nccl"]), None)
     summary = {"nccl": nccl, "gpus": gpus, "p2p_level": lvl, "pcie": links, "results": b.results,
-               "env": {k: v for k, v in os.environ.items() if k.startswith("NCCL_")}}
+               "env": {k: v for k, v in os.environ.items() if k.startswith("NCCL_") and k != "NCCL_VERSION"}}
     (b.out / "summary.json").write_text(json.dumps(summary, indent=1))
     print(f"\nNCCL {nccl}; busbw in GB/s; logs + summary.json in {b.out}")
 
