@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+if ! command -v pixi >/dev/null 2>&1; then
+    curl -fsSL https://pixi.sh/install.sh | sh
+    export PATH="$HOME/.pixi/bin:$PATH"
+fi
+
+git clone https://github.com/mdhorton/nanochat-cpp.git
+cd nanochat-cpp
+
+mkdir external
+(cd external && git clone https://github.com/NVIDIA/cutlass.git)
+(cd external && git clone https://github.com/karpathy/nanochat.git)
+
+pixi install
+pixi run nanochat nanochat.dataset -n 10
+pixi run tok-train
