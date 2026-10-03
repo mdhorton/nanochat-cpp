@@ -1,7 +1,7 @@
 # requirements
 
-- sm120 capability GPU
-- nvidia driver supporting cuda 13.2+
+- sm120 capability GPU (RTX Pro 6000, RTX Pro 4000, RTX 5090, etc...)
+- nvidia driver supporting cuda 13+
 
 I've only tested with Linux Ubuntu 24.04.
 
@@ -18,7 +18,15 @@ Clone project and install the dependencies. Does not require root. Everything is
 ```bash
 git clone https://github.com/mdhorton/nanochat-cpp.git
 cd nanochat-cpp
+mkdir external
+(cd external && git clone https://github.com/NVIDIA/cutlass.git) 
+(cd external && git clone https://github.com/karpathy/nanochat.git) 
+```
+
+```bash
 pixi install                                   
+pixi run nanochat nanochat.dataset -n 170
+pixi run tok-train
 ```
 
 # wandb (optional)

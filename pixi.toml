@@ -50,8 +50,9 @@ NCCL_MIN_NCHANNELS = "8"
 BUILD_TYPE = "RelWithDebInfo"
 TRAIN_BASE = "--nproc=2"
 D12_BASE = "$TRAIN_BASE --depth=12 --device-batch-size=8"
-D24_BASE = "$TRAIN_BASE --depth=24 --device-batch-size=2 --rank-micro-steps=125,131"
+D24_BASE = "$TRAIN_BASE --depth=24 --device-batch-size=2"
 QUICK_BASE = "--eval-tokens=4194304 --eval-every=-1 --save=false"
+# --rank-micro-steps=125,131
 
 [tasks]
 # empty CMAKE_CXX_FLAGS: drops conda's packaging CXXFLAGS (-O2, -march=nocona)
