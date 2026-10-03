@@ -1,7 +1,7 @@
 [workspace]
 name = "nanochat-cpp"
 channels = ["conda-forge"]
-# we're primarily targeting sm120. require a cuda 13+ driver.
+# we primarily target sm120. require a cuda 13+ driver.
 platforms = [{ name = "linux-64-cuda", platform = "linux-64", cuda = "13" }]
 
 [dependencies]
@@ -41,23 +41,22 @@ torch = { version = "==2.14.*", index = "https://download.pytorch.org/whl/cu132"
 
 [activation.env]
 NANOCHAT_BASE_DIR = "$PIXI_PROJECT_ROOT/cache"
-PYTHONDONTWRITEBYTECODE = "1"  # keep the original nanochat tree untouched
 
 # these had a small improvement.
 NCCL_PROTO = "Simple"
 NCCL_MIN_NCHANNELS = "8"
 
 # the following env vars are used as task variables.
+BUILD_TYPE = "RelWithDebInfo"
 TRAIN_BASE = "--nproc=2"
 D12_BASE = "$TRAIN_BASE --depth=12 --device-batch-size=8"
-D24_BASE = "$TRAIN_BASE --depth=24 --device-batch-size=2 --rank-micro-steps=126,130"
+D24_BASE = "$TRAIN_BASE --depth=24 --device-batch-size=2 --rank-micro-steps=125,131"
 QUICK_BASE = "--eval-tokens=4194304 --eval-every=-1 --save=false"
 
 [tasks]
-# empty CMAKE_CXX_FLAGS drops conda's packaging CXXFLAGS (-O2, -march=nocona)
-# the build type sets optimisation
+# empty CMAKE_CXX_FLAGS: drops conda's packaging CXXFLAGS (-O2, -march=nocona)
 # empty NVCC_PREPEND_FLAGS: cuda-nvcc activation adds -ccbin, which CMake already passes
-configure = { cmd = "cmake -S . -B cmake-build-pixi -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH=$CONDA_PREFIX -DCMAKE_CXX_FLAGS=", env = { NVCC_PREPEND_FLAGS = "" } }
+configure = { cmd = "cmake -S . -B cmake-build-pixi -G Ninja -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DCMAKE_PREFIX_PATH=$CONDA_PREFIX -DCMAKE_CXX_FLAGS=", env = { NVCC_PREPEND_FLAGS = "" } }
 build = { cmd = "cmake --build cmake-build-pixi", depends-on = ["configure"], env = { NVCC_PREPEND_FLAGS = "" } }
 rebuild = "rm -rf cmake-build-pixi && pixi run build"
 
@@ -70,7 +69,7 @@ medium-d12 = { cmd = "cmake-build-pixi/base_train $D12_BASE $QUICK_BASE --num-it
 medium-d24 = { cmd = "cmake-build-pixi/base_train $D24_BASE $QUICK_BASE --num-iterations=30  --run=medium-d24", depends-on = ["build"] }
 
 full-d12 = { cmd = "cmake-build-pixi/base_train $D12_BASE --wandb", depends-on = ["build"] }
-full-d24 = { cmd = "cmake-build-pixi/base_train $D24_BASE --wandb", depends-on = ["build"] }
+full-d24 = { cmd = "cmake-build-pixi/base_train $D24_BASE --save-every=250 --wandb", depends-on = ["build"] }
 
 profile-d12 = { cmd = "tools/profile.sh d12 $D12_BASE", depends-on = ["build"] }
 profile-d24 = { cmd = "tools/profile.sh d24 $D24_BASE", depends-on = ["build"] }

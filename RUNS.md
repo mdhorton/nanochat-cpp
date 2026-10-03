@@ -89,16 +89,16 @@ Run 30: GPU0 is about 5-10% slower. This gives a few extra micro-steps to GPU1 s
 
 `--depth=24 --device-batch-size=2 --rank-micro-steps=126,130 --num-iterations=100 --eval-tokens=4194304 --eval-every=-1 --save=false`
 
-| run | toks/sec |     loss |      bpb | memory |   time | notes                                                             |
-|-----|---------:|---------:|---------:|-------:|-------:|-------------------------------------------------------------------|
-| 32  |   58,627 | 4.471248 | 1.328176 |  17.6g | 26.43m | mxfp8 baseline                                                    |
-| 33  |   71,226 | 4.482675 | 1.331916 |  17.0g | 21.80m | --nvfp4-wgrad --nvfp4-dgrad                                       |
-| 34  |   70,307 | 4.477348 | 1.330228 |  17.0g | 22.12m | --nvfp4-wgrad --nvfp4-dgrad --nvfp4-eden=dgrad                    |
-| 35  |   80,441 | 4.488634 | 1.333021 |  16.7g | 19.30m | --nvfp4-wgrad --nvfp4-dgrad --nvfp4-fwd                           |
+| run | toks/sec |     loss |      bpb | memory |   time | notes                                                              |
+|-----|---------:|---------:|---------:|-------:|-------:|--------------------------------------------------------------------|
+| 32  |   58,627 | 4.471248 | 1.328176 |  17.6g | 26.43m | mxfp8 baseline                                                     |
+| 33  |   71,226 | 4.482675 | 1.331916 |  17.0g | 21.80m | --nvfp4-wgrad --nvfp4-dgrad                                        |
+| 34  |   70,307 | 4.477348 | 1.330228 |  17.0g | 22.12m | --nvfp4-wgrad --nvfp4-dgrad --nvfp4-eden=dgrad                     |
+| 35  |   80,441 | 4.488634 | 1.333021 |  16.7g | 19.30m | --nvfp4-wgrad --nvfp4-dgrad --nvfp4-fwd                            |
 | 36  |   71,108 | 4.484975 | 1.332725 |  17.0g | 21.18m | --nvfp4-wgrad --nvfp4-dgrad --nvfp4-fwd --nvfp4-fwd-until=warmdown |
-| 37  |   71,049 | 4.413067 | 1.308297 |  17.0g | 21.86m | run 33 with --seed=43                                             |
-| 38  |   70,238 | 4.411165 | 1.307771 |  17.0g | 22.13m | run 34 with --seed=43                                             |
-| 39  |   71,441 | 4.424313 | 1.311929 |  16.8g | 21.69m | run 33 with --muon-fused                                          |
+| 37  |   71,049 | 4.413067 | 1.308297 |  17.0g | 21.86m | run 33 with --seed=43                                              |
+| 38  |   70,238 | 4.411165 | 1.307771 |  17.0g | 22.13m | run 34 with --seed=43                                              |
+| 39  |   71,441 | 4.424313 | 1.311929 |  16.8g | 21.69m | run 33 with --muon-fused                                           |
 
 Run 36: NVFP4 forward for steps 0-34 (80,457 tok/s), MXFP8 forward from the warmdown at step 35 (71,160 tok/s).
 
@@ -123,8 +123,12 @@ diverges like a seed change: medium-d12 seed pairs (cache/metrics/muon) show the
 
 # full run @d24
 
-`--depth=24 --device-batch-size=2`
+target
+- CORE: 0.256525
+- bpb: 0.71800
 
-|    | toks/sec | loss | bpb | memory | time | notes |
-|----|---------:|-----:|----:|-------:|-----:|-------|
-| 25 |          |      |     |        |      |       |
+`--depth=24 --device-batch-size=2 --save-every=250 --eval-every=250 --wandb`
+
+|    | toks/sec |     loss |      bpb | CORE   | memory |   time | notes                                                              |
+|----|---------:|---------:|---------:|--------|-------:|-------:|--------------------------------------------------------------------|
+| 40 |   81,303 | 2.362947 | 0.742827 | 0.2270 |  17.1g | 19.91h | --nvfp4-wgrad --nvfp4-dgrad --nvfp4-fwd --rank-micro-steps=126,130 |

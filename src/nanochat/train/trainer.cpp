@@ -778,7 +778,7 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
       optimizer.step();
     }
     optimizer.zero_grad();
-    const double train_loss_f = train_loss.item<double>(); // CPU-GPU sync
+    const auto train_loss_f = train_loss.item<double>(); // CPU-GPU sync
     torch::cuda::synchronize();
     const double dt = seconds_since(t0);
 
