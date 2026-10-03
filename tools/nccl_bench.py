@@ -45,7 +45,7 @@ def pcie_links(gpus, stop, peak):
         stop.wait(0.3)
 
 
-def parse(text):
+def parse(text, nccl_log=""):
     # size count type redop root | oop time algbw busbw #wrong | ip time algbw busbw #wrong
     half = r"\s+[\d.]+\s+([\d.]+)\s+([\d.]+)\s+(\S+)"  # time (algbw) (busbw) (#wrong)
     row = re.compile(r"^\s*(\d+)\s+\d+\s+[a-z]\w*\s+\w+\s+-?\d+" + half + half + r"\s*$")
@@ -62,8 +62,8 @@ def parse(text):
         "avg_busbw": float(avg.group(1)) if avg else None,
         "max_busbw": max((r["busbw"] for r in rows), default=None),
         "wrong": sum(r["wrong"] for r in rows) + (int(oob.group(1)) if oob else 0),
-        "transport": sorted(set(re.findall(r" via (\S+)", text))),
-        "nccl": (re.search(r"NCCL version (\S+)", text) or [None, None])[1],
+        "transport": sorted(set(re.findall(r" via (\S+)", nccl_log))),
+        "nccl": (re.search(r"NCCL version (\S+)", nccl_log) or [None, None])[1],
     }
 
 
@@ -78,10 +78,12 @@ class Bench:
         b, e, f = sizes or (self.a.min_bytes, self.a.max_bytes, "2")
         cmd = [str(Path(self.a.build) / f"{test}_perf"), "-b", b, "-e", e, "-f", f, "-g", str(len(gpus)),
                "-n", str(self.a.iters), "-w", "5"]
+        stem = f"{group}-{name}".replace("/", "_").replace(" ", "_")
         envd = {k: v for k, v in os.environ.items() if k not in unset}
-        # PCI order so indices match nvidia-smi / topo -m.
+        # PCI order so indices match nvidia-smi / topo -m. NCCL's log goes to its own file: on stdout it can split
+        # result rows (sendrecv connects mid-test).
         envd.update({"CUDA_DEVICE_ORDER": "PCI_BUS_ID", "CUDA_VISIBLE_DEVICES": ",".join(map(str, gpus)), "NCCL_DEBUG": "INFO",
-                     "NCCL_DEBUG_SUBSYS": "INIT,GRAPH", **(env or {})})
+                     "NCCL_DEBUG_SUBSYS": "INIT,GRAPH", "NCCL_DEBUG_FILE": str(self.out / f"{stem}.nccl.%p"), **(env or {})})
         tag = " ".join([f"{k}={v}" for k, v in (env or {}).items()] + [f"-{k}" for k in unset])
         print(f"[{group}] {name}: {test} gpus={','.join(map(str, gpus))} {tag}", flush=True)
         if self.a.dry_run:
@@ -100,13 +102,14 @@ class Bench:
         stop.set()
         if t:
             t.join()
-        log = self.out / f"{group}-{name}.log".replace("/", "_").replace(" ", "_")
-        log.write_text(" ".join(cmd) + "\n" + tag + "\n\n" + text)
+        nccl_log = "".join(f.read_text(errors="replace") for f in sorted(self.out.glob(f"{stem}.nccl.*")))
+        (self.out / f"{stem}.log").write_text(" ".join(cmd) + "\n" + tag + "\n\n" + text)
         r = {"group": group, "name": name, "test": test, "gpus": gpus, "env": env or {}, "unset": list(unset),
-             "status": status, "secs": round(time.time() - t0, 1), **parse(text)}
+             "status": status, "secs": round(time.time() - t0, 1), **parse(text, nccl_log)}
         if not self.a.keep_rows:
             r.pop("rows")
-        bw = f"avg {r['avg_busbw']:.2f} max {r['max_busbw']:.2f} GB/s" if r["avg_busbw"] else "no result"
+        fmt = lambda v: f"{v:.2f}" if v is not None else "-"
+        bw = f"avg {fmt(r['avg_busbw'])} max {fmt(r['max_busbw'])} GB/s"
         bad = f" WRONG={r['wrong']}" if r["wrong"] else ""
         print(f"    {status} {r['secs']}s {bw}{bad} via {','.join(r['transport']) or '?'}", flush=True)
         self.results.append(r)
