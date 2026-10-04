@@ -122,10 +122,11 @@ target_link_libraries(bench_gemm PRIVATE nanochat_train)
 add_executable(bench_attention apps/bench_attention.cpp)
 target_link_libraries(bench_attention PRIVATE nanochat_train)
 
+# tests: not in the default build (pixi run test builds them)
 enable_testing()
 find_package(GTest REQUIRED)
 include(GoogleTest)
-add_executable(nanochat_tests
+add_executable(nanochat_tests EXCLUDE_FROM_ALL
         tests/main.cpp
         tests/test_dataset.cpp
         tests/test_golden.cpp
@@ -135,7 +136,7 @@ add_executable(nanochat_tests
 target_link_libraries(nanochat_tests PRIVATE nanochat GTest::gtest)
 gtest_discover_tests(nanochat_tests DISCOVERY_TIMEOUT 30)
 
-add_executable(train_tests
+add_executable(train_tests EXCLUDE_FROM_ALL
         tests/main.cpp
         tests/test_backout.cpp
         tests/test_checkpoint.cpp
@@ -160,7 +161,7 @@ add_executable(train_tests
 target_link_libraries(train_tests PRIVATE nanochat_train GTest::gtest)
 target_compile_definitions(train_tests PRIVATE NANOCHAT_DIST_WORKER="$<TARGET_FILE:dist_worker>")
 
-add_executable(dist_worker tests/dist_worker.cpp)
+add_executable(dist_worker EXCLUDE_FROM_ALL tests/dist_worker.cpp)
 target_link_libraries(dist_worker PRIVATE nanochat_train)
 add_dependencies(train_tests dist_worker)
 gtest_discover_tests(train_tests DISCOVERY_TIMEOUT 60)

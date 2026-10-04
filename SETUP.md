@@ -1,6 +1,6 @@
 # requirements
 
-- sm120 capability GPU (RTX Pro 6000, RTX Pro 4000, RTX 5090, etc...)
+- sm120 capability GPU (RTX Pro 6000/5000/4000, RTX 5090, etc...)
 - nvidia driver supporting cuda 13+
 
 I've only tested with Linux Ubuntu 24.04.
@@ -22,6 +22,7 @@ cd nanochat-cpp
 
 ```bash
 pixi run tok-train
+pixi run quick-d24
 ```
 
 # wandb (optional)
