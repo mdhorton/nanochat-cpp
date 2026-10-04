@@ -16,22 +16,26 @@ curl -fsSL https://pixi.sh/install.sh | bash
 Clone project and install the dependencies. Does not require root. Everything is self-contained within the project dir.
 
 ```bash
-git clone https://github.com/mdhorton/nanochat-cpp.git && cd nanochat-cpp
+git clone https://github.com/mdhorton/nanochat-cpp.git
+cd nanochat-cpp
 pixi run tok-train
 pixi run quick-d24
 ```
 
-```bash
-pixi run nccl-bench
-```
+# optional
+
+Full run requires more parquet files.
 
 ```bash
-pixi install
-pixi run configure
-pixi run build
-pixi run clone-nanochat
-pixi run dataset
-pixi tok-train
+pixi run dataset 170
+pixi run tok-train
+pixi run full-d24
+```
+
+nccl-bench usually takes about ~2 minutes to run.
+
+```bash
+pixi run nccl-bench
 ```
 
 # wandb (optional)
