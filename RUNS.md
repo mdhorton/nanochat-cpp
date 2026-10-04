@@ -123,12 +123,15 @@ diverges like a seed change: medium-d12 seed pairs (cache/metrics/muon) show the
 
 # full run @d24
 
-target
+python baseline
+
 - CORE: 0.256525
 - bpb: 0.71800
 
-`--depth=24 --device-batch-size=2 --save-every=250 --eval-every=250 --wandb`
+`--depth=24 --device-batch-size=2 --save-every=250 --eval-every=250`
 
-|    | toks/sec |     loss |      bpb | CORE   | memory |   time | notes                                                              |
-|----|---------:|---------:|---------:|--------|-------:|-------:|--------------------------------------------------------------------|
-| 40 |   81,303 | 2.362947 | 0.742827 | 0.2270 |  17.1g | 19.91h | --nvfp4-wgrad --nvfp4-dgrad --nvfp4-fwd --rank-micro-steps=126,130 |
+|    | toks/sec |    loss |     bpb | CORE   | memory |     time | notes                                                              |
+|----|---------:|--------:|--------:|--------|-------:|---------:|--------------------------------------------------------------------|
+|    |   81,303 | 2.36295 | 0.74283 | 0.2270 |  17.1g | 1194.49m | --nvfp4-wgrad --nvfp4-dgrad --nvfp4-fwd --rank-micro-steps=126,130 |
+|    |   59,978 | 2.41296 | 0.71934 | 0.2616 |  18.0g | 1622.59m | --rank-micro-steps=126,130                                         |
+|    |          |         |         |        |        |          |                                                                    |
