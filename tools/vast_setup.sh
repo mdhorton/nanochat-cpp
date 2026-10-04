@@ -7,9 +7,6 @@ if ! command -v pixi >/dev/null 2>&1; then
     export PATH="$HOME/.pixi/bin:$PATH"
 fi
 
-git clone https://github.com/mdhorton/nanochat-cpp.git
-cd nanochat-cpp
-
 mkdir external
 (cd external && git clone https://github.com/NVIDIA/cutlass.git)
 (cd external && git clone https://github.com/karpathy/nanochat.git)
