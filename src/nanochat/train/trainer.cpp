@@ -455,8 +455,8 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
         with_commas(total_tokens), static_cast<double>(total_tokens) / static_cast<double>(plan.num_scaling_params),
         static_cast<double>(flops_per_token) * static_cast<double>(total_tokens)));
   print(std::format(
-        "Tokens / micro-batch / rank: {} x {} | gradient accumulation steps: {}{}", o.device_batch_size, o.max_seq_len,
-        plan.grad_accum_steps,
+        "Device batch size: {} | tokens / micro-batch / rank: {} x {} | gradient accumulation steps: {}{}",
+        o.device_batch_size, o.device_batch_size, o.max_seq_len, plan.grad_accum_steps,
         o.rank_micro_steps.empty() ? "" : " (per rank: " + nlohmann::json(o.rank_micro_steps).dump() + ")"));
 
   const double bs = plan.batch_lr_scale;
