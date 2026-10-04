@@ -35,7 +35,7 @@ public:
   static variable_list forward(
         AutogradContext* ctx, const torch::Tensor& x, const Optional& r_in, const Optional& x0_in,
         const Optional& lr_in, const Optional& l0_in, int64_t layer, const c10::intrusive_ptr<X0Grad>& x0_grad, bool mx,
-        int64_t gate_cols, bool fp4) {
+        int64_t gate_cols) {
     const auto r = r_in.value_or(torch::Tensor()), x0 = x0_in.value_or(torch::Tensor());
     const auto lr = lr_in.value_or(torch::Tensor()), l0 = l0_in.value_or(torch::Tensor());
     check_bf16(x, x);
@@ -70,13 +70,10 @@ public:
     Fp8Tensor n_mx;
     if (mx) {
       TORCH_CHECK(residual_norm_mx_fits(rows, cols) && gate_cols >= 0 && gate_cols <= cols, "residual_norm_mx: shape");
-      n_mx = empty_mx(
-            rows, cols, x.options(), true, true, fp4 ? Nvfp4Role::FwdInput : Nvfp4Role::None, Nvfp4Role::WgradInput);
+      n_mx = empty_mx(rows, cols, x.options());
       const auto [out, out_t] = mx_outs(n_mx);
       kernels::residual_norm_mx_fwd(
             {.base = args, .out = out, .out_t = out_t, .n_cols = static_cast<int>(gate_cols)}, stream);
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
-      finish_fp4(n_mx);
     }
     else
       kernels::residual_norm_fwd(args, stream);
@@ -94,11 +91,8 @@ public:
     }
     if (!mx)
       return {res, n};
-    // amax_t, amax: NVFP4 data_t's, data's (else placeholders)
-    const auto amax_t = n_mx.fp4_t() ? n_mx.amax_t : torch::empty({0}, rstd.options());
-    const auto amax = n_mx.fp4() ? n_mx.amax : torch::empty({0}, rstd.options());
-    ctx->mark_non_differentiable({n_mx.data, n_mx.inv_scale, n_mx.data_t, n_mx.inv_scale_t, amax_t, amax});
-    return {res, n, n_mx.data, n_mx.inv_scale, n_mx.data_t, n_mx.inv_scale_t, amax_t, amax};
+    ctx->mark_non_differentiable({n_mx.data, n_mx.inv_scale, n_mx.data_t, n_mx.inv_scale_t});
+    return {res, n, n_mx.data, n_mx.inv_scale, n_mx.data_t, n_mx.inv_scale_t};
   }
 
   static variable_list backward(AutogradContext* ctx, variable_list grads) {
@@ -161,10 +155,10 @@ public:
       else
         x0_grad->sum = torch::Tensor(); // a retained graph's next backward starts over
       if (fold_x)
-        return {dx0, add ? ds : torch::Tensor(), {}, dlr, dl0, {}, {}, {}, {}, {}};
+        return {dx0, add ? ds : torch::Tensor(), {}, dlr, dl0, {}, {}, {}, {}};
     }
     // the add passes ds to both of its inputs
-    return {ds, add ? ds : torch::Tensor(), dx0, dlr, dl0, {}, {}, {}, {}, {}};
+    return {ds, add ? ds : torch::Tensor(), dx0, dlr, dl0, {}, {}, {}, {}};
   }
 };
 
@@ -174,23 +168,16 @@ std::pair<torch::Tensor, torch::Tensor> residual_norm(
       const torch::Tensor& x, const torch::Tensor& r, const torch::Tensor& x0, const torch::Tensor& resid_lambdas,
       const torch::Tensor& x0_lambdas, int64_t layer, const c10::intrusive_ptr<X0Grad>& x0_grad) {
   const auto out = ResidualNorm::apply(
-        x, optional(r), optional(x0), optional(resid_lambdas), optional(x0_lambdas), layer, x0_grad, false, 0, false);
+        x, optional(r), optional(x0), optional(resid_lambdas), optional(x0_lambdas), layer, x0_grad, false, 0);
   return {out[0], out[1]};
 }
 
 ResidualNormMx residual_norm_mx(
       const torch::Tensor& x, const torch::Tensor& r, const torch::Tensor& x0, const torch::Tensor& resid_lambdas,
-      const torch::Tensor& x0_lambdas, int64_t layer, const c10::intrusive_ptr<X0Grad>& x0_grad, int64_t gate_cols,
-      bool fp4) {
+      const torch::Tensor& x0_lambdas, int64_t layer, const c10::intrusive_ptr<X0Grad>& x0_grad, int64_t gate_cols) {
   const auto out = ResidualNorm::apply(
-        x, optional(r), optional(x0), optional(resid_lambdas), optional(x0_lambdas), layer, x0_grad, true, gate_cols,
-        fp4);
-  Fp8Tensor n_mx{out[2], out[4], out[3], out[5]};
-  if (n_mx.fp4_t())
-    n_mx.amax_t = out[6];
-  if (n_mx.fp4())
-    n_mx.amax = out[7];
-  return {out[0], out[1], n_mx};
+        x, optional(r), optional(x0), optional(resid_lambdas), optional(x0_lambdas), layer, x0_grad, true, gate_cols);
+  return {out[0], out[1], {out[2], out[4], out[3], out[5]}};
 }
 
 bool residual_norm_mx_fits(int64_t rows, int64_t cols) {

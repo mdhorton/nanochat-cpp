@@ -176,7 +176,7 @@ public:
     if (ctx->saved_data["precomputed"].toBool()) {
       const auto gw = g.to(torch::kFloat32);
       if (ctx->saved_data["direct"].toBool()) { // .grad (+)= g * dlogits^T @ x, one GEMM
-        mx_grad_weights(saved[1], saved[2], saved[3], saved[4], {ctx->saved_data["weight"].toTensor()}, gw, false);
+        mx_grad_weights(saved[1], saved[2], saved[3], saved[4], {ctx->saved_data["weight"].toTensor()}, gw);
         return {saved[0] * g, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}};
       }
       if (ctx->saved_data.count("weight") == 0)

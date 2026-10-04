@@ -23,31 +23,6 @@ void quantize_fp8_relu_square(
       const void* h, int64_t rows, int64_t cols, void* out, void* out_t, float* amax, float* inv_scale,
       cudaStream_t stream);
 
-// NVFP4 written in place of MX data (nvfp4.h's Nvfp4Target): two e2m1 per byte, and per 16 values along a row
-// its block scale, e4m3's mantissa at any exponent, as bf16; nvfp4_finish then picks the power-of-two tensor scale
-// from their max (smax) and stores them as ue4m3.
-inline constexpr int kNvfp4Slots = 32; // smax's, spreading the atomics
-
-// 64 bytes: the CUTLASS epilogues keep two in uniform registers (more spills)
-struct Nvfp4Out {
-  void* data;    // (rows, ld / 2) bytes at this view; null: MX
-  void* scale16; // bf16 at this view, in the ue4m3 scales' swizzled layout (ld / 64 tiles per 128 rows)
-  // kNvfp4Slots: the whole tensor's max block scale is their max, as epoch << 32 | float bits (atomicMax), so slots
-  // left from earlier epochs lose and need no zeroing
-  unsigned long long* smax;
-  uint64_t seed;       // stochastic rounding's
-  uint64_t eden_signs; // eden: bit i: value i of each 64-group negated
-  int32_t ld;          // row stride in values
-  int32_t index0;      // this view's first value's index in the whole tensor: stochastic rounding's counter
-  uint32_t rht_signs;  // bit i: the random Hadamard's row i negated
-  uint32_t epoch;      // smax's, > any earlier value's there
-  // eden: MS-EDEN rows (nvfp4.cuh's nvfp4_eden_store8, row stores of whole 64-groups only): each 64 values of a row
-  // times diag(eden_signs) . H64 / 8, values to nearest, each block scale times its group's ||x||² / <x, q>, rounded
-  // stochastically (seed)
-  // four_six: 4/6 block scales (nvfp4.cuh's nvfp4_four_six): row stores (nvfp4_store8) and quantize_nvfp4_2d only
-  bool rht, stochastic, eden, four_six;
-};
-
 // MXFP8 (OCP MX) E4M3: one power-of-two (e8m0) scale per 32 consecutive values of a row, the smallest with
 // max|block| * 2^-e <= 448, stored in cuBLAS's swizzled layout (128 rows x 4 blocks per 512-byte tile).
 struct MxOut {
@@ -55,7 +30,6 @@ struct MxOut {
   int64_t ld;          // row stride of data
   void* scale;         // e8m0, at this tensor's first tile
   int64_t scale_tiles; // tiles per 128 rows in the whole scale buffer (its blocks per row / 4)
-  Nvfp4Out fp4{};      // NVFP4 instead (data null)
 };
 
 // x: (rows, cols) contiguous bf16 (x_bf16) or fp32, rows % 32 == 0, cols % 64 == 0. out: x, scaled along rows;

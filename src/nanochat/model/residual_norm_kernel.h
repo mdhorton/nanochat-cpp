@@ -32,13 +32,12 @@ void residual_norm_fwd(const ResidualNormFwd& a, cudaStream_t stream);
 // its first n_cols columns (0: base.n unused). rows % 32 == 0, cols % 64 == 0, cols <= kResidualNormMxMaxCols.
 struct ResidualNormMxFwd {
   ResidualNormFwd base;
-  MxOut out, out_t; // (rows, cols) and its transpose; either NVFP4 (fp4; out's without rht)
+  MxOut out, out_t; // (rows, cols) and its transpose
   int n_cols;
 };
 
-// Shared memory the MX variant needs for cols with rows-row tiles (32: MX transpose, 16: NVFP4; must be within the
-// device's opt-in limit).
-int residual_norm_mx_smem(int cols, int rows = 32);
+// Shared memory the MX variant needs for cols (must be within the device's opt-in limit).
+int residual_norm_mx_smem(int cols);
 
 void residual_norm_mx_fwd(const ResidualNormMxFwd& a, cudaStream_t stream);
 

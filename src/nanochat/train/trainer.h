@@ -19,41 +19,16 @@ namespace nanochat {
 struct TrainOptions {
   // model
   int64_t depth = 20, aspect_ratio = 64, head_dim = 128, max_seq_len = 2048;
-  int64_t seed = 42; // weight init and NVFP4 stochastic rounding
+  int64_t seed = 42; // weight init
   std::string window_pattern = "SSSL";
   std::string attention = "mx";       // mx (MXFP8 fwd + bwd), bf16 (ours), bf16mx (MXFP8 bwd), fa2, sdpa (as Python)
   int64_t loss_chunk_rows = 4096;     // > 0: fused chunked lm_head + loss (never all logits at once); 0: as Python
   bool fp8 = true;                    // FP8 matmuls for training (eval stays bf16)
   std::string fp8_recipe = "mxfp8";   // mxfp8 or tensorwise (as Python)
   std::string gemm = "cutlass";       // MXFP8 GEMMs: cutlass or cublas (cuBLASLt)
-  std::string nvfp4_gemm = "cutlass"; // NVFP4 GEMMs: cutlass, cublas (cuBLASLt, 3-13% slower on sm120) or auto
   bool fused = true;                  // fused elementwise kernels; false: Python's op-by-op path
   bool muon_fused = false;            // Muon's update in fused kernels (not bit-identical to Python's)
   int64_t cublaslt_workspace_mb = 32; // cuBLASLt workspace per stream; its split-K GEMMs need a few MB (torch: 1)
-  // simulated NVFP4 (nvfp4_sim.h; slow, for numerics) for these GEMMs of the blocks' Linears: comma list of fwd, dgrad,
-  // wgrad; empty: off. Needs fp8 with mxfp8, which the other GEMMs, blocks and lm_head keep.
-  std::string nvfp4;
-  std::string nvfp4_rht = "wgrad";      // GEMMs with a random Hadamard transform along K
-  std::string nvfp4_sr = "dgrad,wgrad"; // GEMMs whose gradient operand rounds stochastically
-  std::string nvfp4_eden; // GEMMs with MS-EDEN operands (dgrad, wgrad), instead of their rht / sr; real: dgrad
-  // simulated MS-EDEN ablations: the rotation / correction group, signs fixed per step (per Linear and GEMM) instead
-  // of per GEMM call, and Linears (comma list: c_fc, mlp.c_proj, ...) kept on rht / sr
-  int64_t nvfp4_eden_group = 128;
-  bool nvfp4_eden_fixed_signs = false;
-  std::string nvfp4_eden_skip;
-  bool nvfp4_weight_2d = true;
-  int64_t nvfp4_skip_first = 0, nvfp4_skip_last = 0; // blocks kept MXFP8 (sim: all GEMMs; nvfp4_fwd: forward)
-  // real NVFP4 weight / input gradients for the Linears but lm_head (nvfp4.h), with nvfp4_rht / nvfp4_sr's wgrad /
-  // dgrad (no rht) and seed; forward GEMMs for the blocks' Linears (16x16 weight blocks, round to nearest)
-  bool nvfp4_wgrad = false, nvfp4_dgrad = false, nvfp4_fwd = false;
-  // nvfp4_fwd: 4/6 block scales (nvfp4.h's set_nvfp4_four_six) for the weights and the row-written inputs
-  bool nvfp4_four_six = false;
-  // MXFP8 from a step on: the NVFP4 forward GEMMs (nvfp4_fwd_until) or all NVFP4 GEMMs (nvfp4_until), real or
-  // simulated. "warmdown": its first step; a fraction of the steps; empty: never
-  std::string nvfp4_fwd_until, nvfp4_until;
-  // NVFP4 forward weights' oscillation (nvfp4_osci.h), measured over the nvfp4_osci_window steps after every
-  // nvfp4_osci_every-th (0: off)
-  int64_t nvfp4_osci_every = 0, nvfp4_osci_window = 50;
   // training horizon: the first one set wins
   int64_t num_iterations = -1;
   double target_flops = -1, target_param_data_ratio = 8; // Python: 12; speedrun.sh uses 8

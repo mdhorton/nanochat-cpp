@@ -71,11 +71,6 @@ add_library(nanochat_train
         src/nanochat/model/mx_flash_kernel.cu
         src/nanochat/model/mx_gemm.cpp
         src/nanochat/model/mx_gemm_kernel.cu
-        src/nanochat/model/nvfp4.cpp
-        src/nanochat/model/nvfp4_gemm_kernel.cu
-        src/nanochat/model/nvfp4_kernel.cu
-        src/nanochat/model/nvfp4_sim.cpp
-        src/nanochat/model/nvfp4_sim_kernel.cu
         src/nanochat/model/qkv_kernel.cu
         src/nanochat/model/relu_square.cpp
         src/nanochat/model/relu_square_kernel.cu
@@ -92,7 +87,6 @@ add_library(nanochat_train
         src/nanochat/train/dataloader.cpp
         src/nanochat/train/dist.cpp
         src/nanochat/train/loss_eval.cpp
-        src/nanochat/train/nvfp4_osci.cpp
         src/nanochat/train/muon_kernel.cu
         src/nanochat/train/optim.cpp
         src/nanochat/train/safetensors.cpp
@@ -149,7 +143,6 @@ add_executable(train_tests
         tests/test_gpt.cpp
         tests/test_loss_eval.cpp
         tests/test_mx_flash.cpp
-        tests/test_nvfp4.cpp
         tests/test_optim.cpp
         tests/test_qkv.cpp
         tests/test_relu_square.cpp

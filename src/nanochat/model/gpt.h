@@ -10,7 +10,6 @@
 #include <torch/torch.h>
 
 #include "nanochat/model/fp8.h"
-#include "nanochat/model/nvfp4_sim.h"
 #include "nanochat/train/safetensors.h"
 
 namespace nanochat {
@@ -58,8 +57,7 @@ bool has_ve(int64_t layer_idx, int64_t n_layer);
 torch::Tensor rms_norm(const torch::Tensor& x);
 
 // Linear without bias whose weight is cast to the input dtype in forward (replaces autocast). With fp8 set, the
-// matmuls run in FP8 (fp8.h), as Python's Float8Linear; with fp8 and nvfp4 set, as simulated NVFP4 (nvfp4_sim.h);
-// with fp8 (Mx) and nvfp4_fwd, the forward matmul in NVFP4 (nvfp4.h).
+// matmuls run in FP8 (fp8.h), as Python's Float8Linear.
 class LinearImpl : public torch::nn::Module {
 public:
   LinearImpl(int64_t in_features, int64_t out_features, const torch::TensorOptions& options);
@@ -68,10 +66,6 @@ public:
   bool fp8 = false;
   Fp8Recipe fp8_recipe = Fp8Recipe::Tensorwise;
   Fp8WeightCache fp8_cache; // enabled by GPT's set_fused
-  const Nvfp4Options* nvfp4 = nullptr;
-  int64_t nvfp4_id = 0;   // index among the simulated Linears (set_nvfp4)
-  bool nvfp4_eden = true; // false: the simulated backward GEMMs keep rht / sr under MS-EDEN
-  bool nvfp4_fwd = false;
 };
 
 TORCH_MODULE(Linear);
@@ -93,9 +87,8 @@ public:
   torch::Tensor forward(
         const torch::Tensor& x, const torch::Tensor& ve, const torch::Tensor& cos, const torch::Tensor& sin,
         int64_t window, const Fp8Tensor* x_mx = nullptr);
-  // Whether an (N, C) input goes through mx_attention_inputs; and with its GEMM in NVFP4 (c_q's nvfp4_fwd).
+  // Whether an (N, C) input goes through mx_attention_inputs.
   bool mx_inputs(int64_t N, int64_t C) const;
-  bool fp4_inputs(int64_t N, int64_t C) const;
 
   static constexpr int64_t kVeGateChannels = 12;
   int64_t n_head, n_kv_head, head_dim;
@@ -120,9 +113,8 @@ public:
   MLPImpl(const GPTConfig& config, const torch::TensorOptions& options);
   // x_mx (with mx_inputs): x already quantized (residual_norm_mx)
   torch::Tensor forward(const torch::Tensor& x, const Fp8Tensor* x_mx = nullptr);
-  // Whether an (N, C) input goes through the Mx fp8_relu_square_mlp; and with its GEMMs in NVFP4 (c_fc's nvfp4_fwd).
+  // Whether an (N, C) input goes through the Mx fp8_relu_square_mlp.
   bool mx_inputs(int64_t N, int64_t C) const;
-  bool fp4_inputs(int64_t N, int64_t C) const;
   bool fused = false; // relu^2 in one kernel; with FP8, also folded into the quantization (relu_square.h, fp8.h)
   Linear c_fc{nullptr}, c_proj{nullptr};
 };
@@ -206,16 +198,6 @@ public:
   int set_fp8(bool enabled);
   void set_fp8_recipe(Fp8Recipe recipe);
   int num_linears();
-  // Simulated NVFP4 (nvfp4_sim.h) for the FP8 Linears of blocks [first, n_layer - skip_last) (options: null = off;
-  // must outlive the model's use). The attention and MLP of those blocks then run their Linears one by one. Returns
-  // the number of Linears switched.
-  // eden_skip: Linears (module name or its last parts, e.g. c_fc, mlp.c_proj) kept on rht / sr under MS-EDEN.
-  int set_nvfp4(
-        const Nvfp4Options* options, int64_t skip_first = 0, int64_t skip_last = 0,
-        const std::vector<std::string>& eden_skip = {});
-  // Real NVFP4 forward GEMMs (LinearImpl's nvfp4_fwd) for the FP8 Linears of blocks [first, n_layer - skip_last).
-  // Returns the number of Linears switched on.
-  int set_nvfp4_fwd(bool enabled, int64_t skip_first = 0, int64_t skip_last = 0);
 
   Transformer transformer{nullptr};
   Linear lm_head{nullptr};

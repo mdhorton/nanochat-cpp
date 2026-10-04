@@ -146,8 +146,7 @@ TEST(Qkv, AttentionMatchesOpByOp) {
 }
 
 // mx_attention_inputs vs fp8_qkv (Mx), gpt.py's value-embedding ops and rotary_rms_norm: bit-identical, except the
-// gate logits' gradient (summed in another order), which reaches x's first gate_cols columns and the gate weight. Also
-// with NVFP4 dgrad (rounding to nearest), whose x gradient then differs from MX's.
+// gate logits' gradient (summed in another order), which reaches x's first gate_cols columns and the gate weight.
 TEST(Qkv, MxAttentionInputsMatchComposition) {
   torch::manual_seed(0);
   const auto opts = torch::TensorOptions().device(torch::kCUDA);
@@ -165,61 +164,52 @@ TEST(Qkv, MxAttentionInputsMatchComposition) {
   const auto bits = [](const torch::Tensor& t) {
     return t.contiguous().view(torch::kUInt8);
   };
-  const Nvfp4Backward dgrad{.wgrad = false, .dgrad = true, .sr_dgrad = false};
-  std::array<torch::Tensor, 2> dx_of;
-  for (const bool fp4 : {false, true})
-    for (const bool with_ve : {false, true}) {
-      set_nvfp4_backward(fp4 ? &dgrad : nullptr);
-      auto run = [&](bool fused) {
-        auto x = x_in.clone().requires_grad_(), wq = wq_in.clone().requires_grad_();
-        auto wk = wk_in.clone().requires_grad_(), wv = wv_in.clone().requires_grad_();
-        auto wg = wg_in.clone().requires_grad_(), ve = ve_in.clone().requires_grad_();
-        std::vector<torch::Tensor> out;
-        if (fused)
-          out = mx_attention_inputs(
-                x, wq, wk, wv, cos, sin, 1.2, with_ve ? ve : torch::Tensor(), with_ve ? wg : torch::Tensor(), D);
-        else {
-          const auto qkv = fp8_qkv(x, wq, wk, wv, with_ve ? gate_cols : 0, nullptr, Fp8Recipe::Mx);
-          auto v = qkv[2].view({B, T, Hkv, D});
-          if (with_ve) {
-            const auto gate = 3 * torch::sigmoid(F::linear(qkv[3].view({B, T, -1}), wg.to(torch::kBFloat16)));
-            v = v + gate.unsqueeze(-1) * ve.view({B, T, Hkv, D});
-          }
-          out = {
-                rotary_rms_norm(qkv[0].view({B, T, H, D}), cos, sin, 1.2).view({N, -1}),
-                rotary_rms_norm(qkv[1].view({B, T, Hkv, D}), cos, sin, 1.2).view({N, -1}), v.reshape({N, -1})};
+  for (const bool with_ve : {false, true}) {
+    auto run = [&](bool fused) {
+      auto x = x_in.clone().requires_grad_(), wq = wq_in.clone().requires_grad_();
+      auto wk = wk_in.clone().requires_grad_(), wv = wv_in.clone().requires_grad_();
+      auto wg = wg_in.clone().requires_grad_(), ve = ve_in.clone().requires_grad_();
+      std::vector<torch::Tensor> out;
+      if (fused)
+        out = mx_attention_inputs(
+              x, wq, wk, wv, cos, sin, 1.2, with_ve ? ve : torch::Tensor(), with_ve ? wg : torch::Tensor(), D);
+      else {
+        const auto qkv = fp8_qkv(x, wq, wk, wv, with_ve ? gate_cols : 0, nullptr, Fp8Recipe::Mx);
+        auto v = qkv[2].view({B, T, Hkv, D});
+        if (with_ve) {
+          const auto gate = 3 * torch::sigmoid(F::linear(qkv[3].view({B, T, -1}), wg.to(torch::kBFloat16)));
+          v = v + gate.unsqueeze(-1) * ve.view({B, T, Hkv, D});
         }
-        auto loss = torch::zeros({}, opts);
-        for (int i = 0; i < 3; ++i)
-          loss = loss + (out[i].to(torch::kFloat32) * up[i]).sum();
-        loss.backward();
-        std::vector<torch::Tensor> r{out[0].detach(), out[1].detach(), out[2].detach(), x.grad(),
-                                     wq.grad(),       wk.grad(),       wv.grad()};
-        if (with_ve)
-          r.insert(r.end(), {ve.grad(), wg.grad()});
-        return r;
-      };
-      const auto f = run(true), o = run(false);
-      set_nvfp4_backward(nullptr);
-      if (!with_ve)
-        dx_of[fp4] = f[3];
-      const std::vector<std::string> names{"q", "k", "v", "dx", "dwq", "dwk", "dwv", "dve", "dwg"};
-      for (size_t i = 0; i < f.size(); ++i) {
-        const auto n = names[i] + (with_ve ? " ve" : "") + (fp4 ? " nvfp4" : "");
-        if (with_ve && names[i] == "dwg") // bf16 (12 values): within 1 ulp
-          EXPECT_TRUE(((f[i] - o[i]).abs() <= o[i].abs() / 128).all().item<bool>()) << n;
-        else if (with_ve && names[i] == "dx") {
-          EXPECT_LT(rel_norm_diff(f[i], o[i]), 1e-3) << n;
-          // beyond the gate's columns, bit-identical
-          EXPECT_TRUE(
-                torch::equal(
-                      bits(f[i].narrow(1, gate_cols, C - gate_cols)), bits(o[i].narrow(1, gate_cols, C - gate_cols))))
-                << n;
-        }
-        else
-          EXPECT_TRUE(torch::equal(bits(f[i]), bits(o[i]))) << n;
+        out = {
+              rotary_rms_norm(qkv[0].view({B, T, H, D}), cos, sin, 1.2).view({N, -1}),
+              rotary_rms_norm(qkv[1].view({B, T, Hkv, D}), cos, sin, 1.2).view({N, -1}), v.reshape({N, -1})};
       }
+      auto loss = torch::zeros({}, opts);
+      for (int i = 0; i < 3; ++i)
+        loss = loss + (out[i].to(torch::kFloat32) * up[i]).sum();
+      loss.backward();
+      std::vector<torch::Tensor> r{out[0].detach(), out[1].detach(), out[2].detach(), x.grad(),
+                                   wq.grad(),       wk.grad(),       wv.grad()};
+      if (with_ve)
+        r.insert(r.end(), {ve.grad(), wg.grad()});
+      return r;
+    };
+    const auto f = run(true), o = run(false);
+    const std::vector<std::string> names{"q", "k", "v", "dx", "dwq", "dwk", "dwv", "dve", "dwg"};
+    for (size_t i = 0; i < f.size(); ++i) {
+      const auto n = names[i] + (with_ve ? " ve" : "");
+      if (with_ve && names[i] == "dwg") // bf16 (12 values): within 1 ulp
+        EXPECT_TRUE(((f[i] - o[i]).abs() <= o[i].abs() / 128).all().item<bool>()) << n;
+      else if (with_ve && names[i] == "dx") {
+        EXPECT_LT(rel_norm_diff(f[i], o[i]), 1e-3) << n;
+        // beyond the gate's columns, bit-identical
+        EXPECT_TRUE(
+              torch::equal(
+                    bits(f[i].narrow(1, gate_cols, C - gate_cols)), bits(o[i].narrow(1, gate_cols, C - gate_cols))))
+              << n;
+      }
+      else
+        EXPECT_TRUE(torch::equal(bits(f[i]), bits(o[i]))) << n;
     }
-  EXPECT_FALSE(torch::equal(dx_of[0], dx_of[1]));
-  EXPECT_LT(rel_norm_diff(dx_of[1], dx_of[0]), 0.2);
+  }
 }

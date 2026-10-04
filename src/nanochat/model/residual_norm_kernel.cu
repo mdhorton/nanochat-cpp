@@ -13,9 +13,8 @@ namespace {
 
 constexpr int kThreads = 256;
 constexpr int kWarps = kThreads / 32; // rows per block pass, one warp each
-// the MX forward: 2 rows per warp of a kRows-row tile; 16 rows (NVFP4 transpose) fits 2 blocks per SM at 1536 cols
-template <int kRows>
-constexpr int kMxFwdThreads = kRows * 16;
+constexpr int kMxFwdThreads = 512;    // the MX forward's 32-row tile allows 2 blocks per SM: 16 warps each
+constexpr int kMxFwdWarps = kMxFwdThreads / 32;
 constexpr int kVec = 8; // bf16 per 16-byte load
 
 using bf16 = __nv_bfloat16;
@@ -83,24 +82,10 @@ __device__ float block_sum(float v, float* smem) {
 // product, bf16(bf16(lr * s) + bf16(l0 * x0)). Full-precision blend math trained measurably worse (d12 300 steps:
 // val bpb 1.052 vs 1.028). The norm is fp32 inside, rounded once.
 // One warp, one row: writes res (and s, rstd), leaves the row's n (bf16, packed) in n[]: lane's chunk it holds
-// columns (it * 32 + lane) * kVec on. kHoist: all loads before the stores, which may alias them (one memory latency
-// per row, but more registers).
-template <int kIters, bool kHoist = false>
+// columns (it * 32 + lane) * kVec on.
+template <int kIters>
 __device__ __forceinline__ void residual_norm_row(
       const kernels::ResidualNormFwd& a, int64_t row, int lane, bool blend, float lr, float l0, uint4 (&n)[kIters]) {
-  uint4 xr[kIters], rr[kIters], x0r[kIters];
-#pragma unroll
-  for (int it = 0; it < kIters && kHoist; ++it) {
-    const int col = (it * 32 + lane) * kVec;
-    if (col >= a.cols)
-      break;
-    const int64_t i = row * a.cols + col;
-    xr[it] = load_raw(a.x, i);
-    if (a.r != nullptr)
-      rr[it] = load_raw(a.r, i);
-    if (blend)
-      x0r[it] = load_raw(a.x0, i);
-  }
   float ss = 0.f;
 #pragma unroll
   for (int it = 0; it < kIters; ++it) {
@@ -108,9 +93,9 @@ __device__ __forceinline__ void residual_norm_row(
     if (col >= a.cols)
       break;
     const int64_t i = row * a.cols + col;
-    Vec8 v = unpack8(kHoist ? xr[it] : load_raw(a.x, i));
+    Vec8 v = load8(a.x, i);
     if (a.r != nullptr) {
-      const Vec8 r = unpack8(kHoist ? rr[it] : load_raw(a.r, i));
+      const Vec8 r = load8(a.r, i);
 #pragma unroll
       for (int k = 0; k < kVec; ++k)
         v.v[k] = round_bf16(v.v[k] + r.v[k]);
@@ -118,7 +103,7 @@ __device__ __forceinline__ void residual_norm_row(
         store8(a.s, i, v);
     }
     if (blend) {
-      const Vec8 x0 = unpack8(kHoist ? x0r[it] : load_raw(a.x0, i));
+      const Vec8 x0 = load8(a.x0, i);
 #pragma unroll
       for (int k = 0; k < kVec; ++k)
         v.v[k] = round_bf16(round_bf16(lr * v.v[k]) + round_bf16(l0 * x0.v[k]));
@@ -164,25 +149,25 @@ __device__ __forceinline__ void residual_norm_fwd_body(const kernels::ResidualNo
 }
 
 // n quantized as mx_body would read it back: rows from the warp's registers (4 lanes per 32-value block), columns
-// from a kRows-row bf16 tile in shared memory (one thread per column, 32 rows per MX block, 16 per NVFP4 block).
-// Grid-stride over kRows-row tiles.
-template <int kIters, int kRows>
+// from a 32-row bf16 tile in shared memory (one thread per column, 32 rows per block). Grid-stride over 32-row tiles.
+template <int kIters>
 __device__ __forceinline__ void residual_norm_mx_fwd_body(const kernels::ResidualNormMxFwd& a) {
-  constexpr int kBlock = kMxFwdThreads<kRows>;
   extern __shared__ __align__(16) unsigned char smem[];
   auto* tile = reinterpret_cast<bf16*>(smem);
   const int stride = a.base.cols + kVec; // 16-byte rows
   const int lane = static_cast<int>(threadIdx.x % 32), warp = static_cast<int>(threadIdx.x / 32);
   const bool blend = a.base.x0 != nullptr;
   const float lr = blend ? round_bf16(*a.base.lr) : 0.f, l0 = blend ? round_bf16(*a.base.l0) : 0.f;
-  const MxOutDev out = mx_dev(a.out), out_t = mx_dev(a.out_t);
-  float smax = 0.f, smax_rows = 0.f; // NVFP4 out_t's, out's
-  for (int64_t row0 = static_cast<int64_t>(blockIdx.x) * kRows; row0 < a.base.rows;
-       row0 += static_cast<int64_t>(gridDim.x) * kRows) {
-    for (int r = warp; r < kRows; r += kBlock / 32) {
+  const auto dev = [](const kernels::MxOut& o) {
+    return MxOutDev{static_cast<__nv_fp8_storage_t*>(o.data), o.ld, static_cast<uint8_t*>(o.scale), o.scale_tiles};
+  };
+  const MxOutDev out = dev(a.out), out_t = dev(a.out_t);
+  for (int64_t row0 = static_cast<int64_t>(blockIdx.x) * kMxRows; row0 < a.base.rows;
+       row0 += static_cast<int64_t>(gridDim.x) * kMxRows) {
+    for (int r = warp; r < kMxRows; r += kMxFwdWarps) {
       const int64_t row = row0 + r;
       uint4 n[kIters];
-      residual_norm_row<kIters, kRows == 16>(a.base, row, lane, blend, lr, l0, n);
+      residual_norm_row<kIters>(a.base, row, lane, blend, lr, l0, n);
 #pragma unroll
       for (int it = 0; it < kIters; ++it) {
         const int col = (it * 32 + lane) * kVec;
@@ -196,51 +181,36 @@ __device__ __forceinline__ void residual_norm_mx_fwd_body(const kernels::Residua
           for (int k = 0; k < kVec; ++k)
             m = fmaxf(m, fabsf(v.v[k]));
         }
-        const float m16 = fmaxf(m, __shfl_xor_sync(0xffffffff, m, 1)); // NVFP4's block
-        m = fmaxf(m16, __shfl_xor_sync(0xffffffff, m16, 2));
+        m = fmaxf(m, __shfl_xor_sync(0xffffffff, m, 1));
+        m = fmaxf(m, __shfl_xor_sync(0xffffffff, m, 2));
         if (active) {
-          if (out.fp4.data != nullptr)
-            smax_rows = fmaxf(smax_rows, nvfp4_store8_amax(v.v, m16, out.fp4, row, col));
-          else
-            mx_store8(v.v, m, out, row, col, row, lane % 4 == 0);
+          mx_store8(v.v, m, out, row, col, row, lane % 4 == 0);
           if (col < a.n_cols)
             static_cast<uint4*>(a.base.n)[(row * a.base.cols + col) / kVec] = n[it];
         }
       }
     }
     __syncthreads();
-    for (int c = static_cast<int>(threadIdx.x); c < a.base.cols; c += kBlock) {
-      float v[kRows], m = 0.f;
+    for (int c = static_cast<int>(threadIdx.x); c < a.base.cols; c += kMxFwdThreads) {
+      float v[kMxRows], m = 0.f;
 #pragma unroll
-      for (int k = 0; k < kRows; ++k) {
+      for (int k = 0; k < kMxRows; ++k) {
         v[k] = __bfloat162float(tile[k * stride + c]);
         m = fmaxf(m, fabsf(v[k]));
       }
-      if (kRows == 16 || out_t.fp4.data != nullptr) {
+      const int e = mx_exponent(m);
+      const float mul = mx_multiplier(e);
+      __align__(16) __nv_fp8_storage_t q[kMxRows];
 #pragma unroll
-        for (int g = 0; g < kRows / 16; ++g)
-          smax = fmaxf(smax, nvfp4_store16(*reinterpret_cast<float (*)[16]>(v + 16 * g), out_t.fp4, c, row0 + 16 * g));
-        continue;
-      }
-      if constexpr (kRows == kMxRows) {
-        const int e = mx_exponent(m);
-        const float mul = mx_multiplier(e);
-        __align__(16) __nv_fp8_storage_t q[kMxRows];
-#pragma unroll
-        for (int k = 0; k < kMxRows; ++k)
-          q[k] = __nv_cvt_float_to_fp8(v[k] * mul, __NV_SATFINITE, __NV_E4M3);
-        auto* dst = reinterpret_cast<uint4*>(out_t.data + c * out_t.ld + row0);
-        dst[0] = reinterpret_cast<const uint4*>(q)[0];
-        dst[1] = reinterpret_cast<const uint4*>(q)[1];
-        out_t.scale[mx_scale_index(c, row0 / kMxRows, out_t.scale_tiles)] = static_cast<uint8_t>(e);
-      }
+      for (int k = 0; k < kMxRows; ++k)
+        q[k] = __nv_cvt_float_to_fp8(v[k] * mul, __NV_SATFINITE, __NV_E4M3);
+      auto* dst = reinterpret_cast<uint4*>(out_t.data + c * out_t.ld + row0);
+      dst[0] = reinterpret_cast<const uint4*>(q)[0];
+      dst[1] = reinterpret_cast<const uint4*>(q)[1];
+      out_t.scale[mx_scale_index(c, row0 / kMxRows, out_t.scale_tiles)] = static_cast<uint8_t>(e);
     }
     __syncthreads(); // before the next tile overwrites smem
   }
-  if (out_t.fp4.data != nullptr)
-    nvfp4_smax_block(out_t.fp4, smax);
-  if (out.fp4.data != nullptr)
-    nvfp4_smax_block(out.fp4, smax_rows);
 }
 
 // n = res * rs: dres = rs * (g_n - res * rs^2 * mean(g_n * res)), rounded to bf16 as the norm's output gradient, then
@@ -357,15 +327,10 @@ __device__ __forceinline__ void residual_norm_bwd_finalize_body(
     nanochat::residual_norm_bwd_body<(cols) / 256>(a);                                                                 \
   }
 
-// _r16: the NVFP4 transpose's 16-row tile
 #define NANOCHAT_RESIDUAL_NORM_MX(cols)                                                                                \
-  __global__ void __launch_bounds__(nanochat::kMxFwdThreads<32>)                                                       \
+  __global__ void __launch_bounds__(nanochat::kMxFwdThreads)                                                           \
         nanochat_residual_norm_mx_fwd_c##cols(const nanochat::kernels::ResidualNormMxFwd a) {                          \
-    nanochat::residual_norm_mx_fwd_body<(cols) / 256, 32>(a);                                                          \
-  }                                                                                                                    \
-  __global__ void __launch_bounds__(nanochat::kMxFwdThreads<16>)                                                       \
-        nanochat_residual_norm_mx_fwd_r16_c##cols(const nanochat::kernels::ResidualNormMxFwd a) {                      \
-    nanochat::residual_norm_mx_fwd_body<(cols) / 256, 16>(a);                                                          \
+    nanochat::residual_norm_mx_fwd_body<(cols) / 256>(a);                                                              \
   }
 
 NANOCHAT_RESIDUAL_NORM(256)
@@ -421,29 +386,24 @@ void residual_norm_fwd(const ResidualNormFwd& a, cudaStream_t stream) {
   select(a.cols, kernels)<<<blocks_for(a.rows), kThreads, 0, stream>>>(a);
 }
 
-int residual_norm_mx_smem(int cols, int rows) {
-  return rows * (cols + kVec) * static_cast<int>(sizeof(bf16));
+int residual_norm_mx_smem(int cols) {
+  return kMxRows * (cols + kVec) * static_cast<int>(sizeof(bf16));
 }
 
 void residual_norm_mx_fwd(const ResidualNormMxFwd& a, cudaStream_t stream) {
-  static constexpr Kernel<ResidualNormMxFwd> kernels[][6] = {
-        {nanochat_residual_norm_mx_fwd_c256, nanochat_residual_norm_mx_fwd_c512, nanochat_residual_norm_mx_fwd_c768,
-         nanochat_residual_norm_mx_fwd_c1024, nanochat_residual_norm_mx_fwd_c1280, nanochat_residual_norm_mx_fwd_c1536},
-        {nanochat_residual_norm_mx_fwd_r16_c256, nanochat_residual_norm_mx_fwd_r16_c512,
-         nanochat_residual_norm_mx_fwd_r16_c768, nanochat_residual_norm_mx_fwd_r16_c1024,
-         nanochat_residual_norm_mx_fwd_r16_c1280, nanochat_residual_norm_mx_fwd_r16_c1536}};
-  static bool opted_in[2][6] = {};
-  const bool r16 = a.out_t.fp4.data != nullptr;
-  const int rows = r16 ? 16 : kMxRows, cols = a.base.cols, which = (cols + 255) / 256 - 1;
-  const auto kernel = select(cols, kernels[r16]);
-  if (!opted_in[r16][which]) { // once per kernel: the tile of its largest cols
-    cudaFuncSetAttribute(
-          kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, residual_norm_mx_smem((which + 1) * 256, rows));
-    opted_in[r16][which] = true;
+  static constexpr Kernel<ResidualNormMxFwd> kernels[] = {
+        nanochat_residual_norm_mx_fwd_c256,  nanochat_residual_norm_mx_fwd_c512,  nanochat_residual_norm_mx_fwd_c768,
+        nanochat_residual_norm_mx_fwd_c1024, nanochat_residual_norm_mx_fwd_c1280, nanochat_residual_norm_mx_fwd_c1536};
+  static bool opted_in[std::size(kernels)] = {};
+  const int cols = a.base.cols, smem = residual_norm_mx_smem(cols), which = (cols + 255) / 256 - 1;
+  const auto kernel = select(cols, kernels);
+  if (!opted_in[which]) { // once per kernel: the tile of its largest cols
+    cudaFuncSetAttribute(kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, residual_norm_mx_smem((which + 1) * 256));
+    opted_in[which] = true;
   }
-  const int64_t tiles = a.base.rows / rows;
+  const int64_t tiles = a.base.rows / kMxRows;
   const int blocks = static_cast<int>(std::max<int64_t>(1, std::min<int64_t>(tiles, 2 * blocks_for(a.base.rows))));
-  kernel<<<blocks, rows * 16, residual_norm_mx_smem(cols, rows), stream>>>(a);
+  kernel<<<blocks, kMxFwdThreads, smem, stream>>>(a);
 }
 
 int residual_norm_bwd_blocks(int64_t rows) {

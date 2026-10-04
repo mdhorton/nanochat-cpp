@@ -29,7 +29,7 @@ public:
         AutogradContext* ctx, const torch::Tensor& x, const torch::Tensor& wq, const torch::Tensor& wk,
         const torch::Tensor& wv, const torch::Tensor& cos, const torch::Tensor& sin, double scale,
         const Optional& ve_in, const Optional& w_gate_in, int64_t head_dim, Fp8WeightCache* cache,
-        const Fp8Tensor* x_mx, bool quantize_attention, bool fp4) {
+        const Fp8Tensor* x_mx, bool quantize_attention) {
     const auto ve = ve_in.value_or(torch::Tensor()), w_gate = w_gate_in.value_or(torch::Tensor());
     const int64_t N = x.size(0), T = cos.size(1), nq = wq.size(0), nkv = wk.size(0), n = nq + 2 * nkv;
     TORCH_CHECK(mx_attention_fits(N, x.size(1), nq, nkv, head_dim) && wv.size(0) == nkv && N % T == 0);
@@ -42,16 +42,9 @@ public:
     const auto stream = at::cuda::getCurrentCUDAStream().stream();
 
     TORCH_CHECK(x_mx == nullptr || (x_mx->data.defined() && x_mx->data_t.defined()), "x_mx: both layouts");
-    TORCH_CHECK(x_mx == nullptr || x_mx->fp4() == fp4, "x_mx: NVFP4 rows with fp4");
-    TORCH_CHECK(!fp4 || (nvfp4_fits(x.size(1)) && x.scalar_type() == torch::kBFloat16), "fp4: bf16, C % 256");
-    const bool grads_direct = mx_grad_direct(wq) && mx_grad_direct(wk) && mx_grad_direct(wv);
-    const auto xq = x_mx != nullptr ? *x_mx
-                                    : quantize_mx(
-                                            x, true, true, false, fp4 ? Nvfp4Role::FwdInput : Nvfp4Role::None,
-                                            grads_direct ? Nvfp4Role::WgradInput : Nvfp4Role::None);
-    const auto wf = mx_qkv_weights(wq, wk, wv, cache, fp4);
-    const auto qkv = fp4 ? nvfp4_gemm(xq.nvfp4(), {wf[0], wf[2], wf[4]})
-                         : mx_gemm(xq.data, xq.inv_scale, wf[0], wf[2], x.scalar_type());
+    const auto xq = x_mx != nullptr ? *x_mx : quantize_mx(x);
+    const auto wf = mx_qkv_weights(wq, wk, wv, cache);
+    const auto qkv = mx_gemm(xq.data, xq.inv_scale, wf[0], wf[2], x.scalar_type());
 
     // mx_flash_attention's inputs (MxFlashInputs' order and layouts)
     const int64_t B = N / T;
@@ -117,13 +110,11 @@ public:
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 
     ctx->save_for_backward(
-          {xq.data_t, xq.inv_scale_t, wf[1], wf[3], qkv, rstd_q, rstd_k, cos, sin, gate_in, w_gate_bf16, z, ve,
-           xq.amax_t, wf[5]});
-    if (grads_direct)
+          {xq.data_t, xq.inv_scale_t, wf[1], wf[3], qkv, rstd_q, rstd_k, cos, sin, gate_in, w_gate_bf16, z, ve});
+    if (mx_grad_direct(wq) && mx_grad_direct(wk) && mx_grad_direct(wv))
       ctx->saved_data["weights"] = std::vector{wq, wk, wv}; // backward writes their .grad itself
     ctx->saved_data["scale"] = scale;
     ctx->saved_data["head_dim"] = head_dim;
-    ctx->saved_data["signs"] = wf[6].item<int64_t>();
     ctx->saved_data["w_gate_dtype"] = static_cast<int64_t>(w_gate.defined() ? w_gate.scalar_type() : x.scalar_type());
     if (!quantize_attention)
       return {q, k, v};
@@ -138,31 +129,20 @@ public:
     const auto s = ctx->get_saved_variables();
     const auto &x_t = s[0], &x_scale_t = s[1], &w_t = s[2], &w_scale_t = s[3], &qkv = s[4];
     const auto &rstd_q = s[5], &rstd_k = s[6], &cos = s[7], &sin = s[8];
-    const auto &gate_in = s[9], &w_gate_bf16 = s[10], &z = s[11], &ve = s[12], &x_amax = s[13], &w_amax = s[14];
+    const auto &gate_in = s[9], &w_gate_bf16 = s[10], &z = s[11], &ve = s[12];
     const auto scale = static_cast<float>(ctx->saved_data["scale"].toDouble());
     const auto head_dim = ctx->saved_data["head_dim"].toInt();
-    const int64_t N = qkv.size(0), T = cos.size(1), n = qkv.size(1), nq = grads[0].size(1), nkv = grads[1].size(1);
+    const int64_t N = x_t.size(1), T = cos.size(1), n = qkv.size(1), nq = grads[0].size(1), nkv = grads[1].size(1);
     const int heads = static_cast<int>(nq / head_dim), kv_heads = static_cast<int>(nkv / head_dim);
     const auto dtype = grads[0].scalar_type();
     const auto stream = at::cuda::getCurrentCUDAStream().stream();
 
-    // dq, dk, dv, MX-quantized into the merged gradient (N, n) and its transpose; NVFP4 for NVFP4 dgrad (when the
-    // weights' transpose is) / weight gradients
-    const bool grads_direct = ctx->saved_data.count("weights") != 0;
-    auto g = empty_mx(
-          N, n, qkv.options(), true, true, w_t.scalar_type() == torch::kUInt8 ? Nvfp4Role::DgradGrad : Nvfp4Role::None,
-          grads_direct ? Nvfp4Role::WgradGrad : Nvfp4Role::None, ctx->saved_data["signs"].toInt());
+    // dq, dk, dv, MX-quantized into the merged gradient (N, n) and its transpose
+    const auto e4m3 = qkv.options().dtype(torch::kFloat8_e4m3fn);
+    auto g = torch::empty({N, n}, e4m3), g_t = torch::empty({n, N}, e4m3);
+    auto g_scale = empty_mx_scale(N, n, qkv.options()), g_scale_t = empty_mx_scale(n, N, qkv.options());
     const auto part = [&](int64_t col) {
-      kernels::MxOut out{}, out_t{};
-      if (g.fp4_target.data.defined())
-        out.fp4 = nvfp4_out(g.fp4_target, 0, col);
-      else
-        out = mx_out(g.data, g.inv_scale, 0, col);
-      if (g.fp4_target_t.data.defined())
-        out_t.fp4 = nvfp4_out(g.fp4_target_t, col, 0);
-      else
-        out_t = mx_out(g.data_t, g.inv_scale_t, col, 0);
-      return std::pair{out, out_t};
+      return std::pair{mx_out(g, g_scale, 0, col), mx_out(g_t, g_scale_t, col, 0)};
     };
     const auto dq = grads[0].contiguous(), dk = grads[1].contiguous(), dv = grads[2].contiguous();
     for (const auto& [d, col, rstd, h] :
@@ -186,19 +166,12 @@ public:
     else
       quantize_mx_into(dv, false, v_out, v_out_t);
 
-    finish_fp4(g);
-    torch::Tensor dx;
-    if (g.fp4())
-      dx = nvfp4_gemm(g.nvfp4(), {w_t, w_scale_t, w_amax});
-    else
-      dx = mx_gemm(g.data, g.inv_scale, w_t, w_scale_t, dtype);
+    auto dx = mx_gemm(g, g_scale, w_t, w_scale_t, dtype);
     torch::Tensor dw;
-    if (grads_direct)
-      mx_grad_weights(
-            g.data_t, g.inv_scale_t, x_t, x_scale_t, ctx->saved_data["weights"].toTensorVector(), {}, true, g.amax_t,
-            x_amax.defined() && x_t.scalar_type() == torch::kUInt8 ? x_amax : torch::Tensor());
+    if (ctx->saved_data.count("weights") != 0)
+      mx_grad_weights(g_t, g_scale_t, x_t, x_scale_t, ctx->saved_data["weights"].toTensorVector());
     else
-      dw = mx_gemm(g.data_t, g.inv_scale_t, x_t, x_scale_t, dtype);
+      dw = mx_gemm(g_t, g_scale_t, x_t, x_scale_t, dtype);
     const auto rows = [&](int64_t row, int64_t size) {
       return dw.defined() ? dw.narrow(0, row, size) : torch::Tensor();
     };
@@ -207,7 +180,7 @@ public:
       dx.narrow(1, 0, gate_in.size(1)).add_(at::mm(dz, w_gate_bf16));
       dw_gate = at::mm(dz.t(), gate_in).to(static_cast<torch::ScalarType>(ctx->saved_data["w_gate_dtype"].toInt()));
     }
-    return {dx, rows(0, nq), rows(nq, nkv), rows(nq + nkv, nkv), {}, {}, {}, dve, dw_gate, {}, {}, {}, {}, {}};
+    return {dx, rows(0, nq), rows(nq, nkv), rows(nq + nkv, nkv), {}, {}, {}, dve, dw_gate, {}, {}, {}, {}};
   }
 };
 
@@ -221,13 +194,13 @@ variable_list mx_attention_inputs(
       const torch::Tensor& x_2d, const torch::Tensor& wq, const torch::Tensor& wk, const torch::Tensor& wv,
       const torch::Tensor& cos, const torch::Tensor& sin, double scale, const torch::Tensor& ve,
       const torch::Tensor& w_gate, int64_t head_dim, Fp8WeightCache* cache, const Fp8Tensor* x_mx,
-      bool quantize_attention, bool fp4) {
+      bool quantize_attention) {
   const auto opt = [](const torch::Tensor& t) {
     return t.defined() ? Optional(t) : std::nullopt;
   };
   return MxAttentionInputs::apply(
-        x_2d.contiguous(), wq, wk, wv, cos, sin, scale, opt(ve), opt(w_gate), head_dim, cache, x_mx, quantize_attention,
-        fp4);
+        x_2d.contiguous(), wq, wk, wv, cos, sin, scale, opt(ve), opt(w_gate), head_dim, cache, x_mx,
+        quantize_attention);
 }
 
 } // namespace nanochat
