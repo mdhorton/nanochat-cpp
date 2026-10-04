@@ -1,4 +1,4 @@
-// MXFP8 GEMMs through CUTLASS (external/cutlass): sm_120a block-scaled mma.sync, ping-pong warp-specialized kernel,
+// MXFP8 GEMMs through CUTLASS: sm_120a block-scaled mma.sync, ping-pong warp-specialized kernel,
 // 128x128x128 tiles.
 #pragma once
 
