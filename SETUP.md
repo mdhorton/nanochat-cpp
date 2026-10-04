@@ -22,7 +22,7 @@ cd nanochat-cpp
 
 ```bash
 pixi install                                   
-pixi run nanochat nanochat.dataset -n 170
+pixi run dataset 170     # optional: tok-train downloads the first 10
 pixi run tok-train
 ```
 

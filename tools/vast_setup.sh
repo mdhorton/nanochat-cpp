@@ -8,5 +8,4 @@ if ! command -v pixi >/dev/null 2>&1; then
 fi
 
 pixi install
-pixi run nanochat nanochat.dataset -n 10
 pixi run tok-train

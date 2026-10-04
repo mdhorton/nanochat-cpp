@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
-# ~1 minute nccl-tests sweep: transport (P2P level), per-pair links, leave-one-out rings, channels, protocol.
+# nccl-tests sweep: transport (P2P level), channels, protocol; optional (--tests): per-pair links, leave-one-out rings
+# (slow: n*(n-1)/2 + n runs, most of the time on 8 GPUs).
 # build first with tools/build_nccl_tests.sh. raw logs + summary.json go to --out.
 
 import argparse
@@ -127,7 +128,8 @@ def main():
     p.add_argument("--pair-bytes", default="64M", help="sendrecv size for the per-pair test")
     p.add_argument("--iters", type=int, default=20)
     p.add_argument("--timeout", type=int, default=60, help="per-test seconds (P2P can hang)")
-    p.add_argument("--skip", default="", help="comma list of groups to skip: transport,pairs,subsets,channels,proto")
+    p.add_argument("--tests", default="transport,channels,proto",
+                   help="comma list of groups: transport,pairs,subsets,channels,proto; 'all' = every group")
     p.add_argument("--out", default=str(ROOT / "cache/nccl"))
     p.add_argument("--keep-rows", action="store_true", help="keep per-size rows in summary.json")
     p.add_argument("--force", action="store_true", help="run even if the GPUs look busy")
@@ -135,7 +137,10 @@ def main():
     a = p.parse_args()
 
     gpus = [int(g) for g in a.gpus.split(",")] if a.gpus else list(range(gpu_count()))
-    skip = set(filter(None, a.skip.split(",")))
+    groups = {"transport", "pairs", "subsets", "channels", "proto"}
+    tests = groups if a.tests == "all" else set(filter(None, a.tests.split(",")))
+    if tests - groups:
+        sys.exit(f"unknown --tests: {','.join(sorted(tests - groups))}")
     if len(gpus) < 2:
         sys.exit("need >= 2 GPUs")
     if not a.dry_run:
@@ -154,7 +159,7 @@ def main():
     links = {}
     levels = a.p2p_levels.split(",")
     best = {}
-    if "transport" not in skip:
+    if "transport" in tests:
         for lvl in levels:
             env, unset = ({}, ("NCCL_P2P_LEVEL",)) if lvl == "default" else ({"NCCL_P2P_LEVEL": lvl}, ())
             for test in ("all_gather", "reduce_scatter", "all_reduce"):
@@ -166,24 +171,24 @@ def main():
     print(f"using P2P level {lvl} for the remaining tests")
 
     # 2. pairs: sendrecv between every GPU pair (finds a slow card or link).
-    if "pairs" not in skip:
+    if "pairs" in tests:
         for i, j in itertools.combinations(gpus, 2):
             b.run("pairs", f"{i}-{j}", "sendrecv", [i, j], base_env, base_unset, sizes=(a.pair_bytes, a.pair_bytes, "2"))
 
     # 3. leave-one-out rings (does one GPU drag the ring?).
-    if "subsets" not in skip and len(gpus) >= 3:
+    if "subsets" in tests and len(gpus) >= 3:
         for g in gpus:
             sub = [x for x in gpus if x != g]
             b.run("subsets", f"without-{g}", "all_gather", sub, base_env, base_unset)
 
     # 4. channel count.
-    if "channels" not in skip:
+    if "channels" in tests:
         for ch in filter(None, a.channels.split(",")):
             env = {**base_env, "NCCL_MIN_NCHANNELS": ch, "NCCL_MAX_NCHANNELS": ch}
             b.run("channels", f"ch{ch}", "all_gather", gpus, env, base_unset)
 
     # 5. protocol: Simple (pixi default) vs NCCL's own choice vs LL128.
-    if "proto" not in skip:
+    if "proto" in tests:
         for proto in ("Simple", "default", "LL128"):
             unset = base_unset + (("NCCL_PROTO",) if proto == "default" else ())
             env = base_env if proto == "default" else {**base_env, "NCCL_PROTO": proto}
