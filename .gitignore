@@ -10,3 +10,4 @@ __pycache__/
 
 *.nsys-rep
 *.ncu-rep
+metrics-*.jsonl

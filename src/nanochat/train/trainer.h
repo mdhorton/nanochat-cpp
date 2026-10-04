@@ -30,7 +30,7 @@ struct TrainOptions {
   bool muon_fused = false;          // Muon's update in fused kernels (not bit-identical to Python's)
   bool gather_overlap = true;       // several GPUs: the optimizer's param all_gathers overlap the next forward
   // several GPUs, half the Muon traffic (not bit-identical to fp32): grads reduced in bf16, updates gathered in bf16
-  bool muon_bf16_reduce = false, muon_bf16_gather = false;
+  bool muon_bf16_reduce = true, muon_bf16_gather = true;
   int64_t cublaslt_workspace_mb = 32; // cuBLASLt workspace per stream; its split-K GEMMs need a few MB (torch: 1)
   // training horizon: the first one set wins
   int64_t num_iterations = -1;

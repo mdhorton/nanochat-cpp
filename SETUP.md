@@ -50,3 +50,7 @@ pixi run wandb login   # or export WANDB_API_KEY=<key>
 # CLion
 
 use the "Debug (pixi)" / "RelWithDebInfo (pixi)" CMake presets with the Default toolchain.
+
+pixi run python tools/convert_checkpoint.py cache/base_checkpoints/full-d24-8x5090 cache/base_checkpoints/full-d24-8x5090-pt --to pt
+cd external/nanochat
+pixi run torchrun --nproc_per_node=8 -m scripts.base_eval --model-tag full-d24-8x5090-pt --eval core

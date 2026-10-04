@@ -121,6 +121,20 @@ diverges like a seed change: medium-d12 seed pairs (cache/metrics/muon) show the
 | 20 |          |          |          |        |        |                                         |
 | 31 |  351,321 | 2.860658 | 0.879813 |   8.0g | 41.75m | --nvfp4-wgrad --nvfp4-dgrad --nvfp4-fwd |
 
+# full run @d12, 8x RTX 5090
+
+`--nproc=8 --depth=12 --device-batch-size=2` (Vast.ai host)
+
+|    |  toks/sec |     loss |      bpb | memory |  time | notes                                                       |
+|----|----------:|---------:|---------:|-------:|------:|-------------------------------------------------------------|
+|    | 2,343,148 | 2.968829 | 0.867538 |        | 6.26m | --gather-overlap=false                                      |
+|    | 2,399,574 | 2.965643 | 0.867500 |   3.8g | 6.09m | --gather-overlap=true                                       |
+|    | 2,551,937 | 2.963374 | 0.867497 |   3.8g | 5.72m | --gather-overlap=true --muon-bf16-reduce --muon-bf16-gather |
+
+Gather overlap and bf16 Muon comm (cache/metrics/muon-bf16): median step 223.8 → 218.5 → 205.5 ms; toks/sec is the
+median. Val bpb of all three within ±0.0005 at every eval. Gather overlap and both bf16 flags enabled by default going
+forward.
+
 # full run @d24
 
 python baseline
@@ -134,4 +148,4 @@ python baseline
 |--------:|---------:|--------:|--------:|--------|-------:|---------:|--------------------------------------------------------------------|
 |      40 |   81,303 | 2.36295 | 0.74283 | 0.2270 |  17.1g | 1194.49m | --nvfp4-wgrad --nvfp4-dgrad --nvfp4-fwd --rank-micro-steps=126,130 |
 |         |   59,978 | 2.41296 | 0.71934 | 0.2616 |  18.0g | 1622.59m | --rank-micro-steps=126,130                                         |
-|         |          |         |         |        |        |          |                                                                    |
+|         |  597,536 | 2.39167 | 0.71765 | 0.2552 |  21.3g |  162.85m |                                                                    |
