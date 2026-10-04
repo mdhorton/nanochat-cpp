@@ -292,9 +292,9 @@ void MuonAdamW::zero_grad() {
     }
     if (group_gathers_[i].empty())
       muon_grads_[i].zero_();
-    for (const size_t gi : group_gathers_[i]) { // an in-flight gather still writes its rows: finish() zeroes them
+    for (const size_t gi : group_gathers_[i]) { // an in-flight gather into the stack: finish() zeroes its rows
       auto& g = gathers_[gi];
-      if (g.pending)
+      if (g.pending && !g.dst.defined())
         g.zero = true;
       else
         muon_grads_[i].slice(0, g.begin, g.end).zero_();
@@ -314,7 +314,7 @@ void MuonAdamW::step() {
   pending.reserve(groups_.size());
   for (size_t i = 0; i < groups_.size(); ++i)
     pending.push_back(groups_[i].kind == OptimGroup::Kind::AdamW ? reduce_adamw(groups_[i]) : reduce_muon(i));
-  std::vector<torch::Tensor> updated(groups_.size());
+  std::vector<torch::Tensor> updated(groups_.size()), dst(groups_.size());
   std::vector<size_t> last;
   for (size_t i = 0; i < groups_.size(); ++i) {
     if (groups_[i].kind == OptimGroup::Kind::AdamW) {
@@ -322,20 +322,24 @@ void MuonAdamW::step() {
       continue;
     }
     updated[i] = compute_muon(i, pending[i]);
+    if (muon_bf16_gather_) // the reduce's bf16 stack is free again
+      dst[i] = pending[i].bf16.defined()
+                     ? pending[i].bf16
+                     : torch::empty_like(muon_grads_[i], muon_grads_[i].options().dtype(torch::kBFloat16));
     if (!gather_overlap_)
       for (const size_t gi : group_gathers_[i])
-        launch(gi, updated[i]);
+        launch(gi, updated[i], dst[i]);
   }
   if (gather_overlap_)
     for (const size_t gi : muon_order_)
-      launch(gi, updated[gathers_[gi].group]);
+      launch(gi, updated[gathers_[gi].group], dst[gathers_[gi].group]);
   for (const size_t gi : last)
     launch(gi);
   if (!gather_overlap_)
     sync();
 }
 
-void MuonAdamW::launch(size_t gather_index, const torch::Tensor& updated) {
+void MuonAdamW::launch(size_t gather_index, const torch::Tensor& updated, const torch::Tensor& dst) {
   auto& g = gathers_[gather_index];
   const auto& group = groups_[g.group];
   const int world = world_size();
@@ -345,12 +349,13 @@ void MuonAdamW::launch(size_t gather_index, const torch::Tensor& updated) {
     auto p_slice = p.slice(0, rank() * rows, (rank() + 1) * rows);
     g.work = dist_->all_gather(p, p_slice);
   }
-  else { // into the grad stack, which finish() copies to the params
+  else { // the params into the grad stack, or their bf16 updates into dst: finish() applies them
     const int64_t count = (g.end - g.begin) / world;
-    auto out = muon_grads_[g.group].slice(0, g.begin, g.end);
+    auto out = (dst.defined() ? dst : muon_grads_[g.group]).slice(0, g.begin, g.end);
     auto in = updated.slice(0, g.offset, g.offset + count);
     g.work = dist_->all_gather(out, in);
     g.src = updated;
+    g.dst = dst;
   }
   g.pending = true;
   ++num_pending_;
@@ -365,7 +370,11 @@ void MuonAdamW::finish(Gather& g) {
     const auto& params = groups_[g.group].params;
     const auto& stacked = muon_grads_[g.group];
     for (int64_t j = g.begin; j < std::min(g.end, static_cast<int64_t>(params.size())); ++j)
-      params[static_cast<size_t>(j)].copy_(stacked[j]);
+      if (g.dst.defined())
+        params[static_cast<size_t>(j)].add_(g.dst[j]);
+      else
+        params[static_cast<size_t>(j)].copy_(stacked[j]);
+    g.dst = torch::Tensor();
     if (g.zero)
       stacked.slice(0, g.begin, g.end).zero_();
   }
@@ -437,10 +446,13 @@ MuonAdamW::Pending MuonAdamW::reduce_muon(size_t group_index) {
     pending.grads.push_back(stacked);
     return pending;
   }
-  auto grad_chunk = torch::empty({pending.chunk_size, stacked.size(1), stacked.size(2)}, stacked.options());
+  const auto in_stack = muon_bf16_reduce_ ? stacked.to(torch::kBFloat16) : stacked;
+  if (muon_bf16_reduce_)
+    pending.bf16 = in_stack;
+  auto grad_chunk = torch::empty({pending.chunk_size, stacked.size(1), stacked.size(2)}, in_stack.options());
   int64_t offset = 0;
   for (const int64_t count : muon_segments_[group_index]) { // each segment's slices land in chunk order
-    auto in = stacked.slice(0, world * offset, world * (offset + count));
+    auto in = in_stack.slice(0, world * offset, world * (offset + count));
     auto out = grad_chunk.slice(0, offset, offset + count);
     pending.works.push_back(dist_->reduce_scatter(out, in, Dist::Op::Avg));
     offset += count;
@@ -481,7 +493,8 @@ void MuonAdamW::compute_adamw(size_t group_index, Pending& pending, std::vector<
   }
 }
 
-// Updates this rank's params. Several ranks: returns its chunk of the stack for the gathers (padding rows zero).
+// Updates this rank's params. Several ranks: returns its chunk for the gathers (padding rows zero): the updated
+// params, or with the bf16 gather their updates.
 torch::Tensor MuonAdamW::compute_muon(size_t group_index, Pending& pending) {
   const auto& group = groups_[group_index];
   auto& state = muon_states_[group_index];
@@ -496,13 +509,14 @@ torch::Tensor MuonAdamW::compute_muon(size_t group_index, Pending& pending) {
     state.second_momentum_buffer = m >= n ? torch::zeros({chunk, m, 1}, options) : torch::zeros({chunk, 1, n}, options);
   }
   const int64_t red_dim = m >= n ? -1 : -2;
+  const auto grads = pending.grads[0].to(params[0].scalar_type()); // bf16 reduce: back to the params' fp32
 
   // this rank updates the params of its first num_owned rows
   const auto rows = owned_rows(group_index);
   const auto num_owned = static_cast<int64_t>(std::ranges::lower_bound(rows, k) - rows.begin());
   torch::Tensor owned;
+  std::vector<torch::Tensor> owned_params;
   if (num_owned > 0) {
-    std::vector<torch::Tensor> owned_params;
     for (int64_t t = 0; t < num_owned; ++t)
       owned_params.push_back(params[static_cast<size_t>(rows[static_cast<size_t>(t)])]);
     owned = torch::stack(owned_params);
@@ -510,13 +524,13 @@ torch::Tensor MuonAdamW::compute_muon(size_t group_index, Pending& pending) {
     const double lr = group.lr * std::pow(std::max(1.0, static_cast<double>(m) / static_cast<double>(n)), 0.5);
     if (fused_muon_ && owned.is_cuda())
       muon_update_fused(
-            pending.grads[0].slice(0, 0, num_owned), owned, state.momentum_buffer.slice(0, 0, num_owned),
+            grads.slice(0, 0, num_owned), owned, state.momentum_buffer.slice(0, 0, num_owned),
             state.second_momentum_buffer.slice(0, 0, num_owned), static_cast<float>(group.momentum),
             static_cast<float>(lr), static_cast<float>(group.weight_decay), static_cast<float>(group.beta2),
             group.ns_steps);
     else
       muon_update(
-            pending.grads[0].slice(0, 0, num_owned), owned, state.momentum_buffer.slice(0, 0, num_owned),
+            grads.slice(0, 0, num_owned), owned, state.momentum_buffer.slice(0, 0, num_owned),
             state.second_momentum_buffer.slice(0, 0, num_owned), cpu_scalar(group.momentum), cpu_scalar(lr),
             cpu_scalar(group.weight_decay), cpu_scalar(group.beta2), group.ns_steps, red_dim);
   }
@@ -525,8 +539,11 @@ torch::Tensor MuonAdamW::compute_muon(size_t group_index, Pending& pending) {
       params[static_cast<size_t>(j)].copy_(owned[j]);
     return {};
   }
-  auto updated = torch::empty({chunk, m, n}, options);
-  if (num_owned > 0)
+  auto updated = torch::empty({chunk, m, n}, muon_bf16_gather_ ? options.dtype(torch::kBFloat16) : options);
+  if (muon_bf16_gather_)
+    for (int64_t t = 0; t < num_owned; ++t) // the params still hold the old values
+      updated[t].copy_(owned[t] - owned_params[static_cast<size_t>(t)]);
+  else if (num_owned > 0)
     updated.slice(0, 0, num_owned).copy_(owned);
   if (num_owned < chunk)
     updated.slice(0, num_owned).zero_();

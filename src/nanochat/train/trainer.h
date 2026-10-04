@@ -21,14 +21,16 @@ struct TrainOptions {
   int64_t depth = 20, aspect_ratio = 64, head_dim = 128, max_seq_len = 2048;
   int64_t seed = 42; // weight init
   std::string window_pattern = "SSSL";
-  std::string attention = "mx";       // mx (MXFP8 fwd + bwd), bf16 (ours), bf16mx (MXFP8 bwd), fa2, sdpa (as Python)
-  int64_t loss_chunk_rows = 4096;     // > 0: fused chunked lm_head + loss (never all logits at once); 0: as Python
-  bool fp8 = true;                    // FP8 matmuls for training (eval stays bf16)
-  std::string fp8_recipe = "mxfp8";   // mxfp8 or tensorwise (as Python)
-  std::string gemm = "cutlass";       // MXFP8 GEMMs: cutlass or cublas (cuBLASLt)
-  bool fused = true;                  // fused elementwise kernels; false: Python's op-by-op path
-  bool muon_fused = false;            // Muon's update in fused kernels (not bit-identical to Python's)
-  bool gather_overlap = true;         // several GPUs: the optimizer's param all_gathers overlap the next forward
+  std::string attention = "mx";     // mx (MXFP8 fwd + bwd), bf16 (ours), bf16mx (MXFP8 bwd), fa2, sdpa (as Python)
+  int64_t loss_chunk_rows = 4096;   // > 0: fused chunked lm_head + loss (never all logits at once); 0: as Python
+  bool fp8 = true;                  // FP8 matmuls for training (eval stays bf16)
+  std::string fp8_recipe = "mxfp8"; // mxfp8 or tensorwise (as Python)
+  std::string gemm = "cutlass";     // MXFP8 GEMMs: cutlass or cublas (cuBLASLt)
+  bool fused = true;                // fused elementwise kernels; false: Python's op-by-op path
+  bool muon_fused = false;          // Muon's update in fused kernels (not bit-identical to Python's)
+  bool gather_overlap = true;       // several GPUs: the optimizer's param all_gathers overlap the next forward
+  // several GPUs, half the Muon traffic (not bit-identical to fp32): grads reduced in bf16, updates gathered in bf16
+  bool muon_bf16_reduce = false, muon_bf16_gather = false;
   int64_t cublaslt_workspace_mb = 32; // cuBLASLt workspace per stream; its split-K GEMMs need a few MB (torch: 1)
   // training horizon: the first one set wins
   int64_t num_iterations = -1;

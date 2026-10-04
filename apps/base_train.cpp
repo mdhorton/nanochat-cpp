@@ -38,6 +38,11 @@ static int run(int argc, char** argv) {
   o.gather_overlap = flags.boolean(
         "gather-overlap", o.gather_overlap,
         "several GPUs: the optimizer's param all_gathers overlap the next forward (false = finish them in the step)");
+  o.muon_bf16_reduce = flags.boolean(
+        "muon-bf16-reduce", o.muon_bf16_reduce, "several GPUs: reduce the Muon grads in bf16 (half the bytes)");
+  o.muon_bf16_gather = flags.boolean(
+        "muon-bf16-gather", o.muon_bf16_gather,
+        "several GPUs: gather the Muon updates rounded to bf16 instead of the fp32 params (half the bytes)");
   o.cublaslt_workspace_mb = flags.i64(
         "cublaslt-workspace-mb", o.cublaslt_workspace_mb,
         "cuBLASLt workspace in MB; split-K GEMMs need a few (<= 0 = torch's 1 MB default)");

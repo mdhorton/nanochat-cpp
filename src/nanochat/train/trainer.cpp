@@ -205,6 +205,8 @@ nlohmann::json options_to_json(const TrainOptions& o) {
         {"fused", o.fused},
         {"muon_fused", o.muon_fused},
         {"gather_overlap", o.gather_overlap},
+        {"muon_bf16_reduce", o.muon_bf16_reduce},
+        {"muon_bf16_gather", o.muon_bf16_gather},
         {"num_iterations", o.num_iterations},
         {"target_flops", o.target_flops},
         {"target_param_data_ratio", o.target_param_data_ratio},
@@ -474,6 +476,11 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
   if (o.muon_fused)
     print("Muon update: fused kernels");
   optimizer.set_gather_overlap(o.gather_overlap);
+  optimizer.set_muon_bf16(o.muon_bf16_reduce, o.muon_bf16_gather);
+  if (o.world_size > 1 && (o.muon_bf16_reduce || o.muon_bf16_gather))
+    print(std::format(
+          "Muon traffic in bf16:{}{}", o.muon_bf16_reduce ? " grad reduce" : "",
+          o.muon_bf16_gather ? " update gather" : ""));
   if (resuming) {
     optimizer.load_state_dict(ckpt->optimizer, ckpt->optimizer_metadata);
     ckpt->optimizer.clear();

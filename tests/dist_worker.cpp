@@ -21,6 +21,8 @@ static int run(int argc, char** argv) {
   const auto rank = static_cast<int>(flags.i64("rank", -1, "internal: set by the launcher"));
   const auto master_port = static_cast<int>(flags.i64("master-port", 29500, "rendezvous port"));
   const auto gather_overlap = flags.boolean("gather-overlap", true, "param all_gathers overlap the next forward");
+  const auto muon_bf16 = flags.boolean("muon-bf16", false, "Muon reduce and gather in bf16");
+  const auto rank_states = flags.boolean("rank-states", false, "every rank writes <out>_rank<r>.safetensors");
   flags.done();
   if (rank < 0)
     return launch_ranks({argv + 1, argv + argc}, nproc);
@@ -39,6 +41,7 @@ static int run(int argc, char** argv) {
   o.world_size = nproc;
   o.master_port = master_port;
   o.gather_overlap = gather_overlap;
+  o.muon_bf16_reduce = o.muon_bf16_gather = muon_bf16;
 
   std::vector<double> losses;
   std::map<std::string, double> evals;
@@ -55,6 +58,8 @@ static int run(int argc, char** argv) {
                   [&](GPTImpl& model) {
                     final_state = model.state_dict();
                   }});
+  if (rank_states)
+    safetensors::save(out + "_rank" + std::to_string(rank) + ".safetensors", final_state);
   if (rank == 0) {
     std::ofstream(out + ".json") << nlohmann::json{{"losses", losses}, {"evals", evals}}.dump(1);
     safetensors::save(out + ".safetensors", final_state);

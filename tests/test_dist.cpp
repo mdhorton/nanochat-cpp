@@ -43,6 +43,29 @@ TEST(DistGolden, GatherOverlapIsExact) {
   }
 }
 
+// Muon's reduce and gather in bf16: the ranks stay bit-identical replicas, and training still works.
+TEST(DistGolden, MuonBf16KeepsRanksEqual) {
+  const auto golden = test_env().golden_dir / "train" / "train_ddp2.json";
+  if (!fs::exists(golden))
+    GTEST_SKIP() << "missing " << golden << " (pixi run export-train-golden-ddp)";
+  if (torch::cuda::device_count() < 2)
+    GTEST_SKIP() << "needs 2 GPUs";
+  const auto out = run_worker(golden, "_bf16", " --muon-bf16 --rank-states");
+  const auto rank0 = safetensors::load(out + "_rank0.safetensors", torch::kCPU);
+  const auto rank1 = safetensors::load(out + "_rank1.safetensors", torch::kCPU);
+  ASSERT_EQ(rank0.size(), rank1.size());
+  for (const auto& [name, t] : rank0)
+    EXPECT_TRUE(torch::equal(rank1.at(name), t)) << name;
+
+  // the tiny run is chaotic, so only a loose bound on the final val bpb
+  std::ifstream want_in(golden), got_in(out + ".json");
+  const auto want = nlohmann::json::parse(want_in)["evals"], got = nlohmann::json::parse(got_in)["evals"];
+  const auto last = std::prev(want.end()).key();
+  EXPECT_NEAR(got.at(last).get<double>(), want.at(last).get<double>(), 0.1);
+  for (const auto& suffix : {".json", ".safetensors", "_rank0.safetensors", "_rank1.safetensors"})
+    fs::remove(out + suffix);
+}
+
 TEST(DistGolden, TwoGpusMatchPython) {
   const auto golden = test_env().golden_dir / "train" / "train_ddp2.json";
   if (!fs::exists(golden))
