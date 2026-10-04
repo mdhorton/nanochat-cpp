@@ -5,9 +5,11 @@
 #include "nanochat/train/adamw_kernel.h"
 #include "nanochat/train/muon_kernel.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <map>
+#include <numeric>
 #include <stdexcept>
 
 #include <nlohmann/json.hpp>
@@ -15,6 +17,9 @@
 namespace nanochat {
 
 namespace {
+
+constexpr int64_t kMuonSegments = 8; // gather overlap: the most all_gathers per Muon stack
+constexpr size_t kNoGather = static_cast<size_t>(-1);
 
 // Python passes hyperparameters as 0-D fp32 CPU tensors; using the same keeps the fp32 rounding identical.
 torch::Tensor cpu_scalar(double v) {
@@ -185,6 +190,7 @@ MuonAdamW::MuonAdamW(std::vector<OptimGroup> groups, Dist* dist)
   adamw_states_.resize(groups_.size());
   muon_states_.resize(groups_.size());
   muon_grads_.resize(groups_.size());
+  muon_segments_.resize(groups_.size());
   const int world = world_size();
   for (size_t i = 0; i < groups_.size(); ++i) {
     const auto& group = groups_[i];
@@ -200,7 +206,79 @@ MuonAdamW::MuonAdamW(std::vector<OptimGroup> groups, Dist* dist)
         throw std::invalid_argument("Muon group " + group.name + " needs 2D params of one shape");
     const auto k = static_cast<int64_t>(group.params.size());
     muon_grads_[i] = torch::zeros({(k + world - 1) / world * world, p.size(0), p.size(1)}, p.options());
+    muon_segments_[i] = {muon_grads_[i].size(0) / world};
   }
+  layout();
+}
+
+void MuonAdamW::set_gather_overlap(bool on) {
+  const int world = world_size();
+  for (size_t i = 0; i < groups_.size(); ++i) {
+    if (groups_[i].kind != OptimGroup::Kind::Muon)
+      continue;
+    if (muon_states_[i].momentum_buffer.defined())
+      throw std::logic_error("set_gather_overlap: the Muon state already has a layout");
+    const int64_t chunk = muon_grads_[i].size(0) / world;
+    const int64_t n = on && world > 1 ? std::min(kMuonSegments, chunk) : 1;
+    muon_segments_[i].assign(static_cast<size_t>(n), chunk / n);
+    for (int64_t s = 0; s < chunk % n; ++s)
+      ++muon_segments_[i][static_cast<size_t>(s)];
+  }
+  gather_overlap_ = on;
+  layout();
+}
+
+// The gathers of the current segments. Segment s of a Muon stack is rows [world * o, world * (o + c)) for its c
+// params per rank and o the ones before it; rank r owns its rows [r * c, (r + 1) * c).
+void MuonAdamW::layout() {
+  gathers_.clear();
+  gather_of_.clear();
+  muon_order_.clear();
+  group_gathers_.assign(groups_.size(), {});
+  const int world = world_size();
+  if (world == 1)
+    return;
+  for (size_t i = 0; i < groups_.size(); ++i) {
+    const auto& params = groups_[i].params;
+    if (groups_[i].kind == OptimGroup::Kind::AdamW) {
+      for (size_t j = 0; j < params.size(); ++j) {
+        if (params[j].numel() < 1024) { // all_reduced: no gather
+          group_gathers_[i].push_back(kNoGather);
+          continue;
+        }
+        gather_of_[params[j].unsafeGetTensorImpl()] = gathers_.size();
+        group_gathers_[i].push_back(gathers_.size());
+        gathers_.push_back({.group = i, .begin = static_cast<int64_t>(j), .end = static_cast<int64_t>(j) + 1});
+      }
+      continue;
+    }
+    int64_t offset = 0;
+    for (const int64_t count : muon_segments_[i]) {
+      Gather g{.group = i, .begin = world * offset, .end = world * (offset + count), .offset = offset};
+      for (int64_t j = g.begin; j < std::min(g.end, static_cast<int64_t>(params.size())); ++j)
+        gather_of_[params[static_cast<size_t>(j)].unsafeGetTensorImpl()] = gathers_.size();
+      muon_order_.push_back(gathers_.size());
+      group_gathers_[i].push_back(gathers_.size());
+      gathers_.push_back(std::move(g));
+      offset += count;
+    }
+  }
+  // a stack holds its params in forward order: interleave the stacks' segments by where they start
+  std::ranges::stable_sort(muon_order_, {}, [&](size_t g) {
+    return static_cast<double>(gathers_[g].begin) / static_cast<double>(muon_grads_[gathers_[g].group].size(0));
+  });
+}
+
+// The stack rows of this rank's chunk, ascending (padding rows last).
+std::vector<int64_t> MuonAdamW::owned_rows(size_t group_index) const {
+  std::vector<int64_t> rows;
+  int64_t offset = 0;
+  for (const int64_t count : muon_segments_[group_index]) {
+    for (int64_t t = 0; t < count; ++t)
+      rows.push_back(world_size() * offset + rank() * count + t);
+    offset += count;
+  }
+  return rows;
 }
 
 void MuonAdamW::zero_grad() {
@@ -212,31 +290,102 @@ void MuonAdamW::zero_grad() {
         p.mutable_grad().reset();
       continue;
     }
-    muon_grads_[i].zero_();
+    if (group_gathers_[i].empty())
+      muon_grads_[i].zero_();
+    for (const size_t gi : group_gathers_[i]) { // an in-flight gather still writes its rows: finish() zeroes them
+      auto& g = gathers_[gi];
+      if (g.pending)
+        g.zero = true;
+      else
+        muon_grads_[i].slice(0, g.begin, g.end).zero_();
+    }
     for (size_t j = 0; j < params.size(); ++j)
       params[j].mutable_grad() = muon_grads_[i][static_cast<int64_t>(j)];
   }
 }
 
 // As Python: launch every group's reduce, then per group wait, update and launch the gathers, then finish them.
+// Gather overlap: the gathers launch in forward order (embeddings, Muon segments, lm_head) and sync() finishes them.
 void MuonAdamW::step() {
   torch::NoGradGuard no_grad;
+  if (num_pending_ > 0)
+    throw std::logic_error("MuonAdamW::step: sync() the previous step's gathers before backward");
   std::vector<Pending> pending;
   pending.reserve(groups_.size());
   for (size_t i = 0; i < groups_.size(); ++i)
     pending.push_back(groups_[i].kind == OptimGroup::Kind::AdamW ? reduce_adamw(groups_[i]) : reduce_muon(i));
-  std::vector<Gather> gathers;
-  for (size_t i = 0; i < groups_.size(); ++i)
-    if (groups_[i].kind == OptimGroup::Kind::AdamW)
-      compute_adamw(groups_[i], pending[i], adamw_states_[i], gathers);
-    else
-      compute_muon(groups_[i], pending[i], muon_states_[i], gathers);
-  for (auto& g : gathers) {
-    Dist::wait(g.work);
-    if (g.params != nullptr)
-      for (size_t j = 0; j < g.params->size(); ++j)
-        (*g.params)[j].copy_(g.stacked[static_cast<int64_t>(j)]);
+  std::vector<torch::Tensor> updated(groups_.size());
+  std::vector<size_t> last;
+  for (size_t i = 0; i < groups_.size(); ++i) {
+    if (groups_[i].kind == OptimGroup::Kind::AdamW) {
+      compute_adamw(i, pending[i], last);
+      continue;
+    }
+    updated[i] = compute_muon(i, pending[i]);
+    if (!gather_overlap_)
+      for (const size_t gi : group_gathers_[i])
+        launch(gi, updated[i]);
   }
+  if (gather_overlap_)
+    for (const size_t gi : muon_order_)
+      launch(gi, updated[gathers_[gi].group]);
+  for (const size_t gi : last)
+    launch(gi);
+  if (!gather_overlap_)
+    sync();
+}
+
+void MuonAdamW::launch(size_t gather_index, const torch::Tensor& updated) {
+  auto& g = gathers_[gather_index];
+  const auto& group = groups_[g.group];
+  const int world = world_size();
+  if (group.kind == OptimGroup::Kind::AdamW) { // in place: the param's other slices from their ranks
+    auto p = group.params[static_cast<size_t>(g.begin)];
+    const int64_t rows = p.size(0) / world;
+    auto p_slice = p.slice(0, rank() * rows, (rank() + 1) * rows);
+    g.work = dist_->all_gather(p, p_slice);
+  }
+  else { // into the grad stack, which finish() copies to the params
+    const int64_t count = (g.end - g.begin) / world;
+    auto out = muon_grads_[g.group].slice(0, g.begin, g.end);
+    auto in = updated.slice(0, g.offset, g.offset + count);
+    g.work = dist_->all_gather(out, in);
+    g.src = updated;
+  }
+  g.pending = true;
+  ++num_pending_;
+}
+
+void MuonAdamW::finish(Gather& g) {
+  Dist::wait(g.work);
+  g.work = {};
+  g.src = torch::Tensor();
+  if (groups_[g.group].kind == OptimGroup::Kind::Muon) {
+    torch::NoGradGuard no_grad;
+    const auto& params = groups_[g.group].params;
+    const auto& stacked = muon_grads_[g.group];
+    for (int64_t j = g.begin; j < std::min(g.end, static_cast<int64_t>(params.size())); ++j)
+      params[static_cast<size_t>(j)].copy_(stacked[j]);
+    if (g.zero)
+      stacked.slice(0, g.begin, g.end).zero_();
+  }
+  g.pending = g.zero = false;
+  --num_pending_;
+}
+
+void MuonAdamW::sync(const std::vector<torch::Tensor>& params) {
+  if (num_pending_ == 0)
+    return;
+  for (const auto& p : params)
+    if (const auto it = gather_of_.find(p.unsafeGetTensorImpl());
+        it != gather_of_.end() && gathers_[it->second].pending)
+      finish(gathers_[it->second]);
+}
+
+void MuonAdamW::sync() {
+  for (auto& g : gathers_)
+    if (g.pending)
+      finish(g);
 }
 
 MuonAdamW::Pending MuonAdamW::reduce_adamw(const OptimGroup& group) {
@@ -281,21 +430,29 @@ MuonAdamW::Pending MuonAdamW::reduce_muon(size_t group_index) {
   if (k < stacked.size(0))
     stacked.slice(0, k).zero_();
   Pending pending;
-  pending.chunk_size = stacked.size(0) / world_size();
-  if (world_size() == 1) { // this rank owns every param: the stack is the chunk
+  const int world = world_size();
+  pending.chunk_size = stacked.size(0) / world;
+  if (world == 1) { // this rank owns every param: the stack is the chunk
     pending.works.emplace_back();
     pending.grads.push_back(stacked);
     return pending;
   }
   auto grad_chunk = torch::empty({pending.chunk_size, stacked.size(1), stacked.size(2)}, stacked.options());
-  pending.works.push_back(dist_->reduce_scatter(grad_chunk, stacked, Dist::Op::Avg));
+  int64_t offset = 0;
+  for (const int64_t count : muon_segments_[group_index]) { // each segment's slices land in chunk order
+    auto in = stacked.slice(0, world * offset, world * (offset + count));
+    auto out = grad_chunk.slice(0, offset, offset + count);
+    pending.works.push_back(dist_->reduce_scatter(out, in, Dist::Op::Avg));
+    offset += count;
+  }
   pending.grads.push_back(grad_chunk);
-  pending.stacked = stacked;
   return pending;
 }
 
-void MuonAdamW::compute_adamw(
-      const OptimGroup& group, Pending& pending, std::vector<AdamWState>& states, std::vector<Gather>& gathers) {
+// Updates the group and launches its gathers (gather overlap: a gather_last group's indices go to `last` instead).
+void MuonAdamW::compute_adamw(size_t group_index, Pending& pending, std::vector<size_t>& last) {
+  const auto& group = groups_[group_index];
+  auto& states = adamw_states_[group_index];
   const auto lr_t = cpu_scalar(group.lr), beta1_t = cpu_scalar(group.beta1), beta2_t = cpu_scalar(group.beta2);
   const auto eps_t = cpu_scalar(group.eps), wd_t = cpu_scalar(group.weight_decay);
   for (size_t j = 0; j < group.params.size(); ++j) {
@@ -315,14 +472,21 @@ void MuonAdamW::compute_adamw(
     adamw_update(
           p_slice, pending.grads[j], state.exp_avg, state.exp_avg_sq, cpu_scalar(static_cast<double>(state.step)), lr_t,
           beta1_t, beta2_t, eps_t, wd_t);
-    if (pending.sharded[j])
-      gathers.push_back({dist_->all_gather(p, p_slice), {}, nullptr});
+    if (!pending.sharded[j])
+      continue;
+    if (gather_overlap_ && group.gather_last)
+      last.push_back(group_gathers_[group_index][j]);
+    else
+      launch(group_gathers_[group_index][j]);
   }
 }
 
-void MuonAdamW::compute_muon(
-      const OptimGroup& group, Pending& pending, MuonState& state, std::vector<Gather>& gathers) {
-  Dist::wait(pending.works[0]);
+// Updates this rank's params. Several ranks: returns its chunk of the stack for the gathers (padding rows zero).
+torch::Tensor MuonAdamW::compute_muon(size_t group_index, Pending& pending) {
+  const auto& group = groups_[group_index];
+  auto& state = muon_states_[group_index];
+  for (const auto& work : pending.works)
+    Dist::wait(work);
   const auto& params = group.params;
   const int64_t m = params[0].size(0), n = params[0].size(1), k = static_cast<int64_t>(params.size());
   const int64_t chunk = pending.chunk_size;
@@ -333,12 +497,15 @@ void MuonAdamW::compute_muon(
   }
   const int64_t red_dim = m >= n ? -1 : -2;
 
-  // this rank updates params [start, start + num_owned)
-  const int64_t start = rank() * chunk;
-  const int64_t num_owned = std::min(chunk, std::max<int64_t>(0, k - start));
+  // this rank updates the params of its first num_owned rows
+  const auto rows = owned_rows(group_index);
+  const auto num_owned = static_cast<int64_t>(std::ranges::lower_bound(rows, k) - rows.begin());
   torch::Tensor owned;
   if (num_owned > 0) {
-    owned = torch::stack(std::vector<torch::Tensor>(params.begin() + start, params.begin() + start + num_owned));
+    std::vector<torch::Tensor> owned_params;
+    for (int64_t t = 0; t < num_owned; ++t)
+      owned_params.push_back(params[static_cast<size_t>(rows[static_cast<size_t>(t)])]);
+    owned = torch::stack(owned_params);
     // tall matrices get a larger lr
     const double lr = group.lr * std::pow(std::max(1.0, static_cast<double>(m) / static_cast<double>(n)), 0.5);
     if (fused_muon_ && owned.is_cuda())
@@ -353,16 +520,17 @@ void MuonAdamW::compute_muon(
             state.second_momentum_buffer.slice(0, 0, num_owned), cpu_scalar(group.momentum), cpu_scalar(lr),
             cpu_scalar(group.weight_decay), cpu_scalar(group.beta2), group.ns_steps, red_dim);
   }
-  if (!pending.stacked.defined()) { // one rank: the updated stack maps onto the params
-    gathers.push_back({{}, owned, &params});
-    return;
+  if (world_size() == 1) { // the updated stack maps onto the params
+    for (int64_t j = 0; j < k; ++j)
+      params[static_cast<size_t>(j)].copy_(owned[j]);
+    return {};
   }
   auto updated = torch::empty({chunk, m, n}, options);
   if (num_owned > 0)
     updated.slice(0, 0, num_owned).copy_(owned);
   if (num_owned < chunk)
     updated.slice(0, num_owned).zero_();
-  gathers.push_back({dist_->all_gather(pending.stacked, updated), pending.stacked, &params});
+  return updated;
 }
 
 safetensors::TensorMap MuonAdamW::state_dict(safetensors::Metadata& metadata) const {
@@ -396,6 +564,8 @@ safetensors::TensorMap MuonAdamW::state_dict(safetensors::Metadata& metadata) co
     }
     else {
       g.update({{"kind", "muon"}, {"momentum", group.momentum}, {"ns_steps", group.ns_steps}, {"beta2", group.beta2}});
+      if (muon_segments_[i].size() > 1)
+        g["segments"] = muon_segments_[i]; // the state's layout
       if (muon_states_[i].momentum_buffer.defined()) {
         state[prefix(index) + "momentum_buffer"] = muon_states_[i].momentum_buffer;
         state[prefix(index) + "second_momentum_buffer"] = muon_states_[i].second_momentum_buffer;
@@ -447,6 +617,13 @@ void MuonAdamW::load_state_dict(const safetensors::TensorMap& state, const safet
       group.momentum = g["momentum"];
       group.ns_steps = g["ns_steps"];
       group.beta2 = g["beta2"];
+      if (world_size() > 1) { // the state keeps the layout it was saved with (one segment before gather overlap)
+        const int64_t chunk = muon_grads_[i].size(0) / world_size();
+        const auto segments = g.value("segments", std::vector<int64_t>{chunk});
+        if (std::accumulate(segments.begin(), segments.end(), int64_t{0}) != chunk)
+          throw std::runtime_error("optimizer group " + std::to_string(i) + " was saved with another world size");
+        muon_segments_[i] = segments;
+      }
       if (state.contains(prefix(index) + "momentum_buffer")) {
         muon_states_[i].momentum_buffer = get(prefix(index) + "momentum_buffer", group.params[0]);
         muon_states_[i].second_momentum_buffer = get(prefix(index) + "second_momentum_buffer", group.params[0]);
@@ -454,6 +631,7 @@ void MuonAdamW::load_state_dict(const safetensors::TensorMap& state, const safet
     }
     index += static_cast<int64_t>(group.params.size());
   }
+  layout();
 }
 
 MuonAdamW setup_optimizer(
@@ -482,6 +660,7 @@ MuonAdamW setup_optimizer(
         adamw("x0_lambdas", {model.x0_lambdas}, scalar_lr, 0.96, 0.95, 0.0), // higher beta1 for x0
         adamw("smear", {model.smear_gate->weight, model.smear_lambda, model.backout_lambda}, 0.2, 0.8, 0.95, 0.0),
   };
+  groups[0].gather_last = true;
   // Muon groups: matrix params grouped by shape (sorted, as Python's sorted() of shape tuples)
   std::map<std::vector<int64_t>, std::vector<torch::Tensor>> by_shape;
   for (const auto& p : model.transformer->h->parameters())

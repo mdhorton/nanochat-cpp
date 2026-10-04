@@ -28,6 +28,7 @@ struct TrainOptions {
   std::string gemm = "cutlass";       // MXFP8 GEMMs: cutlass or cublas (cuBLASLt)
   bool fused = true;                  // fused elementwise kernels; false: Python's op-by-op path
   bool muon_fused = false;            // Muon's update in fused kernels (not bit-identical to Python's)
+  bool gather_overlap = true;         // several GPUs: the optimizer's param all_gathers overlap the next forward
   int64_t cublaslt_workspace_mb = 32; // cuBLASLt workspace per stream; its split-K GEMMs need a few MB (torch: 1)
   // training horizon: the first one set wins
   int64_t num_iterations = -1;

@@ -14,17 +14,42 @@
 using namespace nanochat;
 namespace fs = std::filesystem;
 
+// Runs the golden training on 2 GPUs; returns the output path prefix.
+static std::string run_worker(const fs::path& golden, const std::string& tag, const std::string& args = "") {
+  const auto out = (fs::temp_directory_path() / ("nanochat_dist_" + std::to_string(getpid()) + tag)).string();
+  const int port = 20000 + getpid() % 20000;
+  const auto cmd = std::string(NANOCHAT_DIST_WORKER) + " --nproc 2 --golden " + golden.string() + " --base-dir " +
+                   test_env().base_dir.string() + " --out " + out + " --master-port " + std::to_string(port) + args;
+  EXPECT_EQ(std::system(cmd.c_str()), 0) << cmd;
+  return out;
+}
+
+// The all_gathers finished in the next forward (and the Muon state striped for it) change no bit.
+TEST(DistGolden, GatherOverlapIsExact) {
+  const auto golden = test_env().golden_dir / "train" / "train_ddp2.json";
+  if (!fs::exists(golden))
+    GTEST_SKIP() << "missing " << golden << " (pixi run export-train-golden-ddp)";
+  if (torch::cuda::device_count() < 2)
+    GTEST_SKIP() << "needs 2 GPUs";
+  const auto on = run_worker(golden, "_on"), off = run_worker(golden, "_off", " --gather-overlap=false");
+  const auto got = safetensors::load(on + ".safetensors", torch::kCPU);
+  const auto want = safetensors::load(off + ".safetensors", torch::kCPU);
+  ASSERT_EQ(got.size(), want.size());
+  for (const auto& [name, t] : want)
+    EXPECT_TRUE(torch::equal(got.at(name), t)) << name;
+  for (const auto& prefix : {on, off}) {
+    fs::remove(prefix + ".json");
+    fs::remove(prefix + ".safetensors");
+  }
+}
+
 TEST(DistGolden, TwoGpusMatchPython) {
   const auto golden = test_env().golden_dir / "train" / "train_ddp2.json";
   if (!fs::exists(golden))
     GTEST_SKIP() << "missing " << golden << " (pixi run export-train-golden-ddp)";
   if (torch::cuda::device_count() < 2)
     GTEST_SKIP() << "needs 2 GPUs";
-  const auto out = fs::temp_directory_path() / ("nanochat_dist_" + std::to_string(getpid()));
-  const int port = 20000 + getpid() % 20000;
-  const auto cmd = std::string(NANOCHAT_DIST_WORKER) + " --nproc 2 --golden " + golden.string() + " --base-dir " +
-                   test_env().base_dir.string() + " --out " + out.string() + " --master-port " + std::to_string(port);
-  ASSERT_EQ(std::system(cmd.c_str()), 0) << cmd;
+  const fs::path out = run_worker(golden, "");
 
   std::ifstream want_in(golden), got_in(out.string() + ".json");
   const auto want = nlohmann::json::parse(want_in), got = nlohmann::json::parse(got_in);

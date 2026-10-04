@@ -3,6 +3,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <string>
 #include <vector>
@@ -198,6 +199,10 @@ public:
   int set_fp8(bool enabled);
   void set_fp8_recipe(Fp8Recipe recipe);
   int num_linears();
+
+  // Called in forward before a stage's parameters are first read: -1 the embeddings, i block i, n_layer the
+  // lm_head (the trainer finishes the optimizer's in-flight all_gathers there).
+  std::function<void(int64_t stage)> before_stage;
 
   Transformer transformer{nullptr};
   Linear lm_head{nullptr};

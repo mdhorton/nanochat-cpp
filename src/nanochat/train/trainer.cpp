@@ -204,6 +204,7 @@ nlohmann::json options_to_json(const TrainOptions& o) {
         {"gemm", o.gemm},
         {"fused", o.fused},
         {"muon_fused", o.muon_fused},
+        {"gather_overlap", o.gather_overlap},
         {"num_iterations", o.num_iterations},
         {"target_flops", o.target_flops},
         {"target_param_data_ratio", o.target_param_data_ratio},
@@ -225,6 +226,12 @@ nlohmann::json options_to_json(const TrainOptions& o) {
         {"save_every", o.save_every},
         {"run", o.run},
         {"wandb", o.wandb}};
+}
+
+// Waits for this thread's stream only (torch::cuda::synchronize also waits for NCCL's, where the optimizer's
+// all_gathers may still run).
+void sync_stream() {
+  at::cuda::getCurrentCUDAStream().synchronize();
 }
 
 double seconds_since(std::chrono::steady_clock::time_point t0) {
@@ -466,9 +473,26 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
   optimizer.set_fused_muon(o.muon_fused);
   if (o.muon_fused)
     print("Muon update: fused kernels");
+  optimizer.set_gather_overlap(o.gather_overlap);
   if (resuming) {
     optimizer.load_state_dict(ckpt->optimizer, ckpt->optimizer_metadata);
     ckpt->optimizer.clear();
+  }
+  if (o.gather_overlap && o.world_size > 1) {
+    print(std::format(
+          "Gather overlap: {} param all_gathers per step finish in the next forward", optimizer.num_gathers()));
+    // the params each forward stage reads first: the embeddings, then block i
+    std::vector<std::vector<torch::Tensor>> stage_params{model->transformer->wte->parameters()};
+    for (const auto& p : model->value_embeds->parameters())
+      stage_params[0].push_back(p);
+    for (const auto& block : *model->transformer->h)
+      stage_params.push_back(block->parameters());
+    model->before_stage = [&optimizer, stage_params = std::move(stage_params)](int64_t stage) {
+      if (const auto s = static_cast<size_t>(stage + 1); s < stage_params.size())
+        optimizer.sync(stage_params[s]);
+      else
+        optimizer.sync(); // lm_head, and whatever is left: backward needs them all done
+    };
   }
 
   const auto data_dir = o.base_dir / "base_data_climbmix";
@@ -511,6 +535,7 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
 
     // -1: final step only (Python: never), 0: never
     if ((o.eval_every != 0 && last_step) || (o.eval_every > 0 && step % o.eval_every == 0)) {
+      optimizer.sync();
       DataLoaderOptions val_opts{.rank = o.rank, .world_size = o.world_size};
       val_opts.device = device;
       DataLoader val_loader(tokenizer, o.device_batch_size, o.max_seq_len, Split::Val, data_dir, val_opts);
@@ -537,6 +562,7 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
     // save at the end, or every save_every steps (except the first step or the resume step)
     if (o.save &&
         (last_step || (step > 0 && step != o.resume_from_step && o.save_every > 0 && step % o.save_every == 0))) {
+      optimizer.sync();
       const auto& ls = train_loader.state();
       const nlohmann::json meta = {
             {"step", step},
@@ -568,7 +594,7 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
 
     // one optimization step
     NvtxRange step_range(std::format("step {}", step));
-    torch::cuda::synchronize();
+    sync_stream();
     const auto t0 = std::chrono::steady_clock::now();
     torch::Tensor train_loss;
     for (int64_t micro_step = 0; micro_step < plan.rank_accum_steps; ++micro_step) {
@@ -602,7 +628,7 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
     }
     optimizer.zero_grad();
     const auto train_loss_f = train_loss.item<double>(); // CPU-GPU sync
-    torch::cuda::synchronize();
+    sync_stream(); // gather overlap: the gathers still in flight count in the next step
     const double dt = seconds_since(t0);
 
     // logging
@@ -640,6 +666,8 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
       callbacks.on_step({step, train_loss_f, lrm, dt});
     ++step;
   }
+  optimizer.sync();
+  model->before_stage = nullptr;
   if (metrics)
     metrics->log({{"step", step}, {"event", "end"}}); // resuming drops it with the steps >= resume step
 

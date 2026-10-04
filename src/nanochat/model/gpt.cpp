@@ -389,6 +389,8 @@ torch::Tensor GPTImpl::forward(
   if (T < 2)
     throw std::invalid_argument("training forward needs T > 1");
   auto cos = cos_.index({Slice(), Slice(None, T)}), sin = sin_.index({Slice(), Slice(None, T)});
+  if (before_stage)
+    before_stage(-1);
 
   // fused: all tables looked up at once, their gradients accumulated straight into .grad (embedding.h)
   torch::Tensor emb;
@@ -427,6 +429,8 @@ torch::Tensor GPTImpl::forward(
   torch::Tensor pending; // fused: the previous block's MLP output, added to x by the next residual_norm
   const auto x0_grad = c10::make_intrusive<X0Grad>();
   for (int64_t i = 0; i < config_.n_layer; ++i) {
+    if (before_stage)
+      before_stage(i);
     torch::Tensor ve = ves[i];
     if (const auto key = std::to_string(i); !fused_ && value_embeds->contains(key))
       ve = value_embeds[key]->as<EmbeddingImpl>()->forward(idx).to(x.scalar_type());
@@ -471,6 +475,8 @@ torch::Tensor GPTImpl::forward(
     x = x - lambda_b * x_backout;
   }
   x = rms_norm(x);
+  if (before_stage)
+    before_stage(config_.n_layer);
 
   const double softcap = 15;
   if (targets.defined() && loss_chunk_rows_ > 0) {

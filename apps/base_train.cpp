@@ -35,6 +35,9 @@ static int run(int argc, char** argv) {
   o.fused = flags.boolean("fused", o.fused, "fused elementwise CUDA kernels (false = op by op, as Python)");
   o.muon_fused = flags.boolean(
         "muon-fused", o.muon_fused, "Muon's update in fused CUDA kernels (not bit-identical to Python's op path)");
+  o.gather_overlap = flags.boolean(
+        "gather-overlap", o.gather_overlap,
+        "several GPUs: the optimizer's param all_gathers overlap the next forward (false = finish them in the step)");
   o.cublaslt_workspace_mb = flags.i64(
         "cublaslt-workspace-mb", o.cublaslt_workspace_mb,
         "cuBLASLt workspace in MB; split-K GEMMs need a few (<= 0 = torch's 1 MB default)");

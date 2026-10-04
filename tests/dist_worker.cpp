@@ -20,6 +20,7 @@ static int run(int argc, char** argv) {
   const auto nproc = static_cast<int>(flags.i64("nproc", 2, "number of GPUs"));
   const auto rank = static_cast<int>(flags.i64("rank", -1, "internal: set by the launcher"));
   const auto master_port = static_cast<int>(flags.i64("master-port", 29500, "rendezvous port"));
+  const auto gather_overlap = flags.boolean("gather-overlap", true, "param all_gathers overlap the next forward");
   flags.done();
   if (rank < 0)
     return launch_ranks({argv + 1, argv + argc}, nproc);
@@ -37,6 +38,7 @@ static int run(int argc, char** argv) {
   o.rank = rank;
   o.world_size = nproc;
   o.master_port = master_port;
+  o.gather_overlap = gather_overlap;
 
   std::vector<double> losses;
   std::map<std::string, double> evals;
