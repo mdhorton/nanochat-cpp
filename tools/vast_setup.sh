@@ -8,7 +8,6 @@ if ! command -v pixi >/dev/null 2>&1; then
 fi
 
 mkdir external
-(cd external && git clone https://github.com/NVIDIA/cutlass.git)
 (cd external && git clone https://github.com/karpathy/nanochat.git)
 
 pixi install

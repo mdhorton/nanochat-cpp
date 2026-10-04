@@ -53,6 +53,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/linux-64/cuda-nvcc_linux-64-13.2.86-hb2fc203_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/cuda-nvvm-impl-13.2.86-h4bc722e_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/cuda-nvvm-tools-13.2.86-h4bc722e_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/linux-64/cutlass-4.8.0-h345135a_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/cxx-compiler-2.0.0-hdab9b82_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/gcc-15.3.0-hc6a0c74_7.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/gcc_impl_linux-64-15.3.0-h6ad849d_7.conda
@@ -818,6 +819,17 @@ packages:
   run_exports: {}
   size: 25989670
   timestamp: 1784315182292
+- conda: https://conda.anaconda.org/conda-forge/linux-64/cutlass-4.8.0-h345135a_0.conda
+  sha256: f8bcc7605f5dbc3e8caa8e9f41b31bd16f882c1e419c781ab64f3de677e73fa1
+  md5: 1a008893b4106b3f4e54daf9f269161e
+  depends:
+  - __glibc >=2.28,<3.0.a0
+  license: BSD-3-Clause
+  license_family: BSD
+  purls: []
+  run_exports: {}
+  size: 1333815
+  timestamp: 1790085292184
 - conda: https://conda.anaconda.org/conda-forge/linux-64/cxx-compiler-2.0.0-hdab9b82_0.conda
   sha256: 384ab445d260e0d69e701c32eb0ed870d348ec7e3efc78d944823855d4512ca1
   md5: 923dacbfd97122c65c97a35f6e959ab8

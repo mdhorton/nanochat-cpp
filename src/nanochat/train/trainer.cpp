@@ -221,6 +221,7 @@ nlohmann::json options_to_json(const TrainOptions& o) {
         {"resume_from_step", o.resume_from_step},
         {"eval_every", o.eval_every},
         {"eval_tokens", o.eval_tokens},
+        {"final_eval_tokens", o.final_eval_tokens},
         {"save_every", o.save_every},
         {"run", o.run},
         {"wandb", o.wandb}};
@@ -228,6 +229,14 @@ nlohmann::json options_to_json(const TrainOptions& o) {
 
 double seconds_since(std::chrono::steady_clock::time_point t0) {
   return std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+}
+
+// MM:SS.ss, or H:MM:SS.ss from an hour on
+std::string mm_ss(double seconds) {
+  const auto cs = static_cast<int64_t>(std::nearbyint(std::max(seconds, 0.0) * 100));
+  const int64_t h = cs / 360000, m = cs / 6000 % 60, sec = cs / 100 % 60, frac = cs % 100;
+  return h > 0 ? std::format("{}:{:02d}:{:02d}.{:02d}", h, m, sec, frac)
+               : std::format("{:02d}:{:02d}.{:02d}", m, sec, frac);
 }
 
 // NVTX range for nsys timelines (no-op without a profiler)
@@ -505,7 +514,8 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
       DataLoaderOptions val_opts{.rank = o.rank, .world_size = o.world_size};
       val_opts.device = device;
       DataLoader val_loader(tokenizer, o.device_batch_size, o.max_seq_len, Split::Val, data_dir, val_opts);
-      const int64_t eval_steps = o.eval_tokens / (o.device_batch_size * o.max_seq_len * o.world_size);
+      const int64_t eval_steps = (last_step ? o.final_eval_tokens : o.eval_tokens) /
+                                 (o.device_batch_size * o.max_seq_len * o.world_size);
       model->set_fp8(false); // evaluate in bf16, as disable_fp8
       {
         NvtxRange range("eval");
@@ -608,15 +618,13 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
       total_training_time += dt; // only count the time after the first 10 steps
     std::string eta;
     if (const int64_t steps_done = step - 10; steps_done > 0)
-      eta = std::format(
-            " | eta: {:.1f}m",
-            static_cast<double>(N - step) * (total_training_time / static_cast<double>(steps_done)) / 60);
+      eta = " | eta: " + mm_ss(static_cast<double>(N - step) * (total_training_time / static_cast<double>(steps_done)));
     const auto& ls = train_loader.state();
     print(std::format(
           "step {:05d}/{:05d} ({:.2f}%) | loss: {:.6f} | lrm: {:.2f} | dt: {:.2f}ms | tok/sec: {} | "
-          "bf16_mfu: {:.2f} | epoch: {} pq: {} rg: {} | total time: {:.2f}m{}",
+          "bf16_mfu: {:.2f} | epoch: {} pq: {} rg: {} | total time: {}{}",
           step, N, pct_done, debiased, lrm, dt * 1000, with_commas(tok_per_sec), mfu, ls.epoch, ls.pq_idx, ls.rg_idx,
-          total_training_time / 60, eta));
+          mm_ss(total_training_time), eta));
     if (metrics)
       metrics->log(
             {{"step", step},

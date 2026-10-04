@@ -67,7 +67,9 @@ static int run(int argc, char** argv) {
   // evaluation and output
   o.eval_every = flags.i64(
         "eval-every", o.eval_every, "evaluate val bpb every N steps and at the end (-1 = end only, 0 = never)");
-  o.eval_tokens = flags.i64("eval-tokens", o.eval_tokens, "tokens to evaluate val bpb on");
+  o.eval_tokens = flags.i64("eval-tokens", o.eval_tokens, "tokens to evaluate val bpb on during training");
+  o.final_eval_tokens = flags.i64(
+        "final-eval-tokens", o.final_eval_tokens, "tokens to evaluate val bpb on at the end of training");
   o.profile_start = flags.i64(
         "profile-start", o.profile_start, "first step in the NVTX range 'profile', for nsys --nvtx-capture (-1 = off)");
   o.profile_steps = flags.i64("profile-steps", o.profile_steps, "number of steps captured");

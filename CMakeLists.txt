@@ -4,11 +4,13 @@ project(nanochat_cpp LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF) 
 
 find_package(PkgConfig REQUIRED)
 find_package(Arrow REQUIRED)
 find_package(Parquet REQUIRED)
 find_package(nlohmann_json REQUIRED)
+find_package(NvidiaCutlass REQUIRED) # headers only
 find_package(Threads REQUIRED)
 pkg_check_modules(PCRE2 REQUIRED IMPORTED_TARGET libpcre2-8)
 
@@ -95,11 +97,13 @@ target_link_libraries(nanochat_train PUBLIC nanochat ${TORCH_LIBRARIES} "${TORCH
 # ATen/cuda headers need the CUDA library headers (cuBLAS, cuSPARSE, ...), which come with the NVIDIA wheels
 target_include_directories(nanochat_train SYSTEM PUBLIC "${TORCH_DIR}/../nvidia/cu13/include")
 target_include_directories(nanochat_train SYSTEM PRIVATE "${TORCH_DIR}/../nvidia/nccl/include") # ProcessGroupNCCL
-# CUTLASS (headers only)
-target_include_directories(nanochat_train SYSTEM PRIVATE
-        "${PROJECT_SOURCE_DIR}/external/cutlass/include" "${PROJECT_SOURCE_DIR}/external/cutlass/tools/util/include")
-# warn on register spills; -lineinfo: source lines in ncu (no codegen change)
-target_compile_options(nanochat_train PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Xptxas=-warn-spills -lineinfo>)
+target_link_libraries(nanochat_train PRIVATE nvidia::cutlass::cutlass nvidia::cutlass::tools::util)
+# -lineinfo: source lines in ncu (no codegen change)
+target_compile_options(nanochat_train PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-lineinfo>)
+option(NANOCHAT_WARN_SPILLS "warn on register spills (pixi run build --warn-spills)" OFF)
+if(NANOCHAT_WARN_SPILLS)
+    target_compile_options(nanochat_train PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Xptxas=-warn-spills>)
+endif()
 
 add_executable(tok_train apps/tok_train.cpp)
 target_link_libraries(tok_train PRIVATE nanochat)
