@@ -127,7 +127,7 @@ def main():
     p.add_argument("--max-bytes", default="128M")
     p.add_argument("--pair-bytes", default="64M", help="sendrecv size for the per-pair test")
     p.add_argument("--iters", type=int, default=20)
-    p.add_argument("--timeout", type=int, default=60, help="per-test seconds (P2P can hang)")
+    p.add_argument("--timeout", type=int, default=10, help="per-test seconds (P2P can hang)")
     p.add_argument("--tests", default="transport,channels,proto",
                    help="comma list of groups: transport,pairs,subsets,channels,proto; 'all' = every group")
     p.add_argument("--out", default=str(ROOT / "cache/nccl"))
