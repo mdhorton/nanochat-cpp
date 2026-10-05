@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 
-# nccl-tests sweep: transport (P2P level), channels, protocol; optional (--tests): per-pair links, leave-one-out rings
-# (slow: n*(n-1)/2 + n runs, most of the time on 8 GPUs).
+# nccl-tests sweep: project (the NCCL env as-is), transport (P2P level), channels, protocol; optional (--tests):
+# per-pair links, leave-one-out rings (slow: n*(n-1)/2 + n runs, most of the time on 8 GPUs).
+# the project busbw (min avg busbw of all_gather and reduce_scatter, ZeRO-2's collectives) is printed last and written
+# to --result.
 # build first with tools/build_nccl_tests.sh. raw logs + summary.json go to --out.
 
 import argparse
@@ -128,16 +130,19 @@ def main():
     p.add_argument("--pair-bytes", default="64M", help="sendrecv size for the per-pair test")
     p.add_argument("--iters", type=int, default=20)
     p.add_argument("--timeout", type=int, default=20, help="per-test seconds (P2P can hang)")
-    p.add_argument("--tests", default="transport,channels,proto",
-                   help="comma list of groups: transport,pairs,subsets,channels,proto; 'all' = every group")
+    p.add_argument("--tests", default="project,transport,channels,proto",
+                   help="comma list of groups: project,transport,pairs,subsets,channels,proto; 'all' = every group")
+    p.add_argument("--result", help="write the project busbw (GB/s) to this file; not written if it fails")
     p.add_argument("--out", default=str(ROOT / "cache/nccl"))
     p.add_argument("--keep-rows", action="store_true", help="keep per-size rows in summary.json")
     p.add_argument("--force", action="store_true", help="run even if the GPUs look busy")
     p.add_argument("--dry-run", action="store_true", help="print the tests only")
     a = p.parse_args()
+    if a.result:
+        Path(a.result).unlink(missing_ok=True)  # no stale value if this run fails
 
     gpus = [int(g) for g in a.gpus.split(",")] if a.gpus else list(range(gpu_count()))
-    groups = {"transport", "pairs", "subsets", "channels", "proto"}
+    groups = {"project", "transport", "pairs", "subsets", "channels", "proto"}
     tests = groups if a.tests == "all" else set(filter(None, a.tests.split(",")))
     if tests - groups:
         sys.exit(f"unknown --tests: {','.join(sorted(tests - groups))}")
@@ -154,6 +159,14 @@ def main():
         b.out.joinpath("topo.txt").write_text(sh(["nvidia-smi", "topo", "-m"]))
         print(sh(["nvidia-smi", "topo", "-m"]))
     print("env:", " ".join(f"{k}={v}" for k, v in sorted(os.environ.items()) if k.startswith("NCCL_") and k != "NCCL_VERSION") or "-")
+
+    # 0. project: the NCCL env as-is (pixi.toml's), training's collectives, all GPUs.
+    project = {}
+    if "project" in tests:
+        for test in ("all_gather", "reduce_scatter"):
+            r = b.run("project", test, test, gpus)
+            project[test] = r["avg_busbw"] if r and r["status"] == "ok" and not r["wrong"] else None
+    project_busbw = min(project.values()) if project and None not in project.values() else None
 
     # 1. transport: each P2P level x collective, all GPUs.
     links = {}
@@ -209,10 +222,15 @@ def main():
         for i, l in sorted(links.items()):
             print(f"  gpu{i} {l['bus']}: gen {l['gen']}/{l['gen_max']} x{l['width']}/{l['width_max']}")
     nccl = next((r["nccl"] for r in b.results if r["nccl"]), None)
-    summary = {"nccl": nccl, "gpus": gpus, "p2p_level": lvl, "pcie": links, "results": b.results,
+    summary = {"nccl": nccl, "gpus": gpus, "p2p_level": lvl, "project_busbw": project_busbw, "pcie": links,
+               "results": b.results,
                "env": {k: v for k, v in os.environ.items() if k.startswith("NCCL_") and k != "NCCL_VERSION"}}
     (b.out / "summary.json").write_text(json.dumps(summary, indent=1))
     print(f"\nNCCL {nccl}; busbw in GB/s; logs + summary.json in {b.out}")
+    if "project" in tests:
+        print(f"project busbw: {project_busbw:.2f} GB/s" if project_busbw is not None else "project busbw: failed")
+    if a.result and project_busbw is not None:
+        Path(a.result).write_text(f"{project_busbw:.2f}\n")
 
 
 if __name__ == "__main__":
