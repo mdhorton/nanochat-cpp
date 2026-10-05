@@ -496,6 +496,10 @@ void MuonAdamW::compute_adamw(size_t group_index, Pending& pending, std::vector<
           beta1_t, beta2_t, eps_t, wd_t);
     if (!pending.sharded[j])
       continue;
+    // the grad and its reduced slice are used up: free them for the rest of step() (the work can hold them too)
+    pending.works[j] = {};
+    pending.grads[j] = torch::Tensor();
+    p.mutable_grad().reset();
     if (gather_overlap_ && group.gather_last)
       last.push_back(group_gathers_[group_index][j]);
     else
@@ -520,6 +524,10 @@ torch::Tensor MuonAdamW::compute_muon(size_t group_index, Pending& pending) {
   }
   const int64_t red_dim = m >= n ? -1 : -2;
   const auto grads = pending.grads[0].to(params[0].scalar_type()); // bf16 reduce: back to the params' fp32
+  // the reduce is done: free its bf16 stack and chunk for the rest of step() (the works can hold them too)
+  pending.works.clear();
+  pending.grads.clear();
+  pending.bf16 = torch::Tensor();
 
   // this rank updates the params of its first num_owned rows
   const auto rows = owned_rows(group_index);
