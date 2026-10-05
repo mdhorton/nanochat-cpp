@@ -100,7 +100,7 @@ private:
     std::vector<Dist::Work> works;    // AdamW: per param; Muon: per segment
     std::vector<torch::Tensor> grads; // AdamW: this rank's grad (slice); Muon: the owned chunk
     std::vector<bool> sharded;        // AdamW: reduce_scattered (else all_reduced)
-    torch::Tensor bf16;               // Muon bf16 reduce: the stack's bf16 copy (then free for the gather)
+    torch::Tensor bf16;               // Muon bf16 reduce: the stack's bf16 copy, alive until the reduce is done
     int64_t chunk_size = 0;
   };
 
@@ -111,9 +111,9 @@ private:
     int64_t offset = 0;         // Muon: the segment's start in a rank's chunk
     Dist::Work work;
     torch::Tensor src;    // Muon: this rank's updated chunk, alive until the gather is done
-    torch::Tensor dst;    // Muon bf16 gather: the group's gathered updates (else the grad stack takes the params)
+    torch::Tensor dst;    // Muon bf16 gather: the gathered updates, in the grad stack's bytes (else: the params)
     bool pending = false; // launched, not finished
-    bool zero = false;    // Muon: zero_grad() came first, so finish() zeroes the rows
+    bool zero = false;    // Muon: zero_grad() came first, so finish() zeroes the rows (bf16 gather: the last one, all)
   };
 
   void layout();

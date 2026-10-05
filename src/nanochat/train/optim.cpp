@@ -182,6 +182,11 @@ void muon_update_fused(
     t.unsafeGetTensorImpl()->bump_version();
 }
 
+// The first half of an fp32 stack's bytes as a bf16 stack of the same shape: bf16 row j lies in fp32 row j / 2.
+torch::Tensor bf16_alias(const torch::Tensor& stack) {
+  return stack.view(torch::kBFloat16).flatten().narrow(0, 0, stack.numel()).view(stack.sizes());
+}
+
 } // namespace
 
 MuonAdamW::MuonAdamW(std::vector<OptimGroup> groups, Dist* dist)
@@ -292,13 +297,17 @@ void MuonAdamW::zero_grad() {
     }
     if (group_gathers_[i].empty())
       muon_grads_[i].zero_();
-    for (const size_t gi : group_gathers_[i]) { // an in-flight gather into the stack: finish() zeroes its rows
+    // an in-flight gather into the stack: finish() zeroes its rows. bf16 gather: the updates in flight span the
+    // stack's bytes, so none are zeroed here and the group's last finish() zeroes the whole stack.
+    bool whole = false;
+    for (const size_t gi : group_gathers_[i]) {
       auto& g = gathers_[gi];
-      if (g.pending && !g.dst.defined())
-        g.zero = true;
-      else
-        muon_grads_[i].slice(0, g.begin, g.end).zero_();
+      g.zero = g.pending;
+      whole = whole || (g.pending && g.dst.defined());
     }
+    for (const size_t gi : group_gathers_[i])
+      if (const auto& g = gathers_[gi]; !g.pending && !whole)
+        muon_grads_[i].slice(0, g.begin, g.end).zero_();
     for (size_t j = 0; j < params.size(); ++j)
       params[j].mutable_grad() = muon_grads_[i][static_cast<int64_t>(j)];
   }
@@ -322,10 +331,8 @@ void MuonAdamW::step() {
       continue;
     }
     updated[i] = compute_muon(i, pending[i]);
-    if (muon_bf16_gather_) // the reduce's bf16 stack is free again
-      dst[i] = pending[i].bf16.defined()
-                     ? pending[i].bf16
-                     : torch::empty_like(muon_grads_[i], muon_grads_[i].options().dtype(torch::kBFloat16));
+    if (muon_bf16_gather_) // the grads are reduced: the gathered updates go in the grad stack's bytes
+      dst[i] = bf16_alias(muon_grads_[i]);
     if (!gather_overlap_)
       for (const size_t gi : group_gathers_[i])
         launch(gi, updated[i], dst[i]);
@@ -374,9 +381,12 @@ void MuonAdamW::finish(Gather& g) {
         params[static_cast<size_t>(j)].add_(g.dst[j]);
       else
         params[static_cast<size_t>(j)].copy_(stacked[j]);
-    g.dst = torch::Tensor();
-    if (g.zero)
+    g.pending = false;
+    if (g.zero && !g.dst.defined())
       stacked.slice(0, g.begin, g.end).zero_();
+    else if (g.zero && std::ranges::none_of(group_gathers_[g.group], [&](size_t gi) { return gathers_[gi].pending; }))
+      stacked.zero_(); // bf16 gather (see zero_grad): the group's last gather is done
+    g.dst = torch::Tensor();
   }
   g.pending = g.zero = false;
   --num_pending_;
