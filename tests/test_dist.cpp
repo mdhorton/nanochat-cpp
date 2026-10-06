@@ -25,13 +25,13 @@ static std::string run_worker(const fs::path& golden, const std::string& tag, co
 }
 
 // The all_gathers finished in the next forward (and the Muon state striped for it) change no bit.
-TEST(DistGolden, GatherOverlapIsExact) {
+static void expect_overlap_exact(const std::string& args) {
   const auto golden = test_env().golden_dir / "train" / "train_ddp2.json";
   if (!fs::exists(golden))
     GTEST_SKIP() << "missing " << golden << " (pixi run export-train-golden-ddp)";
   if (torch::cuda::device_count() < 2)
     GTEST_SKIP() << "needs 2 GPUs";
-  const auto on = run_worker(golden, "_on"), off = run_worker(golden, "_off", " --gather-overlap=false");
+  const auto on = run_worker(golden, "_on", args), off = run_worker(golden, "_off", args + " --gather-overlap=false");
   const auto got = safetensors::load(on + ".safetensors", torch::kCPU);
   const auto want = safetensors::load(off + ".safetensors", torch::kCPU);
   ASSERT_EQ(got.size(), want.size());
@@ -41,6 +41,15 @@ TEST(DistGolden, GatherOverlapIsExact) {
     fs::remove(prefix + ".json");
     fs::remove(prefix + ".safetensors");
   }
+}
+
+TEST(DistGolden, GatherOverlapIsExact) {
+  expect_overlap_exact("");
+}
+
+// The bf16 gather lands in the grad stack's bytes: with overlap, the last finish() zeroes the stack
+TEST(DistGolden, GatherOverlapIsExactMuonBf16) {
+  expect_overlap_exact(" --muon-bf16");
 }
 
 // Muon's reduce and gather in bf16: the ranks stay bit-identical replicas, and training still works.
