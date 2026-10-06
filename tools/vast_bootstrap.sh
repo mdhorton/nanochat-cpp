@@ -12,7 +12,7 @@ usage() {
   echo "usage: $0 [--dry-run] [--branch NAME] [--min-bus-bw GB/s] [ssh] [-p PORT] [USER@]HOST [-L ...]" >&2
   echo "  --dry-run    print the ssh commands instead of running them" >&2
   echo "  --branch     git branch to run (default overlap)" >&2
-  echo "  --min-bus-bw log out below this NCCL Bus BW (default by PCIe gen: 4 → 15, 5 → 27)" >&2
+  echo "  --min-bus-bw stop before tok-train below this NCCL Bus BW (default by PCIe gen: 4 → 15, 5 → 27)" >&2
   exit 2
 }
 

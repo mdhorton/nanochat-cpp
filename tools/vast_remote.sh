@@ -2,7 +2,7 @@
 
 # runs on a fresh vast.ai instance; copied there and started by tools/vast_bootstrap.sh. disables vast's python venv,
 # installs pixi, clones /workspace/nanochat-cpp, switches to --branch. with > 1 GPU, runs `pixi run nccl-bench` and
-# exits if the busbw is below --min-bus-bw (default by PCIe gen: 4 → 15, 5 → 27 GB/s). then runs
+# skips the rest if the busbw is below --min-bus-bw (default by PCIe gen: 4 → 15, 5 → 27 GB/s). then runs
 # `pixi run tok-train` and `pixi run quick-d12`, and hands over an interactive login shell in the repo.
 
 set -uo pipefail
@@ -55,8 +55,9 @@ if ((gpus > 1)); then
   pixi run nccl-bench --result cache/nccl/busbw --force || echo "nccl-bench failed ($?)"
   busbw=$(cat cache/nccl/busbw 2>/dev/null || echo 0)
   if awk -v bw="$busbw" -v min="$min_busbw" 'BEGIN { exit !(bw < min) }'; then
-    echo "== NCCL Bus BW $busbw GB/s is below $min_busbw GB/s: this host is too slow, logging out"
-    exit 1
+    echo "== NCCL Bus BW $busbw GB/s is below $min_busbw GB/s: this host is too slow"
+    echo "== run the following to continue: pixi run tok-train"
+    NANOCHAT_CD=$PWD exec bash -l
   fi
   echo "== NCCL Bus BW $busbw GB/s"
 else
