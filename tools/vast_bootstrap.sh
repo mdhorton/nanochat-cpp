@@ -9,10 +9,10 @@
 set -euo pipefail
 
 usage() {
-  echo "usage: $0 [--dry-run] [--branch NAME] [--min-busbw GB/s] [ssh] [-p PORT] [USER@]HOST [-L ...]" >&2
-  echo "  --dry-run   print the ssh commands instead of running them" >&2
-  echo "  --branch    git branch to run (default overlap)" >&2
-  echo "  --min-busbw log out below this NCCL busbw (default by PCIe gen: 4 → 15, 5 → 27)" >&2
+  echo "usage: $0 [--dry-run] [--branch NAME] [--min-bus-bw GB/s] [ssh] [-p PORT] [USER@]HOST [-L ...]" >&2
+  echo "  --dry-run    print the ssh commands instead of running them" >&2
+  echo "  --branch     git branch to run (default overlap)" >&2
+  echo "  --min-bus-bw log out below this NCCL Bus BW (default by PCIe gen: 4 → 15, 5 → 27)" >&2
   exit 2
 }
 
@@ -23,8 +23,8 @@ while (($#)); do
     --dry-run) dry_run=1 ;;
     --branch) branch=${2:?--branch needs a name}; shift ;;
     --branch=*) branch=${1#*=} ;;
-    --min-busbw) min_busbw=${2:?--min-busbw needs a value}; shift ;;
-    --min-busbw=*) min_busbw=${1#*=} ;;
+    --min-bus-bw) min_busbw=${2:?--min-bus-bw needs a value}; shift ;;
+    --min-bus-bw=*) min_busbw=${1#*=} ;;
     -h | --help) usage ;;
     ssh) ;;
     -p) port=${2:?-p needs a port}; shift ;;
@@ -44,7 +44,7 @@ dest=$user@$host
 remote=$(dirname "$0")/vast_remote.sh
 # the first login (no tty) creates ~/.no_auto_tmux, so vast's auto-tmux is off by the second (tty) login
 copy='touch ~/.no_auto_tmux && cat > vast_remote.sh'
-run=(bash vast_remote.sh --branch "$branch" ${min_busbw:+--min-busbw "$min_busbw"})
+run=(bash vast_remote.sh --branch "$branch" ${min_busbw:+--min-bus-bw "$min_busbw"})
 
 if ((dry_run)); then
   printf '%q ' ssh "${opts[@]}" "$dest" "$copy"; printf '< %q\n' "$remote"
