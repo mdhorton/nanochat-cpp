@@ -44,8 +44,8 @@ struct TrainOptions {
   double warmdown_ratio = 0.65, final_lr_frac = 0.05;
   int64_t resume_from_step = -1;
   // evaluation and checkpoints
-  // eval_tokens: during training; final_eval_tokens: the last step's eval (Python: 80 * 524288 for both)
-  int64_t eval_every = 250, eval_tokens = 4194304, final_eval_tokens = 80 * 524288, save_every = -1;
+  // eval_tokens: during training; final_eval_tokens: the last step's eval (both match Python's default)
+  int64_t eval_every = 250, eval_tokens = 80 * 524288, final_eval_tokens = 80 * 524288, save_every = -1;
   bool save = true; // save at the end (and every save_every)
   // run name: checkpoint dir and wandb name; metrics go to <base_dir>/metrics/<run>/metrics-<timestamp>.jsonl.
   // "dummy" (as base_train.py): checkpoint dir d<depth>, no metrics
