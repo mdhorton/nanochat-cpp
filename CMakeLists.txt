@@ -100,6 +100,13 @@ target_include_directories(nanochat_train SYSTEM PRIVATE "${TORCH_DIR}/../nvidia
 target_link_libraries(nanochat_train PRIVATE nvidia::cutlass::cutlass nvidia::cutlass::tools::util)
 # -lineinfo: source lines in ncu (no codegen change)
 target_compile_options(nanochat_train PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-lineinfo>)
+# git commit, branch and dirty flag for the metrics header, refreshed every build
+set(GIT_INFO_H "${CMAKE_BINARY_DIR}/generated/nanochat/git_info.h")
+add_custom_target(git_info
+        COMMAND ${CMAKE_COMMAND} -DSRC=${PROJECT_SOURCE_DIR} -DOUT=${GIT_INFO_H} -P ${PROJECT_SOURCE_DIR}/cmake/git_info.cmake
+        BYPRODUCTS ${GIT_INFO_H})
+add_dependencies(nanochat_train git_info)
+target_include_directories(nanochat_train PRIVATE "${CMAKE_BINARY_DIR}/generated")
 option(NANOCHAT_WARN_SPILLS "warn on register spills (pixi run build --warn-spills)" OFF)
 if(NANOCHAT_WARN_SPILLS)
     target_compile_options(nanochat_train PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Xptxas=-warn-spills>)

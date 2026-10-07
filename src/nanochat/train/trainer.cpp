@@ -17,9 +17,12 @@
 
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <cuda_runtime_api.h>
 #include <nvtx3/nvToolsExt.h>
+#include <torch/version.h>
 
 #include "nanochat/common.h"
+#include "nanochat/git_info.h"
 #include "nanochat/model/mx_gemm.h"
 #include "nanochat/tokenizer/tokenizer.h"
 #include "nanochat/train/checkpoint.h"
@@ -228,6 +231,33 @@ nlohmann::json options_to_json(const TrainOptions& o) {
         {"save_every", o.save_every},
         {"run", o.run},
         {"wandb", o.wandb}};
+}
+
+// CUDA version as "major.minor" (e.g. 13000 -> "13.0")
+std::string cuda_version(cudaError_t (*get)(int*)) {
+  int v = 0;
+  if (get(&v) != cudaSuccess)
+    return "unknown";
+  return std::format("{}.{}", v / 1000, v % 1000 / 10);
+}
+
+// Loaded kernel driver version (e.g. "580.82.07")
+std::string driver_version() {
+  std::ifstream in("/sys/module/nvidia/version");
+  std::string v;
+  return std::getline(in, v) && !v.empty() ? v : "unknown";
+}
+
+// build (git, libraries) and host (driver) versions
+nlohmann::json env_to_json() {
+  return {
+        {"git_commit", NANOCHAT_GIT_COMMIT},
+        {"git_branch", NANOCHAT_GIT_BRANCH},
+        {"git_dirty", NANOCHAT_GIT_DIRTY}, // uncommitted tracked changes at build time
+        {"driver", driver_version()},
+        {"cuda_runtime", cuda_version(cudaRuntimeGetVersion)},
+        {"cuda_driver", cuda_version(cudaDriverGetVersion)}, // highest CUDA the driver supports
+        {"torch", TORCH_VERSION}};
 }
 
 // Waits for this thread's stream only (torch::cuda::synchronize also waits for NCCL's, where the optimizer's
@@ -448,6 +478,7 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
                 {"model_config", config_to_json(config)},
                 {"world_size", o.world_size},
                 {"device_name", device_name},
+                {"env_config", env_to_json()},
                 {"num_scaling_params", plan.num_scaling_params},
                 {"num_iterations", plan.num_iterations},
                 {"total_batch_size", plan.total_batch_size}},
