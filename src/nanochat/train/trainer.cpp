@@ -248,12 +248,10 @@ std::string driver_version() {
   return std::getline(in, v) && !v.empty() ? v : "unknown";
 }
 
-// build (git, libraries) and host (driver) versions
+// build (git branch, libraries) and host (driver) versions
 nlohmann::json env_to_json() {
   return {
-        {"git_commit", NANOCHAT_GIT_COMMIT},
         {"git_branch", NANOCHAT_GIT_BRANCH},
-        {"git_dirty", NANOCHAT_GIT_DIRTY}, // uncommitted tracked changes at build time
         {"driver", driver_version()},
         {"cuda_runtime", cuda_version(cudaRuntimeGetVersion)},
         {"cuda_driver", cuda_version(cudaDriverGetVersion)}, // highest CUDA the driver supports
