@@ -4,7 +4,7 @@
 #include <fstream>
 #include <nlohmann/json.hpp>
 
-#include "nanochat/train/safetensors.h"
+#include "nanochat/safetensors.h"
 #include "nanochat/train/trainer.h"
 #include "test_env.h"
 #include "train_golden.h"

@@ -2,7 +2,7 @@
 #include <gtest/gtest.h>
 
 #include "nanochat/model/gpt.h"
-#include "nanochat/model/residual_norm.h"
+#include "nanochat/model/ops/residual_norm.h"
 
 using namespace nanochat;
 

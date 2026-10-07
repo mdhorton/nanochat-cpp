@@ -6,8 +6,8 @@
 
 #include <torch/torch.h>
 
+#include "nanochat/data/dataloader.h"
 #include "nanochat/model/gpt.h"
-#include "nanochat/train/dataloader.h"
 #include "nanochat/train/dist.h"
 
 namespace nanochat {

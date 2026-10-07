@@ -3,11 +3,11 @@
 
 #include <ATen/cuda/CUDAContext.h>
 
-#include "nanochat/model/fp8.h"
-#include "nanochat/model/fp8_kernel.h"
+#include "nanochat/model/fp8/fp8.h"
+#include "nanochat/model/fp8/fp8_kernel.h"
+#include "nanochat/model/fp8/mx_gemm.h"
+#include "nanochat/model/fp8/mx_gemm_kernel.h"
 #include "nanochat/model/gpt.h"
-#include "nanochat/model/mx_gemm.h"
-#include "nanochat/model/mx_gemm_kernel.h"
 
 using namespace nanochat;
 

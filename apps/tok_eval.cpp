@@ -6,7 +6,7 @@
 #include <vector>
 
 #include "nanochat/common.h"
-#include "nanochat/dataset.h"
+#include "nanochat/data/dataset.h"
 #include "nanochat/flags.h"
 #include "nanochat/tokenizer/tokenizer.h"
 #include "tok_eval_texts.h"

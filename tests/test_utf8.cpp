@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include "nanochat/tokenizer/utf8.h"
+#include "nanochat/utf8.h"
 
 using namespace nanochat;
 

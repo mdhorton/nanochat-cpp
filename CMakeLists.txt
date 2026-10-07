@@ -42,13 +42,13 @@ set_property(TARGET CUDA::cudart PROPERTY IMPORTED_LOCATION "${TORCH_DIR}/../nvi
 set(CMAKE_EXE_LINKER_FLAGS "-Wl,-rpath,${TORCH_DIR}/../nvidia/cu13/lib ${CMAKE_EXE_LINKER_FLAGS}")
 
 add_library(nanochat
-        src/nanochat/dataset.cpp
         src/nanochat/flags.cpp
+        src/nanochat/utf8.cpp
+        src/nanochat/data/dataset.cpp
         src/nanochat/tokenizer/base64.cpp
         src/nanochat/tokenizer/bpe.cpp
         src/nanochat/tokenizer/splitter.cpp
-        src/nanochat/tokenizer/tokenizer.cpp
-        src/nanochat/tokenizer/utf8.cpp)
+        src/nanochat/tokenizer/tokenizer.cpp)
 target_include_directories(nanochat PUBLIC src)
 target_compile_definitions(nanochat PUBLIC NANOCHAT_CACHE_DIR="${PROJECT_SOURCE_DIR}/cache")
 target_link_libraries(nanochat PUBLIC
@@ -56,42 +56,42 @@ target_link_libraries(nanochat PUBLIC
 
 # pre-training (libtorch)
 add_library(nanochat_train
-        src/nanochat/model/backout.cpp
-        src/nanochat/model/backout_kernel.cu
-        src/nanochat/model/embedding.cpp
-        src/nanochat/model/embedding_kernel.cu
-        src/nanochat/model/fp8.cpp
-        src/nanochat/model/flash.cpp
-        src/nanochat/model/flash_bwd_kernel.cu
-        src/nanochat/model/flash_bwd_mx_kernel.cu
-        src/nanochat/model/flash_kernel.cu
-        src/nanochat/model/fp8_kernel.cu
+        src/nanochat/safetensors.cpp
+        src/nanochat/data/dataloader.cpp
         src/nanochat/model/gpt.cpp
-        src/nanochat/model/mx_attention.cpp
-        src/nanochat/model/mx_attention_kernel.cu
-        src/nanochat/model/mx_flash.cpp
-        src/nanochat/model/mx_flash_kernel.cu
-        src/nanochat/model/mx_gemm.cpp
-        src/nanochat/model/mx_gemm_kernel.cu
-        src/nanochat/model/qkv_kernel.cu
-        src/nanochat/model/relu_square.cpp
-        src/nanochat/model/relu_square_kernel.cu
-        src/nanochat/model/residual_norm.cpp
-        src/nanochat/model/residual_norm_kernel.cu
-        src/nanochat/model/rotary_norm.cpp
-        src/nanochat/model/rotary_norm_kernel.cu
-        src/nanochat/model/smear.cpp
-        src/nanochat/model/smear_kernel.cu
-        src/nanochat/model/softcap_ce.cpp
-        src/nanochat/model/softcap_ce_kernel.cu
+        src/nanochat/model/attention/flash.cpp
+        src/nanochat/model/attention/flash_bwd_kernel.cu
+        src/nanochat/model/attention/flash_kernel.cu
+        src/nanochat/model/attention/mx_attention.cpp
+        src/nanochat/model/attention/mx_attention_kernel.cu
+        src/nanochat/model/attention/mx_flash.cpp
+        src/nanochat/model/attention/mx_flash_bwd_kernel.cu
+        src/nanochat/model/attention/mx_flash_kernel.cu
+        src/nanochat/model/attention/rotary_norm.cpp
+        src/nanochat/model/attention/rotary_norm_kernel.cu
+        src/nanochat/model/fp8/fp8.cpp
+        src/nanochat/model/fp8/fp8_kernel.cu
+        src/nanochat/model/fp8/mx_gemm.cpp
+        src/nanochat/model/fp8/mx_gemm_kernel.cu
+        src/nanochat/model/fp8/qkv_kernel.cu
+        src/nanochat/model/ops/backout.cpp
+        src/nanochat/model/ops/backout_kernel.cu
+        src/nanochat/model/ops/embedding.cpp
+        src/nanochat/model/ops/embedding_kernel.cu
+        src/nanochat/model/ops/relu_square.cpp
+        src/nanochat/model/ops/relu_square_kernel.cu
+        src/nanochat/model/ops/residual_norm.cpp
+        src/nanochat/model/ops/residual_norm_kernel.cu
+        src/nanochat/model/ops/smear.cpp
+        src/nanochat/model/ops/smear_kernel.cu
+        src/nanochat/model/ops/softcap_ce.cpp
+        src/nanochat/model/ops/softcap_ce_kernel.cu
         src/nanochat/train/adamw_kernel.cu
         src/nanochat/train/checkpoint.cpp
-        src/nanochat/train/dataloader.cpp
         src/nanochat/train/dist.cpp
         src/nanochat/train/loss_eval.cpp
         src/nanochat/train/muon_kernel.cu
         src/nanochat/train/optim.cpp
-        src/nanochat/train/safetensors.cpp
         src/nanochat/train/trainer.cpp)
 target_link_libraries(nanochat_train PUBLIC nanochat ${TORCH_LIBRARIES} "${TORCH_DIR}/../nvidia/cu13/lib/libcublasLt.so.13")
 # ATen/cuda headers need the CUDA library headers (cuBLAS, cuSPARSE, ...), which come with the NVIDIA wheels

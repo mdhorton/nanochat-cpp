@@ -6,7 +6,7 @@
 #include <thread>
 
 #include "nanochat/common.h"
-#include "nanochat/dataset.h"
+#include "nanochat/data/dataset.h"
 #include "nanochat/flags.h"
 #include "nanochat/tokenizer/bpe.h"
 #include "nanochat/tokenizer/tokenizer.h"

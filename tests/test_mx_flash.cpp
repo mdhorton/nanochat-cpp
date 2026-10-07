@@ -6,8 +6,8 @@
 #include <cmath>
 #include <iostream>
 
-#include "nanochat/model/mx_attention.h"
-#include "nanochat/model/mx_flash.h"
+#include "nanochat/model/attention/mx_attention.h"
+#include "nanochat/model/attention/mx_flash.h"
 
 using namespace nanochat;
 

@@ -10,8 +10,8 @@
 
 #include <torch/torch.h>
 
-#include "nanochat/model/fp8.h"
-#include "nanochat/train/safetensors.h"
+#include "nanochat/model/fp8/fp8.h"
+#include "nanochat/safetensors.h"
 
 namespace nanochat {
 

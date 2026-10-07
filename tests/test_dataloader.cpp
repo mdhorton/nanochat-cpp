@@ -4,8 +4,8 @@
 #include <fstream>
 #include <nlohmann/json.hpp>
 
-#include "nanochat/train/dataloader.h"
-#include "nanochat/train/safetensors.h"
+#include "nanochat/data/dataloader.h"
+#include "nanochat/safetensors.h"
 #include "test_env.h"
 
 using namespace nanochat;

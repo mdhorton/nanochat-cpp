@@ -1,7 +1,7 @@
 // Fused smear vs gpt.py's op-by-op bf16 path and fp64 references.
 #include <gtest/gtest.h>
 
-#include "nanochat/model/smear.h"
+#include "nanochat/model/ops/smear.h"
 
 using namespace nanochat;
 

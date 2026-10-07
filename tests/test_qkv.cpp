@@ -1,10 +1,10 @@
 // Merged q/k/v (fp8_qkv) vs three fp8_matmuls, the rotary norm on strided q/k views, and the MX attention inputs.
 #include <gtest/gtest.h>
 
-#include "nanochat/model/fp8.h"
+#include "nanochat/model/attention/mx_attention.h"
+#include "nanochat/model/attention/rotary_norm.h"
+#include "nanochat/model/fp8/fp8.h"
 #include "nanochat/model/gpt.h"
-#include "nanochat/model/mx_attention.h"
-#include "nanochat/model/rotary_norm.h"
 
 using namespace nanochat;
 namespace F = torch::nn::functional;

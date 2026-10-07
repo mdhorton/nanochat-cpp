@@ -2,7 +2,7 @@
 #include <gtest/gtest.h>
 
 #include "nanochat/model/gpt.h"
-#include "nanochat/model/relu_square.h"
+#include "nanochat/model/ops/relu_square.h"
 
 using namespace nanochat;
 

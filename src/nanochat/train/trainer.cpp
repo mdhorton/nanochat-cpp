@@ -22,11 +22,11 @@
 #include <torch/version.h>
 
 #include "nanochat/common.h"
+#include "nanochat/data/dataloader.h"
 #include "nanochat/git_info.h"
-#include "nanochat/model/mx_gemm.h"
+#include "nanochat/model/fp8/mx_gemm.h"
 #include "nanochat/tokenizer/tokenizer.h"
 #include "nanochat/train/checkpoint.h"
-#include "nanochat/train/dataloader.h"
 #include "nanochat/train/dist.h"
 #include "nanochat/train/loss_eval.h"
 #include "nanochat/train/optim.h"

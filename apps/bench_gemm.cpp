@@ -13,8 +13,8 @@
 #include <cublasLt.h>
 #include <torch/torch.h>
 
-#include "nanochat/model/fp8.h"
-#include "nanochat/model/mx_gemm.h"
+#include "nanochat/model/fp8/fp8.h"
+#include "nanochat/model/fp8/mx_gemm.h"
 
 using nanochat::quantize_mx;
 

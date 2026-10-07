@@ -1,8 +1,8 @@
 // Fused rotary + QK norm vs an fp64 reference and vs gpt.py's op-by-op bf16 path: outputs and gradients.
 #include <gtest/gtest.h>
 
+#include "nanochat/model/attention/rotary_norm.h"
 #include "nanochat/model/gpt.h"
-#include "nanochat/model/rotary_norm.h"
 
 using namespace nanochat;
 using torch::indexing::None;

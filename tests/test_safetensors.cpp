@@ -2,7 +2,7 @@
 
 #include <unistd.h>
 
-#include "nanochat/train/safetensors.h"
+#include "nanochat/safetensors.h"
 #include "test_env.h"
 
 namespace fs = std::filesystem;

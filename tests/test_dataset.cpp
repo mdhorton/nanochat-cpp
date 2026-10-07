@@ -10,7 +10,7 @@
 #include <parquet/arrow/writer.h>
 #include <unistd.h>
 
-#include "nanochat/dataset.h"
+#include "nanochat/data/dataset.h"
 
 namespace fs = std::filesystem;
 using nanochat::ParquetBatches;

@@ -6,8 +6,8 @@
 
 #include "nanochat/common.h"
 #include "nanochat/flags.h"
+#include "nanochat/safetensors.h"
 #include "nanochat/train/dist.h"
-#include "nanochat/train/safetensors.h"
 #include "train_golden.h"
 
 using namespace nanochat;

@@ -1,7 +1,7 @@
 // Fused embedding lookups whose backward accumulates straight into .grad, vs at::embedding + autograd and fp64.
 #include <gtest/gtest.h>
 
-#include "nanochat/model/embedding.h"
+#include "nanochat/model/ops/embedding.h"
 
 using namespace nanochat;
 

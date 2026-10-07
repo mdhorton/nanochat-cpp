@@ -1,7 +1,7 @@
 // Fused backout vs gpt.py's ops (bit-identical but for dlambda, checked against an fp64 sum).
 #include <gtest/gtest.h>
 
-#include "nanochat/model/backout.h"
+#include "nanochat/model/ops/backout.h"
 
 using namespace nanochat;
 

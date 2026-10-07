@@ -19,7 +19,7 @@ However, let me make the decision and install them.
 - cache/metrics → metric files from notable historic runs
 - external → external packages, repos, dependencies, etc...
 - roofline → measured roofline data for target GPUs
-- src → nanochat source code
+- src → nanochat cpp source code
 
 # testing code changes
 

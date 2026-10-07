@@ -1,16 +1,16 @@
 #include "nanochat/model/gpt.h"
 
-#include "nanochat/model/backout.h"
-#include "nanochat/model/embedding.h"
-#include "nanochat/model/flash.h"
-#include "nanochat/model/fp8.h"
-#include "nanochat/model/mx_attention.h"
-#include "nanochat/model/mx_flash.h"
-#include "nanochat/model/relu_square.h"
-#include "nanochat/model/residual_norm.h"
-#include "nanochat/model/rotary_norm.h"
-#include "nanochat/model/smear.h"
-#include "nanochat/model/softcap_ce.h"
+#include "nanochat/model/attention/flash.h"
+#include "nanochat/model/attention/mx_attention.h"
+#include "nanochat/model/attention/mx_flash.h"
+#include "nanochat/model/attention/rotary_norm.h"
+#include "nanochat/model/fp8/fp8.h"
+#include "nanochat/model/ops/backout.h"
+#include "nanochat/model/ops/embedding.h"
+#include "nanochat/model/ops/relu_square.h"
+#include "nanochat/model/ops/residual_norm.h"
+#include "nanochat/model/ops/smear.h"
+#include "nanochat/model/ops/softcap_ce.h"
 
 #include <cmath>
 #include <set>

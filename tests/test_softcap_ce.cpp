@@ -1,10 +1,10 @@
 // Chunked softcap cross-entropy vs the unchunked ops (as gpt.py): loss and gradients.
 #include <gtest/gtest.h>
 
-#include "nanochat/model/fp8.h"
+#include "nanochat/model/fp8/fp8.h"
 #include "nanochat/model/gpt.h"
-#include "nanochat/model/softcap_ce.h"
-#include "nanochat/model/softcap_ce_kernel.h"
+#include "nanochat/model/ops/softcap_ce.h"
+#include "nanochat/model/ops/softcap_ce_kernel.h"
 
 #include <ATen/cuda/CUDAContext.h>
 

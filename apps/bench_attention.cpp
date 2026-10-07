@@ -17,11 +17,11 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <torch/torch.h>
 
-#include "nanochat/model/flash.h"
-#include "nanochat/model/flash_kernel.h"
-#include "nanochat/model/mx_attention.h"
-#include "nanochat/model/mx_flash.h"
-#include "nanochat/model/mx_flash_kernel.h"
+#include "nanochat/model/attention/flash.h"
+#include "nanochat/model/attention/flash_kernel.h"
+#include "nanochat/model/attention/mx_attention.h"
+#include "nanochat/model/attention/mx_flash.h"
+#include "nanochat/model/attention/mx_flash_kernel.h"
 
 namespace {
 
@@ -240,15 +240,15 @@ void bench_backward(
   }
   const auto mx_in = nanochat::mx_flash_quantize(q, k, v);
   const auto [mx_out, mx_lse] = nanochat::mx_flash_forward(q, k, v, window, &mx_in);
-  for (int dqv = 0; dqv < nanochat::kernels::kFlashBwdMxDqVariants; ++dqv) {
-    for (int dkvv = 0; dkvv < nanochat::kernels::kFlashBwdMxDkvVariants; ++dkvv) {
+  for (int dqv = 0; dqv < nanochat::kernels::kMxFlashBwdDqVariants; ++dqv) {
+    for (int dkvv = 0; dkvv < nanochat::kernels::kMxFlashBwdDkvVariants; ++dkvv) {
       const double ms = time_ms(
             [&] {
               nanochat::mx_flash_backward(g, mx_in, mx_out, mx_lse, window, dqv, dkvv);
             },
             a.iters);
-      const auto name = std::string(nanochat::kernels::flash_bwd_mx_dq_variant_name(dqv)) + "; " +
-                        nanochat::kernels::flash_bwd_mx_dkv_variant_name(dkvv);
+      const auto name = std::string(nanochat::kernels::mx_flash_bwd_dq_variant_name(dqv)) + "; " +
+                        nanochat::kernels::mx_flash_bwd_dkv_variant_name(dkvv);
       std::printf("  %-32s %8.3f ms %6.1f TFLOPs (FA2-equivalent)\n", name.c_str(), ms, bwd_flops / ms / 1e9);
     }
   }

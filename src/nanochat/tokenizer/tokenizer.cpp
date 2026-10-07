@@ -10,7 +10,7 @@
 
 #include "nanochat/tokenizer/base64.h"
 #include "nanochat/tokenizer/bpe.h"
-#include "nanochat/tokenizer/utf8.h"
+#include "nanochat/utf8.h"
 
 namespace nanochat {
 

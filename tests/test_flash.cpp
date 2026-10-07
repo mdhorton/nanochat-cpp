@@ -8,8 +8,8 @@
 
 #include <ATen/cuda/CUDAContext.h>
 
-#include "nanochat/model/flash.h"
-#include "nanochat/model/flash_kernel.h"
+#include "nanochat/model/attention/flash.h"
+#include "nanochat/model/attention/flash_kernel.h"
 
 using namespace nanochat;
 
@@ -74,12 +74,12 @@ double cosine(const torch::Tensor& a, const torch::Tensor& b) {
   return (a64.dot(b64) / (a64.norm() * b64.norm())).item<double>();
 }
 
-// x (B, T, heads, 128) bf16 through flash_mx_quantize_rows and back (fp64)
+// x (B, T, heads, 128) bf16 through mx_flash_quantize_rows and back (fp64)
 torch::Tensor mx_rows_roundtrip(const torch::Tensor& x) {
   const int64_t B = x.size(0), T = x.size(1), heads = x.size(2);
   auto data = torch::empty({B, T, heads, 128}, kCuda.dtype(torch::kUInt8));
   auto scale = torch::empty({B, heads, T}, kCuda.dtype(torch::kInt32));
-  kernels::flash_mx_quantize_rows(
+  kernels::mx_flash_quantize_rows(
         x.data_ptr(), x.stride(1), data.data_ptr(), static_cast<uint32_t*>(scale.data_ptr()), nullptr, nullptr, B, T,
         heads, at::cuda::getCurrentCUDAStream().stream());
   const auto e = scale.view(torch::kUInt8).view({B, heads, T, 4}).to(torch::kFloat64) - 127;
@@ -171,12 +171,12 @@ TEST(Flash, MxBackwardMatchesReference) {
     const auto want_mx = ref_grads(
           mx_rows_roundtrip(q), mx_rows_roundtrip(k), mx_rows_roundtrip(v), mx_rows_roundtrip(g), c.window);
     const auto [out, lse] = flash_forward(q, k, v, c.window);
-    for (int dqv = 0; dqv < kernels::kFlashBwdMxDqVariants; ++dqv) {
-      for (int dkvv = 0; dkvv < kernels::kFlashBwdMxDkvVariants; ++dkvv) {
+    for (int dqv = 0; dqv < kernels::kMxFlashBwdDqVariants; ++dqv) {
+      for (int dkvv = 0; dkvv < kernels::kMxFlashBwdDkvVariants; ++dkvv) {
         const auto [dq, dk, dv] = flash_backward_mx(g, q, k, v, out, lse, c.window, dqv, dkvv);
         const std::vector<torch::Tensor> got{dq, dk, dv};
         std::cout << "B " << c.B << " T " << c.T << " H " << c.H << "/" << c.Hkv << " window " << c.window << " ["
-                  << kernels::flash_bwd_mx_dq_variant_name(dqv) << "; " << kernels::flash_bwd_mx_dkv_variant_name(dkvv)
+                  << kernels::mx_flash_bwd_dq_variant_name(dqv) << "; " << kernels::mx_flash_bwd_dkv_variant_name(dkvv)
                   << "]:";
         const char* names[] = {"dq", "dk", "dv"};
         for (int i = 0; i < 3; ++i) {
@@ -192,8 +192,8 @@ TEST(Flash, MxBackwardMatchesReference) {
   }
 }
 
-// flash_mx_quantize_rows / _t dequantized vs their bf16 input: e4m3's error, so any layout or permutation slip shows;
-// flash_mx_quantize_dout identical to them
+// mx_flash_quantize_rows / _t dequantized vs their bf16 input: e4m3's error, so any layout or permutation slip shows;
+// mx_flash_quantize_dout identical to them
 TEST(Flash, MxQuantizeRoundTrip) {
   torch::manual_seed(0);
   const int64_t B = 2, T = 256, heads = 3, D = 128;
@@ -211,7 +211,7 @@ TEST(Flash, MxQuantizeRoundTrip) {
 
   auto data = torch::empty({B, T, heads, D}, u8), scale = torch::empty({B, heads, T}, kCuda.dtype(torch::kInt32));
   auto delta = torch::empty({B, heads, T}, kCuda.dtype(torch::kFloat32));
-  kernels::flash_mx_quantize_rows(
+  kernels::mx_flash_quantize_rows(
         x.data_ptr(), x.stride(1), data.data_ptr(), static_cast<uint32_t*>(scale.data_ptr()), o.data_ptr(),
         delta.data_ptr<float>(), B, T, heads, stream);
   // scale bytes (B, heads, T, 4) -> per value (B, T, heads, D)
@@ -221,7 +221,7 @@ TEST(Flash, MxQuantizeRoundTrip) {
   const double delta_err = rel_norm(delta, (x64 * o.to(torch::kFloat64)).sum(-1).transpose(1, 2));
 
   auto tdata = torch::empty({B, heads, D, T}, u8), tscale = torch::empty({B, heads, T / 32, D}, u8);
-  kernels::flash_mx_quantize_t(
+  kernels::mx_flash_quantize_t(
         x.data_ptr(), x.stride(1), tdata.data_ptr(), tscale.data_ptr<uint8_t>(), B, T, heads, stream);
   // position p of each 16 holds token perm[p]
   const int64_t perm[16] = {0, 1, 8, 9, 2, 3, 10, 11, 4, 5, 12, 13, 6, 7, 14, 15};
@@ -238,11 +238,11 @@ TEST(Flash, MxQuantizeRoundTrip) {
   EXPECT_LT(t_err, 0.04);
   EXPECT_LT(delta_err, 1e-5);
 
-  // flash_mx_quantize_dout: both of the above in one pass
+  // mx_flash_quantize_dout: both of the above in one pass
   const auto xc = x.contiguous();
   auto ddata = torch::empty_like(data), dscale = torch::empty_like(scale), ddelta = torch::empty_like(delta);
   auto dtdata = torch::empty_like(tdata), dtscale = torch::empty_like(tscale);
-  kernels::flash_mx_quantize_dout(
+  kernels::mx_flash_quantize_dout(
         xc.data_ptr(), o.data_ptr(), ddata.data_ptr(), static_cast<uint32_t*>(dscale.data_ptr()), dtdata.data_ptr(),
         dtscale.data_ptr<uint8_t>(), ddelta.data_ptr<float>(), B, T, heads, stream);
   EXPECT_TRUE(torch::equal(ddata, data));
