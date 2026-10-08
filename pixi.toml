@@ -10,13 +10,13 @@ cuda-version = "13.2.*"
 cuda-nvcc = "*"
 cuda-cudart-dev = "*"
 cxx-compiler = "*"
-gxx_linux-64 = "15.3.*"        # pins the gcc version cxx-compiler uses
+gxx_linux-64 = "15.3.*"  # pins the gcc version cxx-compiler uses
 cmake = ">=3.28"
 ninja = "*"
 pkg-config = "*"
 
 # C++ libraries
-cutlass = "4.8.*"            # headers only
+cutlass = "4.8.*"        # headers only
 gtest = "*"
 libarrow = "*"
 libparquet = "*"
