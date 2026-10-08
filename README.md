@@ -1,11 +1,40 @@
-# introduction
+## introduction
 
-This is a **python → c++** port of the [nanochat](https://github.com/karpathy/nanochat) project.
+This is a **python → c++** port of Andrej Karpathy's [nanochat](https://github.com/karpathy/nanochat). With the added
+twist that it targets Nvidia sm120 GPUs.
 
-It continues the saga of exploring sm120 GPUs. Specifically 2x RTX Pro 4000, which is my local setup. With the added
-twist of c++.
+I'd classify this as more of a performance engineering project. I own 2x RTX Pro 4000 and my initial goal was to see how
+fast it would run locally.
 
-# TLDR
+## sm120 GPUs
+
+These are Blackwell non-datacenter GPUs such as RTX Pro 6000, RTX Pro 4000, RTX 5090, etc... They lack important
+features compared to datacenter GPUs such as H100. For example:
+
+- no nvlink
+- no wgmma
+- 50% less shared memory
+- lower power cap (RTX Pro 4000 == 145 watts)
+- lower vram (RTX Pro 4000 == 24GB)
+
+FA3+ focuses on datacenter GPUs. Thus, sm120 GPUs are limited to FA2.
+
+Also, the RTX non-Pro line (eg, RTX 5090) does not support P2P and does not have ECC. Not having ECC is more of a
+quality issue.
+
+However, sm120 has MXFP8 and NVFP4, which H100 does not have.
+
+## initial port
+
+Opus 5.5 (high effort) ported the nanochat pre-training code from python to c++ in ~40 minutes. I believe one of the
+reasons for the speed is the fact that pytorch uses libtorch, which is a c++ library.
+
+However, libtorch does not have torch.compile or inductor. So the baseline performance is not great. This starts the
+performance engineering work on making it faster with sm120.
+
+## TLDR
+
+8x RTX 5090
 
 ## setup
 
@@ -15,7 +44,7 @@ twist of c++.
 - nvidia driver supporting cuda 13+
 - [pixi](https://prefix.dev/) package manager
 
-I've only tested with Linux Ubuntu 24.04.
+I've only tested on Linux Ubuntu 24.04.
 
 ### 1-time initial setup
 
@@ -48,8 +77,9 @@ pixi run full-d24 --run=full-d24-super --wandb
 
 ### optional
 
-A NCCL benchmark can help determine if the host is correctly configured and
-has sufficient GPU communication hardware for pre-training.
+A NCCL benchmark can help determine if the host is correctly configured and has sufficient GPU communication hardware
+for pre-training. sm120 does not support nvlink. I've found that some rented hosts have poor PCI bus bandwidth, which
+significantly impacts performance.
 
 ```bash
 pixi run nccl-bench
