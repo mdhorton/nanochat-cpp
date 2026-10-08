@@ -129,46 +129,6 @@ target_link_libraries(bench_gemm PRIVATE nanochat_train)
 add_executable(bench_attention apps/bench_attention.cpp)
 target_link_libraries(bench_attention PRIVATE nanochat_train)
 
-# tests: not in the default build (pixi run test builds them)
+# tests (tests/CMakeLists.txt): enable_testing here so ctest finds them from the build root
 enable_testing()
-find_package(GTest REQUIRED)
-include(GoogleTest)
-add_executable(nanochat_tests EXCLUDE_FROM_ALL
-        tests/main.cpp
-        tests/test_dataset.cpp
-        tests/test_golden.cpp
-        tests/test_splitter.cpp
-        tests/test_tokenizer.cpp
-        tests/test_utf8.cpp)
-target_link_libraries(nanochat_tests PRIVATE nanochat GTest::gtest)
-gtest_discover_tests(nanochat_tests DISCOVERY_TIMEOUT 30)
-
-add_executable(train_tests EXCLUDE_FROM_ALL
-        tests/main.cpp
-        tests/test_backout.cpp
-        tests/test_checkpoint.cpp
-        tests/test_dataloader.cpp
-        tests/test_dist.cpp
-        tests/test_embedding.cpp
-        tests/test_flash.cpp
-        tests/test_fp8.cpp
-        tests/test_gpt.cpp
-        tests/test_loss_eval.cpp
-        tests/test_mx_flash.cpp
-        tests/test_optim.cpp
-        tests/test_qkv.cpp
-        tests/test_relu_square.cpp
-        tests/test_residual_norm.cpp
-        tests/test_rotary_norm.cpp
-        tests/test_safetensors.cpp
-        tests/test_smear.cpp
-        tests/test_softcap_ce.cpp
-        tests/test_torch.cpp
-        tests/test_train.cpp)
-target_link_libraries(train_tests PRIVATE nanochat_train GTest::gtest)
-target_compile_definitions(train_tests PRIVATE NANOCHAT_DIST_WORKER="$<TARGET_FILE:dist_worker>")
-
-add_executable(dist_worker EXCLUDE_FROM_ALL tests/dist_worker.cpp)
-target_link_libraries(dist_worker PRIVATE nanochat_train)
-add_dependencies(train_tests dist_worker)
-gtest_discover_tests(train_tests DISCOVERY_TIMEOUT 60)
+add_subdirectory(tests)

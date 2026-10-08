@@ -5,6 +5,56 @@ This is a **python → c++** port of the [nanochat](https://github.com/karpathy/
 It continues the saga of exploring sm120 GPUs. Specifically 2x RTX Pro 4000, which is my local setup. With the added
 twist of c++.
 
+# TLDR
+
+## setup
+
+### requirements
+
+- sm120 capability GPU (RTX Pro 6000/4000, RTX 5090, etc...)
+- nvidia driver supporting cuda 13+
+- [pixi](https://prefix.dev/) package manager
+
+I've only tested with Linux Ubuntu 24.04.
+
+### 1-time initial setup
+
+```bash
+# install pixi
+curl -fsSL https://pixi.sh/install.sh | bash
+
+# download the parquet files (downloads 10 files by default)
+pixi run dataset 
+
+# or download more files (downloads 170 parquet files)
+# pixi run dataset 170
+
+# train the BPE tokenizer
+pixi run tok-train
+```
+
+### execute some runs
+
+```bash
+# execute a 30 iteration --depth=12 pre-training run
+pixi run quick-d12
+
+# execute a 100 iteration --depth=12 pre-training run
+pixi run medium-d12
+
+# execute a full --depth=24 pre-training run and use wandb (requires WANDB_API_KEY or wandb login)
+pixi run full-d24 --run=full-d24-super --wandb
+```
+
+### optional
+
+A NCCL benchmark can help determine if the host is correctly configured and
+has sufficient GPU communication hardware for pre-training.
+
+```bash
+pixi run nccl-bench
+```
+
 # pytorch vs LLM agent CUDA kernels
 
 [KernelBench](https://github.com/ScalingIntelligence/KernelBench) asked: Can LLMs Write GPU Kernels?
