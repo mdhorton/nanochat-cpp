@@ -16,7 +16,7 @@ usage() {
   exit 2
 }
 
-dry_run=0 branch=overlap min_busbw= port=22 user=root host=
+dry_run=0 branch=refactor min_busbw= port=22 user=root host=
 set -f; set -- $*; set +f # re-split, so the vast line also works as one quoted string
 while (($#)); do
   case $1 in
