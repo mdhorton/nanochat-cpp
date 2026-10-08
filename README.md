@@ -3,8 +3,8 @@
 This is a **python → c++** port of Andrej Karpathy's [nanochat](https://github.com/karpathy/nanochat). With the added
 twist that it targets Nvidia sm120 GPUs.
 
-I'd classify this as more of a performance engineering project. I own 2x RTX Pro 4000 and my initial goal was to see how
-fast it would run locally.
+I'd classify this as more of a performance engineering project. I own 2x RTX Pro 4000 Blackwell and my initial goal was
+to see how fast it would run locally.
 
 ## sm120 GPUs
 
@@ -20,9 +20,9 @@ features compared to datacenter GPUs such as H100. For example:
 FA3+ focuses on datacenter GPUs. Thus, sm120 GPUs are limited to FA2.
 
 Also, the RTX non-Pro line (eg, RTX 5090) does not support P2P and does not have ECC. Not having ECC is more of a
-quality issue.
+potential quality issue.
 
-However, sm120 has MXFP8 and NVFP4, which H100 does not have.
+However, sm120 has MXFP8 and NVFP4, which the H100 does not have.
 
 ## initial port
 
@@ -30,11 +30,31 @@ Opus 5.5 (high effort) ported the nanochat pre-training code from python to c++ 
 reasons for the speed is the fact that pytorch uses libtorch, which is a c++ library.
 
 However, libtorch does not have torch.compile or inductor. So the baseline performance is not great. This starts the
-performance engineering work on making it faster with sm120.
+performance engineering work to make it faster with sm120.
 
-## TLDR
+## tl;dr
 
-8x RTX 5090
+### 8x RTX 5090
+
+time: 148.85m
+bpb: 0.71769
+CORE: 0.2615
+
+flags
+
+- --depth=24
+- --target-param-data-ratio=8
+- --device-batch-size=4
+
+## tuning
+
+Most of the sm120 tuning fell into the following:
+
+- kernel fusing
+- overlapping compute with collectives
+- mxfp8
+- flash attention
+- memory tuning (less smem and vram)
 
 ## setup
 
