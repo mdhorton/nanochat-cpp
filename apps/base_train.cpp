@@ -28,7 +28,8 @@ static int run(int argc, char** argv) {
         "bf16 (our sm120 flash attention, FA2 backward), bf16mx (bf16 forward, our MXFP8 backward), mx (MXFP8 "
         "forward and backward), fa2 (FlashAttention-2) or sdpa (bit-identical to Python)");
   o.loss_chunk_rows = flags.i64(
-        "loss-chunk-rows", o.loss_chunk_rows, "rows per chunk of the fused lm_head + loss (0 = unchunked, as Python)");
+        "loss-chunk-rows", o.loss_chunk_rows,
+        "rows per chunk of the fused lm_head + loss (-1 = whole micro-batch, 0 = unfused, as Python)");
   o.fp8 = flags.boolean("fp8", o.fp8, "FP8 training (eval stays bf16); false = bf16, as Python's default");
   o.fp8_recipe = flags.str("fp8-recipe", o.fp8_recipe, "mxfp8 (32-value block scales) or tensorwise (as Python)");
   o.gemm = flags.str("gemm", o.gemm, "MXFP8 GEMMs: cutlass or cublas (cuBLASLt)");

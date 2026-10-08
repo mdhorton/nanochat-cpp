@@ -3,13 +3,13 @@
 This is a **python → c++** port of Andrej Karpathy's [nanochat](https://github.com/karpathy/nanochat). With the added
 twist that it targets Nvidia sm120 GPUs.
 
-I'd classify this as more of a performance engineering project. I own 2x RTX Pro 4000 Blackwell and my initial goal was
-to see how fast it would run locally.
+I'd classify this port as more of a performance engineering project. I own 2x RTX Pro 4000 Blackwell and my initial goal
+was to see how fast it would run locally.
 
 ## sm120 GPUs
 
 These are Blackwell non-datacenter GPUs such as RTX Pro 6000, RTX Pro 4000, RTX 5090, etc... They lack important
-features compared to datacenter GPUs such as H100. For example:
+features compared to datacenter GPUs. For example:
 
 - no nvlink
 - no wgmma
@@ -27,30 +27,32 @@ However, sm120 has MXFP8 and NVFP4, which the H100 does not have.
 ## tl;dr
 
 The following runs used `--depth=24 --target-param-data-ratio=8`. It also kept the same model config as the python
-version. CORE was calculated using the python version.
+version. And CORE was calculated using the python version.
 
-| GPU            | GPU Count |     bpb |   CORE |    time | device-batch-size |      rental cost |
-|----------------|----------:|--------:|-------:|--------:|------------------:|-----------------:|
-| RTX Pro 6000 S |         8 |         |        |         |                 8 | $12/hr x 3 = $36 |
-| RTX 5090       |         8 | 0.71769 | 0.2615 | 148.85m |                 4 |  $6/hr x 3 = $18 |
+| GPU            | GPU Count |     bpb |   CORE |    time | device-batch-size |        rental cost |
+|----------------|----------:|--------:|-------:|--------:|------------------:|-------------------:|
+| RTX Pro 6000 S |         8 |         |        |         |                 8 | $12/hr x 2.5 = $30 |
+| RTX 5090       |         8 | 0.71769 | 0.2615 | 148.85m |                 4 |  $6/hr x 3.0 = $18 |
+
+Rental costs can fluctuate quite a bit. But these values give you a rough idea.
 
 ## initial port
 
 Opus 5.5 (high effort) ported the nanochat pre-training code from python to c++ in ~40 minutes. I believe one of the
 reasons for the speed is the fact that pytorch uses libtorch, which is a c++ library.
 
-However, libtorch does not have torch.compile or inductor. So the baseline performance is not great. This starts the
+However, libtorch does not have `torch.compile` or inductor. So the baseline performance is not great. This starts the
 performance engineering work to make it faster with sm120.
 
 ## tuning
 
-Most of the sm120 tuning fell into the following:
+Most of the sm120 tuning fell into the following categories:
 
 - kernel fusing
 - overlapping compute with collectives
 - mxfp8
 - flash attention
-- memory tuning (less smem and vram)
+- memory tuning
 
 ## setup
 
@@ -106,7 +108,7 @@ pixi run nccl-bench
 Honestly, mostly just curiosity. The core code runs on the GPU, so there's no performance benefit from c++.
 
 At the outset I was curious how long it would take Claude to port it to c++. Then I just kept going. I didn't hit any
-significant roadblocks, so I just continued.
+significant roadblocks.
 
 The custom kernels could even be integrated back into the original python.
 

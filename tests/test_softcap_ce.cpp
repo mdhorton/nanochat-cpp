@@ -79,9 +79,12 @@ TEST(SoftcapCE, ModelLossMatchesUnchunked) {
     return std::pair{loss.item<double>(), model->lm_head->weight.grad().clone()};
   };
   const auto [chunked, grad_chunked] = run(100);
+  const auto [whole, grad_whole] = run(-1); // one chunk of all rows
   const auto [plain, grad_plain] = run(0);
   EXPECT_NEAR(chunked, plain, 1e-5);
   EXPECT_LT(rel_diff(grad_chunked, grad_plain), 2e-2);
+  EXPECT_NEAR(whole, plain, 1e-5);
+  EXPECT_LT(rel_diff(grad_whole, grad_plain), 2e-2);
 }
 
 // FP8 lm_head: chunked vs the unchunked Float8Matmul path (gpt.py with fp8). Tensorwise: one chunk shares python's

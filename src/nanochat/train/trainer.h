@@ -22,7 +22,7 @@ struct TrainOptions {
   int64_t seed = 42; // weight init
   std::string window_pattern = "SSSL";
   std::string attention = "mx";     // mx (MXFP8 fwd + bwd), bf16 (ours), bf16mx (MXFP8 bwd), fa2, sdpa (as Python)
-  int64_t loss_chunk_rows = 4096;   // > 0: fused chunked lm_head + loss (never all logits at once); 0: as Python
+  int64_t loss_chunk_rows = -1;     // fused lm_head + loss in chunks of this many rows; -1: one chunk; 0: as Python
   bool fp8 = true;                  // FP8 matmuls for training (eval stays bf16)
   std::string fp8_recipe = "mxfp8"; // mxfp8 or tensorwise (as Python)
   std::string gemm = "cutlass";     // MXFP8 GEMMs: cutlass or cublas (cuBLASLt)

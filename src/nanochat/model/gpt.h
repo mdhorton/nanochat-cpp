@@ -189,7 +189,7 @@ public:
   void set_fused(bool fused);
 
   // > 0: compute the training loss a chunk of rows at a time (softcap_ce.h), never materializing all logits.
-  // 0: unchunked, as Python.
+  // < 0: fused, one chunk of all rows. 0: unfused, as Python.
   void set_loss_chunk_rows(int64_t rows) {
     loss_chunk_rows_ = rows;
   }

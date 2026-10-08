@@ -479,13 +479,15 @@ torch::Tensor GPTImpl::forward(
     before_stage(config_.n_layer);
 
   const double softcap = 15;
-  if (targets.defined() && loss_chunk_rows_ > 0) {
+  if (targets.defined() && loss_chunk_rows_ != 0) {
     const auto r = std::holds_alternative<torch::enumtype::kMean>(reduction)  ? LossReduction::Mean
                    : std::holds_alternative<torch::enumtype::kSum>(reduction) ? LossReduction::Sum
                                                                               : LossReduction::None;
+    const auto rows = x.view({-1, x.size(-1)});
     return softcap_cross_entropy(
-          x.view({-1, x.size(-1)}), lm_head->weight, targets.view(-1), config_.vocab_size, softcap, loss_chunk_rows_, r,
-          lm_head->fp8, &lm_head->fp8_cache, lm_head->fp8_recipe);
+          rows, lm_head->weight, targets.view(-1), config_.vocab_size, softcap,
+          loss_chunk_rows_ > 0 ? loss_chunk_rows_ : rows.size(0), r, lm_head->fp8, &lm_head->fp8_cache,
+          lm_head->fp8_recipe);
   }
   auto logits = lm_head(x).index({"...", Slice(None, config_.vocab_size)}).to(torch::kFloat32);
   logits = softcap * torch::tanh(logits / softcap);
