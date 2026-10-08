@@ -63,6 +63,7 @@ D24_BASE = "$TRAIN_BASE --depth=24 --device-batch-size=$D24_DBS"
 QUICK_BASE = "--eval-tokens=4194304 --final-eval-tokens=4194304 --eval-every=-1 --save=false"
 
 # --rank-micro-steps=125,131
+# pixi run full-d24 > cache/full-d24.log 2>&1 < /dev/null &!
 
 [tasks]
 # empty CMAKE_CXX_FLAGS: drops conda's packaging CXXFLAGS (-O2, -march=nocona)
