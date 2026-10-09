@@ -45,7 +45,8 @@ NANOCHAT_BASE_DIR = "$PIXI_PROJECT_ROOT/cache"
 
 # these usually were the most consistant nccl flags.
 NCCL_PROTO = "Simple"
-NCCL_MIN_NCHANNELS = "8"
+NCCL_MIN_NCHANNELS = "4"
+NCCL_CUMEM_HOST_ENABLE = "0"
 
 # the following env vars are used as task variables.
 BUILD_TYPE = "RelWithDebInfo"
@@ -54,13 +55,13 @@ BUILD_TYPE = "RelWithDebInfo"
 NPROC = "$(nvidia-smi -L 2>/dev/null | wc -l)"
 VRAM_GB = "$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | awk 'NR==1{print int($1 / 1024 + 0.5)}')"
 
-TRAIN_BASE = "--nproc=$NPROC"
+TRAIN_BASE = "--nproc=$NPROC --eval-tokens=4194304"
 D12_DBS = "2"
 D24_DBS = "$(( ${VRAM_GB:-0} > 40 ? 8 : ${VRAM_GB:-0} >= 30 ? 4 : 2 ))"
 
 D12_BASE = "$TRAIN_BASE --depth=12 --device-batch-size=$D12_DBS"
 D24_BASE = "$TRAIN_BASE --depth=24 --device-batch-size=$D24_DBS"
-QUICK_BASE = "--eval-tokens=4194304 --final-eval-tokens=4194304 --eval-every=-1 --save=false"
+QUICK_BASE = "--final-eval-tokens=4194304 --eval-every=-1 --save=false"
 
 # --rank-micro-steps=125,131
 # pixi run full-d24 > cache/full-d24.log 2>&1 < /dev/null &!
@@ -96,12 +97,15 @@ clone-nanochat = "test -d external/nanochat || (git clone https://github.com/kar
 nanochat = { cmd = "python -m", cwd = "external/nanochat", depends-on = ["clone-nanochat"] }
 dataset = { cmd = "python -m nanochat.dataset -n {{ n }}", cwd = "external/nanochat", args = [{ arg = "n", default = "10" }], depends-on = ["clone-nanochat"] }
 
-export-golden = { cmd = "python tools/export_golden.py", depends-on = ["clone-nanochat"] }
+# core-eval <run> ["<base_eval flags>"]: converts cache/base_checkpoints/<run> to <run>-pt, then CORE via Python nanochat
+core-convert = { cmd = "python tools/convert_checkpoint.py cache/base_checkpoints/{{ run }} cache/base_checkpoints/{{ run }}-pt --to pt --model-only", args = [{ arg = "run" }] }
+core-eval = { cmd = "torchrun --standalone --nproc_per_node=$NPROC -m scripts.base_eval --model-tag {{ run }}-pt --eval core {{ opt }}", cwd = "external/nanochat", args = [{ arg = "run" }, { arg = "opt", default = "" }], depends-on = [{ task = "clone-nanochat" }, { task = "core-convert", args = ["{{ run }}"] }] }
+
+export-golden ={ cmd = "python tools/export_golden.py", depends-on = ["clone-nanochat"] }
 export-train-golden = { cmd = "python tools/export_train_golden.py", depends-on = ["clone-nanochat"] }
 export-train-golden-ddp = { cmd = "torchrun --standalone --nproc-per-node 2 tools/export_train_golden.py --sections train", depends-on = ["clone-nanochat"] }
 
 export-pretrained = "python tools/export_tokenizer.py --pretrained gpt2 cl100k_base"
-wandb-upload = "python tools/wandb_upload.py"
 
 build-nccl-tests = "tools/build_nccl_tests.sh"
 nccl-bench = { cmd = "python tools/nccl_bench.py", depends-on = ["build-nccl-tests"] }

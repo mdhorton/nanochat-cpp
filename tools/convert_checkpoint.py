@@ -5,7 +5,7 @@ Files per step: model_<step>, optim_<step>_rank<r> (optional, one per rank), met
 Optimizer state keeps Python's state_dict structure: tensors "state.<param index>.<field>" plus the param groups as
 JSON in the safetensors metadata ("param_groups").
 
-  python tools/convert_checkpoint.py SRC DST --to safetensors [--step N]
+  python tools/convert_checkpoint.py SRC DST --to safetensors [--step N] [--model-only]
 """
 import argparse
 import glob
@@ -53,6 +53,7 @@ def main():
     parser.add_argument("dst")
     parser.add_argument("--to", choices=["safetensors", "pt"], required=True)
     parser.add_argument("--step", type=int, help="default: the last step in src")
+    parser.add_argument("--model-only", action="store_true", help="skip optimizer state (e.g. for evals)")
     args = parser.parse_args()
     src_ext = "pt" if args.to == "safetensors" else "safetensors"
     step = args.step if args.step is not None else last_step(args.src, src_ext)
@@ -67,7 +68,8 @@ def main():
     else:
         torch.save(load_file(src("model") + ".safetensors"), dst("model") + ".pt")
 
-    for path in sorted(glob.glob(src("optim") + f"_rank*.{src_ext}")):
+    optim_paths = [] if args.model_only else sorted(glob.glob(src("optim") + f"_rank*.{src_ext}"))
+    for path in optim_paths:
         rank = re.search(r"_rank(\d+)\.", path).group(1)
         if args.to == "safetensors":
             tensors, metadata = optim_to_safetensors(torch.load(path, map_location="cpu"))
