@@ -5,7 +5,7 @@
 The development time saving are enormous. Handwritten kernels take weeks to write and tune. An LLM can generate a dozen
 high performance kernels in a few hours. This includes tests, benchmarks, and tuning with nsys/ncu.
 
-So the answer to the question is yes, but problem is more of
+So the answer is yes, but problem is more of
 a [verification issue](https://gimletlabs.ai/blog/formally-verifying-ai-generated-kernels).
 
 For this project, I'm going to side-step this and treat the final result as verification. After all, this is an

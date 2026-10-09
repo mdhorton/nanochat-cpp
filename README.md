@@ -70,11 +70,8 @@ I've only tested on Linux Ubuntu 24.04.
 # install pixi
 curl -fsSL https://pixi.sh/install.sh | bash
 
-# download the parquet files (downloads 10 files by default)
-pixi run dataset 
-
-# or download more files (downloads 170 parquet files)
-# pixi run dataset 170
+# download 10 parquet files
+pixi run dataset 10
 
 # train the BPE tokenizer
 pixi run tok-train
@@ -82,22 +79,30 @@ pixi run tok-train
 
 ### execute some runs
 
+The `quick-, medium-, full-` prefixes use preset flags (see `pixi.toml` for the presets). All preset flags can be
+overridden.
+
+Use `pixi run based-train` for no preset flags.
+
 ```bash
-# execute a 30 iteration --depth=12 pre-training run
+# execute a short (30 step) --depth=12 training run
 pixi run quick-d12
 
-# execute a 100 iteration --depth=12 pre-training run
+# execute a slightly longer (100 step) --depth=12 training run
 pixi run medium-d12
 
-# execute a full --depth=24 pre-training run and use wandb (requires WANDB_API_KEY or wandb login)
+# execute a full --depth=24 training run and use wandb (requires WANDB_API_KEY or wandb login)
 pixi run full-d24 --run=full-d24-super --wandb
+
+# execute a customized training run
+pixi run base-train --depth=26 --device-batch-size=16 --eval-every=1000 --save-every=1000 --run=full-d26 --wandb
 ```
 
 ### optional
 
-A NCCL benchmark can help determine if the host is correctly configured and has sufficient GPU communication hardware
-for pre-training. sm120 does not support nvlink. I've found that some rented hosts have poor PCI bus bandwidth, which
-significantly impacts performance.
+sm120 does not support nvlink. A NCCL benchmark can help determine if the host is correctly configured and has
+sufficient GPU communication hardware for pre-training. I've found that some rented hosts have poor PCI bus bandwidth,
+which significantly impacts performance.
 
 ```bash
 pixi run nccl-bench
@@ -105,7 +110,7 @@ pixi run nccl-bench
 
 ## why c++?
 
-Honestly, mostly just curiosity. The core code runs on the GPU, so there's no performance benefit from c++.
+Honestly, mostly curiosity. The core code runs on the GPU, so there's no performance benefit from c++.
 
 At the outset I was curious how long it would take Claude to port it to c++. Then I just kept going. I didn't hit any
 significant roadblocks.
