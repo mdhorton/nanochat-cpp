@@ -97,15 +97,14 @@ clone-nanochat = "test -d external/nanochat || (git clone https://github.com/kar
 nanochat = { cmd = "python -m", cwd = "external/nanochat", depends-on = ["clone-nanochat"] }
 dataset = { cmd = "python -m nanochat.dataset -n {{ n }}", cwd = "external/nanochat", args = [{ arg = "n", default = "10" }], depends-on = ["clone-nanochat"] }
 
-# core-eval <run> ["<base_eval flags>"]: converts cache/base_checkpoints/<run> to <run>-pt, then CORE via Python nanochat
+# core-eval <run>
 core-convert = { cmd = "python tools/convert_checkpoint.py cache/base_checkpoints/{{ run }} cache/base_checkpoints/{{ run }}-pt --to pt --model-only", args = [{ arg = "run" }] }
 core-eval = { cmd = "torchrun --standalone --nproc_per_node=$NPROC -m scripts.base_eval --model-tag {{ run }}-pt --eval core {{ opt }}", cwd = "external/nanochat", args = [{ arg = "run" }, { arg = "opt", default = "" }], depends-on = [{ task = "clone-nanochat" }, { task = "core-convert", args = ["{{ run }}"] }] }
 
-export-golden ={ cmd = "python tools/export_golden.py", depends-on = ["clone-nanochat"] }
-export-train-golden = { cmd = "python tools/export_train_golden.py", depends-on = ["clone-nanochat"] }
-export-train-golden-ddp = { cmd = "torchrun --standalone --nproc-per-node 2 tools/export_train_golden.py --sections train", depends-on = ["clone-nanochat"] }
-
-export-pretrained = "python tools/export_tokenizer.py --pretrained gpt2 cl100k_base"
-
 build-nccl-tests = "tools/build_nccl_tests.sh"
 nccl-bench = { cmd = "python tools/nccl_bench.py", depends-on = ["build-nccl-tests"] }
+
+export-golden = { cmd = "python tools/export_golden.py", depends-on = ["clone-nanochat"] }
+export-train-golden = { cmd = "python tools/export_train_golden.py", depends-on = ["clone-nanochat"] }
+export-train-golden-ddp = { cmd = "torchrun --standalone --nproc-per-node 2 tools/export_train_golden.py --sections train", depends-on = ["clone-nanochat"] }
+export-pretrained = "python tools/export_tokenizer.py --pretrained gpt2 cl100k_base"
