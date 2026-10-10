@@ -8,12 +8,12 @@
 - FA warp specialization
 - fix mfu for rtx pro 6000 and rtx 5090
 - try mxfp8 with muon gather/reduce
+- try sm120f (GB10 compatibility)
 
 # done
 
 - remove nvfp4 code
 - add hours to eta: 1h 34.2m
-- only use full tokens for final bpb validation
-- why does it rebuild without changes sometimes?
+- why does it sometimes rebuild even with no code changes?
 - reduce compile noise
 - speed up builds (skip building tests)
