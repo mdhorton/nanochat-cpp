@@ -20,12 +20,13 @@ The following are worth checking out on rented hosts:
 - cooling
 
 Run `pixi run nccl-bench` to get an idea of collectives performance. Substandard PCIe can easily cut performance in
-half. For PCIe 5x16, a solid host will report ~25+ GB/sec. ~20 GB/sec usually performs acceptable. ~10-15 GB/sec is
-probably the bare minimum.
+half. For PCIe 5x16, a solid host will report ~25+ GB/sec. ~20 GB/sec is usually acceptable. ~10-15 GB/sec is probably
+the bare minimum.
 
 Some hosts intentionally lower the power cap. Sometimes for thermal reasons. This is worth a quick check via
-`nvidia-smi`. The best hosts keep GPU temps under 50C without lowering the power cap. If temps regularly exceed 80C then
-thermal throttling is a risk.
+`nvidia-smi`. Also, if temps regularly exceed 80C then thermal throttling is a risk.
+
+If any of these 3 items is subpar, then the performance will suffer.
 
 ## goal with 2x RTX Pro 4000 blackwell GPUs (sm120)
 
@@ -37,7 +38,7 @@ target:
 
 ```~5.84B tokens in 2376 minutes (39.6 hours) = ~41k toks/sec```
 
-## RTX Pro 4000 Blackwell == 145 watts
+## RTX Pro 4000 Blackwell = 145 watts
 
 Pre-training workload is heavily power-bound and these cards have a low power cap (145 watts). They boost to 3000 GHz,
 but most large dense GEMMs run at ~1700 GHz due to the power cap.

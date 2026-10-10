@@ -7,6 +7,7 @@
 - run --attention=mx|fa2|bf16|bf16mx full d12 equal-time pairs
 - FA warp specialization
 - fix mfu for rtx pro 6000 and rtx 5090
+- try mxfp8 with muon gather/reduce
 
 # done
 
