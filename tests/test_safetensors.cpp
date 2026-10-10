@@ -14,7 +14,7 @@ fs::path temp_file(const std::string& name) {
   return fs::temp_directory_path() / ("nanochat_" + std::to_string(::getpid()) + "_" + name);
 }
 
-// Values written by tools/export_train_golden.py (safetensors_check.safetensors).
+// Values written by scripts/export_train_golden.py (safetensors_check.safetensors).
 st::TensorMap check_tensors() {
   return {
         {"f32", torch::arange(12, torch::kFloat32).reshape({3, 4}) / 3},
@@ -60,7 +60,7 @@ TEST(Safetensors, LoadToCuda) {
 TEST(Safetensors, ReadsPythonFile) {
   const auto path = test_env().golden_dir / "train" / "safetensors_check.safetensors";
   if (!fs::exists(path))
-    GTEST_SKIP() << "missing " << path << " (run tools/export_train_golden.py)";
+    GTEST_SKIP() << "missing " << path << " (run scripts/export_train_golden.py)";
   expect_same(st::load(path), check_tensors());
   EXPECT_EQ(st::load_metadata(path).at("source"), "python");
 }

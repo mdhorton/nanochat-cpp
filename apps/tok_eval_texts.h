@@ -1,4 +1,4 @@
-// Sample texts copied from nanochat scripts/tok_eval.py (generated; do not edit by hand).
+// Sample texts copied from nanochat's scripts/tok_eval.py (generated; do not edit by hand).
 #pragma once
 
 #include <string_view>

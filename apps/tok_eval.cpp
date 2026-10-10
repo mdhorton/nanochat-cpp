@@ -1,4 +1,4 @@
-// Evaluate compression ratio of the tokenizer against GPT-2 and GPT-4. Port of scripts/tok_eval.py.
+// Evaluate compression ratio of the tokenizer against GPT-2 and GPT-4. Port of nanochat's scripts/tok_eval.py.
 #include <format>
 #include <iostream>
 #include <map>
@@ -86,10 +86,10 @@ static int run(int argc, char** argv) {
   const fs::path tok_dir = base_dir / "tokenizer";
   const fs::path ours_path = flags.str("tokenizer", (tok_dir / "tokenizer.json").string(), "our tokenizer");
   const fs::path gpt2_path = flags.str(
-        "gpt2", (tok_dir / "gpt2.json").string(), "GPT-2 encoding (tools/export_tokenizer.py --pretrained gpt2)");
+        "gpt2", (tok_dir / "gpt2.json").string(), "GPT-2 encoding (scripts/export_tokenizer.py --pretrained gpt2)");
   const fs::path gpt4_path = flags.str(
         "gpt4", (tok_dir / "cl100k_base.json").string(),
-        "GPT-4 encoding (tools/export_tokenizer.py --pretrained cl100k_base)");
+        "GPT-4 encoding (scripts/export_tokenizer.py --pretrained cl100k_base)");
   flags.done();
 
   // the tokenizer was trained on earlier train shards, so it has seen the train text

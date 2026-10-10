@@ -4,7 +4,7 @@
 # per-pair links, leave-one-out rings (slow: n*(n-1)/2 + n runs, most of the time on 8 GPUs).
 # the project busbw (min avg busbw of all_gather and reduce_scatter, ZeRO-2's collectives) is printed last and written
 # to --result.
-# build first with tools/build_nccl_tests.sh. raw logs + summary.json go to --out.
+# build first with scripts/build_nccl_tests.sh. raw logs + summary.json go to --out.
 
 import argparse
 import itertools
@@ -150,7 +150,7 @@ def main():
         sys.exit("need >= 2 GPUs")
     if not a.dry_run:
         if not (Path(a.build) / "all_gather_perf").exists():
-            sys.exit(f"no nccl-tests in {a.build}; run tools/build_nccl_tests.sh")
+            sys.exit(f"no nccl-tests in {a.build}; run scripts/build_nccl_tests.sh")
         if (busy := busy_gpus(gpus)) and not a.force:
             sys.exit(f"GPUs {busy} busy; --force to run anyway")
 

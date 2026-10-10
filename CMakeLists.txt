@@ -50,7 +50,7 @@ add_library(nanochat
         src/nanochat/tokenizer/splitter.cpp
         src/nanochat/tokenizer/tokenizer.cpp)
 target_include_directories(nanochat PUBLIC src)
-target_compile_definitions(nanochat PUBLIC NANOCHAT_CACHE_DIR="${PROJECT_SOURCE_DIR}/cache")
+target_compile_definitions(nanochat PUBLIC NANOCHAT_PROJECT_DIR="${PROJECT_SOURCE_DIR}")
 target_link_libraries(nanochat PUBLIC
         PkgConfig::PCRE2 Arrow::arrow_shared Parquet::parquet_shared nlohmann_json::nlohmann_json Threads::Threads)
 

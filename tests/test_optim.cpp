@@ -99,7 +99,7 @@ TEST(Optim, Groups) {
 // Feeds Python's gradients into the C++ optimizer and compares every parameter after each step.
 TEST(OptimGolden, StepsMatchPython) {
   if (!fs::exists(golden("optim_config.json")))
-    GTEST_SKIP() << "missing " << golden("optim_config.json") << " (run tools/export_train_golden.py)";
+    GTEST_SKIP() << "missing " << golden("optim_config.json") << " (run scripts/export_train_golden.py)";
   const auto config = read_json(golden("optim_config.json"));
   GPT model(golden_config());
   model->load_state(st::load(golden("gpt_perturbed.safetensors"), torch::kCUDA));

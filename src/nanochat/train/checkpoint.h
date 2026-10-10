@@ -1,6 +1,6 @@
 // Training checkpoints, laid out like nanochat/checkpoint_manager.py but in safetensors:
 //   model_<step>.safetensors, optim_<step>_rank<r>.safetensors (optimizer state is per rank), meta_<step>.json.
-// tools/convert_checkpoint.py converts to and from Python's .pt files.
+// scripts/convert_checkpoint.py converts to and from Python's .pt files.
 #pragma once
 
 #include <cstdint>

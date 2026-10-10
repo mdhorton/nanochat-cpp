@@ -17,7 +17,7 @@ import sys
 
 sys.dont_write_bytecode = True  # keep the nanochat tree untouched
 
-from export_tokenizer import CACHE_DIR
+from export_tokenizer import BASE_DIR, PROJECT_CACHE_DIR
 
 
 def ranks_b64(tok):
@@ -26,7 +26,7 @@ def ranks_b64(tok):
 
 
 def train_iter(max_chars, doc_cap):
-    # same semantics as scripts/tok_train.py text_iterator
+    # same semantics as nanochat's scripts/tok_train.py text_iterator
     from nanochat.dataset import parquets_iter_batched
     nchars = 0
     for batch in parquets_iter_batched(split="train"):
@@ -65,8 +65,8 @@ CONVERSATIONS = [
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--base-dir", default=CACHE_DIR, help="nanochat data directory")
-    parser.add_argument("--out-dir", help="default: <base-dir>/golden")
+    parser.add_argument("--base-dir", default=BASE_DIR, help="nanochat data directory")
+    parser.add_argument("--out-dir", help="default: <project>/cache/golden")
     parser.add_argument("--nanochat-dir", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "external", "nanochat"))
     parser.add_argument("--num-docs", type=int, default=1000, help="val docs in encode.jsonl")
     parser.add_argument("--num-pretrained-docs", type=int, default=300, help="val docs in encode_<pretrained>.jsonl")
@@ -74,7 +74,7 @@ def main():
     parser.add_argument("--medium-doc-cap", type=int, default=10_000)
     parser.add_argument("--medium-vocab-size", type=int, default=4096)
     args = parser.parse_args()
-    args.out_dir = args.out_dir or os.path.join(args.base_dir, "golden")
+    args.out_dir = args.out_dir or os.path.join(PROJECT_CACHE_DIR, "golden")
 
     os.environ["NANOCHAT_BASE_DIR"] = args.base_dir  # nanochat reads it at import time
     sys.path.insert(0, args.nanochat_dir)

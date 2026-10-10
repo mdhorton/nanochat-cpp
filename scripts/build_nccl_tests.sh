@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # build NVIDIA nccl-tests against the pixi env's CUDA and the NCCL wheel torch uses. run inside `pixi shell`
-# (or `pixi run tools/build_nccl_tests.sh`).
+# (or `pixi run scripts/build_nccl_tests.sh`).
 
 set -euo pipefail
 

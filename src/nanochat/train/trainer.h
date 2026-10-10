@@ -1,5 +1,5 @@
-// Pre-training loop. Port of scripts/base_train.py (without torch.compile, CORE eval and sampling; wandb via
-// tools/wandb_upload.py).
+// Pre-training loop. Port of nanochat's scripts/base_train.py (without torch.compile, CORE eval and sampling; wandb via
+// scripts/wandb_upload.py).
 #pragma once
 
 #include <cstdint>
@@ -47,10 +47,10 @@ struct TrainOptions {
   // eval_tokens: during training; final_eval_tokens: the last step's eval (both match Python's default)
   int64_t eval_every = 250, eval_tokens = 80 * 524288, final_eval_tokens = 80 * 524288, save_every = -1;
   bool save = true; // save at the end (and every save_every)
-  // run name: checkpoint dir and wandb name; metrics go to <base_dir>/metrics/<run>/metrics-<timestamp>.jsonl.
+  // run name: checkpoint dir and wandb name; metrics go to <project>/cache/metrics/<run>/metrics-<timestamp>.jsonl.
   // "dummy" (as base_train.py): checkpoint dir d<depth>, no metrics
   std::string run = "dummy";
-  bool wandb = false; // rank 0 uploads the metrics live with tools/wandb_upload.py (not with run "dummy")
+  bool wandb = false; // rank 0 uploads the metrics live with scripts/wandb_upload.py (not with run "dummy")
   // nsys: NVTX range "profile" around steps [profile_start, profile_start + profile_steps), -1 = off
   int64_t profile_start = -1, profile_steps = 3;
   // paths

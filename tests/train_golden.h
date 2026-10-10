@@ -1,4 +1,4 @@
-// Shared by the train golden tests: TrainOptions from tools/export_train_golden.py's "options".
+// Shared by the train golden tests: TrainOptions from scripts/export_train_golden.py's "options".
 #pragma once
 
 #include <nlohmann/json.hpp>

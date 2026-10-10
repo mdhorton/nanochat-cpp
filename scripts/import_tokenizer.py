@@ -16,12 +16,12 @@ import numpy as np
 import tiktoken
 import torch
 
-CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "cache")
+from export_tokenizer import BASE_DIR
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--tokenizer-dir", default=os.path.join(CACHE_DIR, "tokenizer"))
+    parser.add_argument("--tokenizer-dir", default=os.path.join(BASE_DIR, "tokenizer"))
     args = parser.parse_args()
 
     with open(os.path.join(args.tokenizer_dir, "tokenizer.json")) as f:

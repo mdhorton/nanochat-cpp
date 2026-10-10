@@ -5,7 +5,7 @@ Files per step: model_<step>, optim_<step>_rank<r> (optional, one per rank), met
 Optimizer state keeps Python's state_dict structure: tensors "state.<param index>.<field>" plus the param groups as
 JSON in the safetensors metadata ("param_groups").
 
-  python tools/convert_checkpoint.py SRC DST --to safetensors [--step N] [--model-only]
+  python scripts/convert_checkpoint.py SRC DST --to safetensors [--step N] [--model-only]
 """
 import argparse
 import glob

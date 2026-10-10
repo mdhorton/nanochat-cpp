@@ -359,12 +359,12 @@ private:
   std::ofstream out_;
 };
 
-// tools/wandb_upload.py --follow on the metrics file, in the background. It stops at the metrics end line, or when
+// scripts/wandb_upload.py --follow on the metrics file, in the background. It stops at the metrics end line, or when
 // this process exits.
 class WandbUpload {
 public:
   explicit WandbUpload(const fs::path& metrics) {
-    const auto script = default_base_dir().parent_path() / "tools" / "wandb_upload.py"; // <project>/cache's parent
+    const auto script = project_dir() / "scripts" / "wandb_upload.py";
     const auto pid = std::to_string(getpid());
     std::vector<std::string> argv{"python", script.string(), "--file", metrics.string(), "--follow", "--pid", pid};
     std::vector<char*> cargv;
@@ -466,7 +466,7 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
   std::optional<MetricsLog> metrics;
   std::optional<WandbUpload> wandb;
   if (master && o.run != "dummy") {
-    const auto path = metrics_path(o.base_dir / "metrics" / o.run, resuming);
+    const auto path = metrics_path(project_cache_dir() / "metrics" / o.run, resuming);
     print("Metrics: " + path.string());
     metrics.emplace(
           path,

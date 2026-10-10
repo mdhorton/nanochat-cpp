@@ -33,11 +33,11 @@ the rustbpe/tiktoken benchmark moved to phase 5.
 
 ### phase 2
 
-port pre-training (`gpt.py`, `optim.py`, `dataloader.py`, `loss_eval.py`, `scripts/base_train.py`) to libtorch.
+port pre-training (`gpt.py`, `optim.py`, `dataloader.py`, `loss_eval.py`, nanochat's `scripts/base_train.py`) to libtorch.
 
 - oracle: python nanochat run uncompiled (`TORCHDYNAMO_DISABLE=1`), SDPA attention, seed 42. the dataloader must
   match exactly; everything else within bf16 tolerances.
-- golden data: `tools/export_train_golden.py` -> `cache/golden/train/`.
+- golden data: `scripts/export_train_golden.py` -> `cache/golden/train/`.
 - parity config: d4, head_dim 64, T=256, SSSL, device batch 8, total batch 4096, 20 iterations.
 - target: d24 on 2 GPUs + FP8.
 

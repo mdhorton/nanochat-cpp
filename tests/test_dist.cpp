@@ -1,5 +1,5 @@
 // 2-GPU training (ZeRO-2 MuonAdamW, strided data, all-reduced eval) vs Python under torchrun
-// (tools/export_train_golden.py train_ddp2). Runs dist_worker, one process per GPU.
+// (scripts/export_train_golden.py train_ddp2). Runs dist_worker, one process per GPU.
 #include <gtest/gtest.h>
 
 #include <unistd.h>

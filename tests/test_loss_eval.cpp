@@ -1,4 +1,4 @@
-// Validation bits per byte vs Python (tools/export_train_golden.py).
+// Validation bits per byte vs Python (scripts/export_train_golden.py).
 #include <gtest/gtest.h>
 
 #include <fstream>
@@ -13,7 +13,7 @@ namespace fs = std::filesystem;
 TEST(LossEvalGolden, BpbMatchesPython) {
   const auto dir = test_env().golden_dir / "train";
   if (!fs::exists(dir / "bpb.json"))
-    GTEST_SKIP() << "missing " << dir / "bpb.json" << " (run tools/export_train_golden.py)";
+    GTEST_SKIP() << "missing " << dir / "bpb.json" << " (run scripts/export_train_golden.py)";
   std::ifstream in(dir / "bpb.json");
   const auto j = nlohmann::json::parse(in);
   const auto& c = j["config"];

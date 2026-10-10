@@ -1,4 +1,4 @@
-// Train the BPE tokenizer on the pretraining data. Port of scripts/tok_train.py.
+// Train the BPE tokenizer on the pretraining data. Port of nanochat's scripts/tok_train.py.
 #include <chrono>
 #include <format>
 #include <fstream>

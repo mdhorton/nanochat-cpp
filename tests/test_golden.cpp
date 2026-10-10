@@ -1,4 +1,4 @@
-// Parity with Python nanochat, using data from tools/export_golden.py. Skipped when the golden dir is missing.
+// Parity with Python nanochat, using data from scripts/export_golden.py. Skipped when the golden dir is missing.
 #include <gtest/gtest.h>
 
 #include <fstream>
@@ -19,7 +19,7 @@ static fs::path golden(const std::string& name) {
 
 #define REQUIRE_GOLDEN(name)                                                                                           \
   if (!fs::exists(golden(name)))                                                                                       \
-  GTEST_SKIP() << "missing " << golden(name) << " (run tools/export_golden.py)"
+  GTEST_SKIP() << "missing " << golden(name) << " (run scripts/export_golden.py)"
 
 static json read_json(const fs::path& path) {
   std::ifstream in(path);

@@ -1,12 +1,13 @@
 """
-Upload a base_train metrics file (<base_dir>/metrics/<run>/metrics-<timestamp>.jsonl) to wandb, as base_train.py logs.
+Upload a base_train metrics file (<project>/cache/metrics/<run>/metrics-<timestamp>.jsonl) to wandb, as base_train.py
+logs.
 
 The header line becomes the run config; step and eval lines are logged at wandb step = training step, with "step" also
 kept as a key (base_train.py's x axis). The wandb run id is kept in <file>.wandb-id, so uploading again (or following a
 resumed training run) continues the same wandb run and skips the steps it already has.
 
-  python tools/wandb_upload.py --file cache/metrics/full-d12             # newest file in the dir
-  python tools/wandb_upload.py --file <file> --follow [--pid <trainer>]  # live; base_train --wandb does this
+  python scripts/wandb_upload.py --file cache/metrics/full-d12             # newest file in the dir
+  python scripts/wandb_upload.py --file <file> --follow [--pid <trainer>]  # live; base_train --wandb does this
 """
 import argparse
 import glob

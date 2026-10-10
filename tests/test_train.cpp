@@ -1,4 +1,4 @@
-// base_train: scaling rules, schedules, and a tiny training run vs Python (tools/export_train_golden.py).
+// base_train: scaling rules, schedules, and a tiny training run vs Python (scripts/export_train_golden.py).
 #include <gtest/gtest.h>
 
 #include <fstream>
@@ -22,7 +22,7 @@ class TrainGolden : public testing::Test {
 protected:
   void SetUp() override {
     if (!fs::exists(golden("train.json")))
-      GTEST_SKIP() << "missing " << golden("train.json") << " (run tools/export_train_golden.py)";
+      GTEST_SKIP() << "missing " << golden("train.json") << " (run scripts/export_train_golden.py)";
     std::ifstream in(golden("train.json"));
     golden_ = nlohmann::json::parse(in);
     options_ = options_from_json(golden_["options"]);
@@ -110,7 +110,7 @@ namespace {
 // Runs the tiny training of golden <prefix>.json and compares losses, val bpb and final weights.
 void check_train_golden(const std::string& prefix) {
   if (!fs::exists(golden(prefix + ".json")))
-    GTEST_SKIP() << "missing " << golden(prefix + ".json") << " (run tools/export_train_golden.py)";
+    GTEST_SKIP() << "missing " << golden(prefix + ".json") << " (run scripts/export_train_golden.py)";
   std::ifstream in(golden(prefix + ".json"));
   const auto golden_json = nlohmann::json::parse(in);
   auto options = options_from_json(golden_json["options"]);

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# runs on a fresh vast.ai instance; copied there and started by tools/vast_bootstrap.sh. disables vast's python venv,
+# runs on a fresh vast.ai instance; copied there and started by scripts/vast_bootstrap.sh. disables vast's python venv,
 # installs pixi, clones /workspace/nanochat-cpp, switches to --branch. with > 1 GPU, runs `pixi run nccl-bench` and
 # skips the rest if the busbw is below --min-bus-bw (default by PCIe gen: 4 → 15, 5 → 27 GB/s). then runs
 # `pixi run tok-train` and `pixi run quick-d12`, and hands over an interactive login shell in the repo.

@@ -1,4 +1,4 @@
-// GPT model: structure tests, plus parity with Python from tools/export_train_golden.py (skipped when missing).
+// GPT model: structure tests, plus parity with Python from scripts/export_train_golden.py (skipped when missing).
 #include <gtest/gtest.h>
 
 #include <fstream>
@@ -19,9 +19,9 @@ fs::path golden(const std::string& name) {
 
 #define REQUIRE_TRAIN_GOLDEN(name)                                                                                     \
   if (!fs::exists(golden(name)))                                                                                       \
-  GTEST_SKIP() << "missing " << golden(name) << " (run tools/export_train_golden.py)"
+  GTEST_SKIP() << "missing " << golden(name) << " (run scripts/export_train_golden.py)"
 
-// The parity config (see tools/export_train_golden.py).
+// The parity config (see scripts/export_train_golden.py).
 GPTConfig tiny_config() {
   return {
         .sequence_len = 256,

@@ -14,7 +14,7 @@ using namespace nanochat;
 
 static int run(int argc, char** argv) {
   Flags flags(argc, argv, "Tiny multi-GPU training run for the dist golden test");
-  const auto golden = flags.str("golden", "", "train_ddp<N>.json from tools/export_train_golden.py");
+  const auto golden = flags.str("golden", "", "train_ddp<N>.json from scripts/export_train_golden.py");
   const auto base_dir = flags.str("base-dir", default_base_dir().string(), "nanochat data directory");
   const auto out = flags.str("out", "", "output path prefix");
   const auto nproc = static_cast<int>(flags.i64("nproc", 2, "number of GPUs"));

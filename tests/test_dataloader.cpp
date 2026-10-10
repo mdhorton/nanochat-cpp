@@ -1,4 +1,4 @@
-// BOS best-fit data loader: batches and states must be identical to Python's (tools/export_train_golden.py).
+// BOS best-fit data loader: batches and states must be identical to Python's (scripts/export_train_golden.py).
 #include <gtest/gtest.h>
 
 #include <fstream>
@@ -34,7 +34,7 @@ protected:
 
   void SetUp() override {
     if (!tokenizer_)
-      GTEST_SKIP() << "missing " << golden("loader_cases.json") << " (run tools/export_train_golden.py)";
+      GTEST_SKIP() << "missing " << golden("loader_cases.json") << " (run scripts/export_train_golden.py)";
   }
 
   static inline std::unique_ptr<Tokenizer> tokenizer_;

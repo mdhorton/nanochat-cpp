@@ -58,7 +58,7 @@ private:
 };
 
 // Documents cropped to doc_cap code points, stopping after the doc that takes the total past max_chars.
-// Same semantics as text_iterator in scripts/tok_train.py.
+// Same semantics as text_iterator in nanochat's scripts/tok_train.py.
 class CappedTexts {
 public:
   CappedTexts(ParquetBatches& batches, int64_t max_chars, int64_t doc_cap, size_t batch_size = 8192);

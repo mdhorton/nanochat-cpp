@@ -2,13 +2,13 @@
 Export golden pre-training data from Python nanochat for the C++ parity tests (tests/test_*.cpp in train_tests).
 
 Python runs uncompiled (TORCHDYNAMO_DISABLE=1) with SDPA attention, so both sides use the same ATen kernels.
-Writes to --out-dir (default <base-dir>/golden/train):
+Writes to --out-dir (default <project>/cache/golden/train):
 - safetensors_check.safetensors: known tensors, checks the C++ reader against a Python writer
 - gpt_*: tiny model init weights, perturbed weights, a batch, and logits / loss / grads
 - optim_*: MuonAdamW steps from given grads
 - loader_*: batches from the BOS best-fit data loader (train, resume, rank 1 of 2, val) on the real data
 - bpb*: val bits per byte of a small real-vocab model
-- ckpt*: a Python checkpoint converted to safetensors (tools/convert_checkpoint.py), and the step after it
+- ckpt*: a Python checkpoint converted to safetensors (scripts/convert_checkpoint.py), and the step after it
 - train*: a tiny base_train run (per-step losses, val bpb, schedules, final weights)
 - train_ddp2*: the same run on 2 GPUs (torchrun --nproc-per-node 2 ... --sections train)
 - fp8_*: the perturbed tiny model's loss and grads with FP8 Linears (nanochat/fp8.py)
@@ -26,7 +26,7 @@ sys.dont_write_bytecode = True  # keep the nanochat tree untouched
 
 import torch
 
-from export_tokenizer import CACHE_DIR
+from export_tokenizer import BASE_DIR, PROJECT_CACHE_DIR
 
 NANOCHAT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "external", "nanochat")
 
@@ -242,7 +242,7 @@ def export_bpb(out):
 
 
 def export_ckpt(out):
-    # a Python .pt checkpoint after 2 steps, converted with tools/convert_checkpoint.py, plus a 3rd step to check that
+    # a Python .pt checkpoint after 2 steps, converted with scripts/convert_checkpoint.py, plus a 3rd step to check that
     # the C++ side resumes from it exactly
     try:
         import safetensors  # noqa: F401
@@ -298,7 +298,7 @@ TRAIN = dict(depth=4, aspect_ratio=64, head_dim=64, max_seq_len=256, window_patt
 
 
 def export_train(out, fp8=False):
-    # scripts/base_train.py transcribed (it imports wandb/jinja2), minus compile, wandb, CORE and sampling
+    # nanochat's scripts/base_train.py transcribed (it imports wandb/jinja2), minus compile, wandb, CORE and sampling
     import math
     import torch.distributed as dist
     from nanochat.dataloader import tokenizing_distributed_data_loader_bos_bestfit as val_loader_fn
@@ -429,12 +429,12 @@ SECTIONS = {"safetensors": export_safetensors_check, "gpt": export_gpt, "optim":
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--base-dir", default=CACHE_DIR, help="nanochat data directory")
-    parser.add_argument("--out-dir", help="default: <base-dir>/golden/train")
+    parser.add_argument("--base-dir", default=BASE_DIR, help="nanochat data directory")
+    parser.add_argument("--out-dir", help="default: <project>/cache/golden/train")
     parser.add_argument("--nanochat-dir", default=NANOCHAT_DIR)
     parser.add_argument("--sections", default=",".join(SECTIONS), help="comma-separated subset of " + ",".join(SECTIONS))
     args = parser.parse_args()
-    args.out_dir = args.out_dir or os.path.join(args.base_dir, "golden", "train")
+    args.out_dir = args.out_dir or os.path.join(PROJECT_CACHE_DIR, "golden", "train")
 
     os.environ["NANOCHAT_BASE_DIR"] = args.base_dir  # nanochat reads it at import time
     sys.path.insert(0, args.nanochat_dir)

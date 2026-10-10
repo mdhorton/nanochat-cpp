@@ -15,7 +15,10 @@ import pickle
 
 import numpy as np
 
-CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "cache")
+# as the C++ project_cache_dir(): this project's own files (metrics, golden data), wherever the base dir is
+PROJECT_CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "cache")
+# as the C++ default_base_dir(): NANOCHAT_BASE_DIR when set and non-empty, else <project>/cache
+BASE_DIR = os.environ.get("NANOCHAT_BASE_DIR") or PROJECT_CACHE_DIR
 
 
 def encoding_to_json(enc):
@@ -45,7 +48,7 @@ def export_pretrained(name, out_dir):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--tokenizer-dir", default=os.path.join(CACHE_DIR, "tokenizer"))
+    parser.add_argument("--tokenizer-dir", default=os.path.join(BASE_DIR, "tokenizer"))
     parser.add_argument("--out-dir", help="default: --tokenizer-dir")
     parser.add_argument("--pretrained", nargs="+", help="tiktoken encodings to export, e.g. gpt2 cl100k_base")
     args = parser.parse_args()

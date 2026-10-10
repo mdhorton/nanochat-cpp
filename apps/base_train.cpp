@@ -1,4 +1,4 @@
-// Pretrain a base model. Port of scripts/base_train.py (no CORE eval or sampling yet).
+// Pretrain a base model. Port of nanochat's scripts/base_train.py (no CORE eval or sampling yet).
 // --nproc N runs one process per GPU (as torchrun --nproc_per_node=N).
 #include <algorithm>
 #include <cstdlib>
@@ -89,7 +89,7 @@ static int run(int argc, char** argv) {
         "run name: checkpoint dir, metrics/<run>/metrics-<timestamp>.jsonl, wandb name ('dummy' = d<depth>, no "
         "metrics)");
   o.wandb = flags.boolean(
-        "wandb", o.wandb, "upload the metrics live to wandb (project nanochat) with tools/wandb_upload.py");
+        "wandb", o.wandb, "upload the metrics live to wandb (project nanochat) with scripts/wandb_upload.py");
   // distributed
   const auto nproc = static_cast<int>(flags.i64("nproc", 1, "number of GPUs (one process each)"));
   const auto rank = static_cast<int>(flags.i64("rank", -1, "internal: set by --nproc for each process"));

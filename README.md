@@ -22,7 +22,9 @@ support P2P.
 
 However, sm120 has MXFP8 and NVFP4, which the H100 does not have. So we'll see if this helps.
 
-## TLDR results
+## TLDR
+
+### Pre-training results
 
 | GPU            | GPUs | device batch size |     bpb |   CORE |     time |    
 |----------------|-----:|------------------:|--------:|-------:|---------:|
@@ -31,12 +33,11 @@ However, sm120 has MXFP8 and NVFP4, which the H100 does not have. So we'll see i
 | RTX Pro 4000   |    2 |                 2 | 0.71934 | 0.2616 | 1622.59m |
 
 These runs used `--depth=24 --target-param-data-ratio=8`. The same model config was used as the python version. CORE
-was calculated using the original python code.
+metric was calculated using the original python code.
 
 ## Performance history change summary
 
-There were more changes than this, but these were the keepers. These can be run with `pixi run medium-d24` along with
-the row flags.
+These were the keepers. These can be run with `pixi run medium-d24` along with the row flags.
 
 These were 100-steps @ depth 24 run on rented 8x RTX Pro 6000 S.
 
@@ -52,11 +53,11 @@ These were 100-steps @ depth 24 run on rented 8x RTX Pro 6000 S.
 |   8 | 1.328304 |  33.1g | 2.19m | bf16 muon gradient reduce    | --muon-bf16-gather=false --muon-bf16-reduce=true --gather-overlap=true --gemm=cutlass --fp8-recipe=mxfp8 --fused=true --loss-chunk-rows=-1 --attention=mx         |
 |   9 | 1.328021 |  33.1g | 2.17m | bf16 muon update gather      | --muon-bf16-gather=true --muon-bf16-reduce=true --gather-overlap=true --gemm=cutlass --fp8-recipe=mxfp8 --fused=true --loss-chunk-rows=-1 --attention=mx          |
 
-Row 2 was required so that `--depth=24` worked on RTX Pro 4000.
+Row 2 was required to get `--depth=24` working on RTX Pro 4000.
 
-Row 3 was needed because c++ doesn't have Inductor. (However, we have an LLM agent.)
+Row 3 was needed because c++ doesn't have Inductor. (However, we have an LLM agent that can fuse kernels.) This was the bulk of the speedup.
 
-Rows 4-6 utilise sm120 features.
+Rows 4-6 utilises sm120 features.
 
 Rows 7-9 target the lack of nvlink. Move less data and overlap it with compute.
 
@@ -101,7 +102,7 @@ curl -fsSL https://pixi.sh/install.sh | bash
 # download 10 parquet files
 pixi run dataset 10
 
-# train the BPE tokenizer
+# train the BPE tokenizer (usually takes ~2-3 minutes)
 pixi run tok-train
 ```
 
@@ -115,6 +116,7 @@ pixi run quick-d12
 pixi run medium-d12
 
 # execute a full --depth=24 training run and use wandb (requires WANDB_API_KEY or wandb login)
+# run `pixi run dataset 170` if needed to fetch enough parquet files.
 pixi run full-d24 --run=full-d24-8x6000 --wandb
 
 # execute a customized training run
@@ -124,7 +126,7 @@ pixi run base-train --depth=26 --device-batch-size=16 --eval-every=1000 --save-e
 The `quick-, medium-, full-` prefixes use preset flags for convenience (see `pixi.toml` for the presets). All preset
 flags can be overridden on the command line. Or use `pixi run based-train` for no preset flags.
 
-NOTE: `--fp8` is enabled by default. To disable use `--fp8=false`. This will also disable mxfp8 related flags.
+NOTE: `--fp8` is enabled by default. Use `--fp8=false` to disable. This will also disable mxfp8 related flags.
 
 ## Why c++?
 

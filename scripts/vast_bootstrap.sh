@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 
-# bootstrap a fresh vast.ai instance from the local machine: disable vast's auto-tmux, copy tools/vast_remote.sh to the
+# bootstrap a fresh vast.ai instance from the local machine: disable vast's auto-tmux, copy scripts/vast_remote.sh to the
 # home dir, log back in and run it (setup, nccl-bench busbw check, tok-train, quick-d12, then an interactive shell in
 # the repo). takes the ssh line vast shows, eg
-#   tools/vast_bootstrap.sh ssh -p 37157 root@198.53.64.194 -L 8080:localhost:8080
+#   scripts/vast_bootstrap.sh ssh -p 37157 root@198.53.64.194 -L 8080:localhost:8080
 # (-L and everything after it is ignored)
 
 set -euo pipefail
