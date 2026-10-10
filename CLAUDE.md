@@ -24,7 +24,7 @@ However, let me make the decision and install them.
 # testing code changes
 
 After making code changes, if you need to run a test that uses the GPU, run the shortest test reasonably possible. For
-example, usually a simple d4 or d12 test will suffice.
+example, usually a short d12 test will suffice.
 
 Leave the longer running tests to me.
 
@@ -32,4 +32,6 @@ Always check to see if the GPUs are in use before running a test that will hit t
 
 # sm120 target GPUs
 
-- RTX Pro 4000 Blackwell
+- RTX Pro 4000
+- RTX Pro 6000
+- RTX 5090

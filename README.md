@@ -24,13 +24,13 @@ However, sm120 has MXFP8 and NVFP4, which the H100 does not have. So we'll see i
 
 ## TLDR results
 
-| GPU            | GPU Count |     bpb |   CORE |     time | device-batch-size |       
-|----------------|----------:|--------:|-------:|---------:|------------------:|
-| RTX Pro 6000 S |         8 | 0.71773 | 0.2592 |  135.07m |                 8 |
-| RTX 5090       |         8 | 0.71769 | 0.2615 |  148.85m |                 4 |
-| RTX Pro 4000   |         2 | 0.71934 | 0.2616 | 1622.59m |                 2 |
+| GPU            | GPUs | device batch size |     bpb |   CORE |     time |    
+|----------------|-----:|------------------:|--------:|-------:|---------:|
+| RTX Pro 6000 S |    8 |                 8 | 0.71773 | 0.2592 |  135.07m |
+| RTX 5090       |    8 |                 4 | 0.71769 | 0.2615 |  148.85m |
+| RTX Pro 4000   |    2 |                 2 | 0.71934 | 0.2616 | 1622.59m |
 
-These runs used `--depth=24 --target-param-data-ratio=8`. They kept the same model config as the python version. CORE
+These runs used `--depth=24 --target-param-data-ratio=8`. The same model config was used as the python version. CORE
 was calculated using the original python code.
 
 ## Performance history change summary
