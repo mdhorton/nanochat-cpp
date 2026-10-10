@@ -22,16 +22,16 @@ support P2P.
 
 However, sm120 has MXFP8 and NVFP4, which the H100 does not have. So we'll see if this helps.
 
-## tl;dr results
-
-The following runs used `--depth=24 --target-param-data-ratio=8`. They also kept the same model config as the python
-version. And CORE was calculated using the original python code.
+## TLDR results
 
 | GPU            | GPU Count |     bpb |   CORE |                  time | device-batch-size |       
 |----------------|----------:|--------:|-------:|----------------------:|------------------:|
 | RTX Pro 6000 S |         8 | 0.71773 | 0.2592 |  139.96m ( 2h:19.96m) |                 8 |
 | RTX 5090       |         8 | 0.71769 | 0.2615 |  148.85m ( 2h:28.85m) |                 4 |
 | RTX Pro 4000   |         2 | 0.71934 | 0.2616 | 1622.59m (27h:02.59m) |                 2 |
+
+These runs used `--depth=24 --target-param-data-ratio=8`. They kept the same model config as the python version. CORE
+was calculated using the original python code.
 
 ## performance history change summary
 
@@ -41,18 +41,18 @@ flags from the table.
 Row #10 is the current default. Technically those flags could be omitted. I laid out all the flags for each row to make
 it clear what was being enabled or not.
 
-| row | bpb | memory | time | notes                        | flags                                                                                                                                                                                |
-|----:|----:|-------:|-----:|------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-|   1 |     |        |      | baseline                     | --muon-bf16-gather=false --muon-bf16-reduce=false --gather-overlap=false --gemm=cublas --fp8-recipe=tensorwise --fused=false --loss-chunk-rows=0 --attention=sdpa --window-pattern=L |
-|   2 |     |        |      | enable torch FA2 and SSSL    | --muon-bf16-gather=false --muon-bf16-reduce=false --gather-overlap=false --gemm=cublas --fp8-recipe=tensorwise --fused=false --loss-chunk-rows=0 --attention=fa2                     |
-|   3 |     |        |      | fused & chunked lm_head loss | --muon-bf16-gather=false --muon-bf16-reduce=false --gather-overlap=false --gemm=cublas --fp8-recipe=tensorwise --fused=false --loss-chunk-rows=-1 --attention=fa2                    |
-|   4 |     |        |      | fused many more kernels      | --muon-bf16-gather=false --muon-bf16-reduce=false --gather-overlap=false --gemm=cublas --fp8-recipe=tensorwise --fused=true --loss-chunk-rows=-1 --attention=fa2                     |
-|   5 |     |        |      | mxfp8                        | --muon-bf16-gather=false --muon-bf16-reduce=false --gather-overlap=false --gemm=cublas --fp8-recipe=mxfp8 --fused=true --loss-chunk-rows=-1 --attention=fa2                          |
-|   6 |     |        |      | mxfp8 attention              | --muon-bf16-gather=false --muon-bf16-reduce=false --gather-overlap=false --gemm=cublas --fp8-recipe=mxfp8 --fused=true --loss-chunk-rows=-1 --attention=mx                           |
-|   7 |     |        |      | mxfp8 gemm backend           | --muon-bf16-gather=false --muon-bf16-reduce=false --gather-overlap=false --gemm=cutlass --fp8-recipe=mxfp8 --fused=true --loss-chunk-rows=-1 --attention=mx                          |
-|   8 |     |        |      | overlap gathers with forward | --muon-bf16-gather=false --muon-bf16-reduce=false --gather-overlap=true --gemm=cutlass --fp8-recipe=mxfp8 --fused=true --loss-chunk-rows=-1 --attention=mx                           |
-|   9 |     |        |      | bf16 muon gradient reduce    | --muon-bf16-gather=false --muon-bf16-reduce=true --gather-overlap=true --gemm=cutlass --fp8-recipe=mxfp8 --fused=true --loss-chunk-rows=-1 --attention=mx                            |
-|  10 |     |        |      | bf16 muon update gather      | --muon-bf16-gather=true --muon-bf16-reduce=true --gather-overlap=true --gemm=cutlass --fp8-recipe=mxfp8 --fused=true --loss-chunk-rows=-1 --attention=mx                             |
+| row | bpb | memory | time | notes                        | flags                                                                                                                                                                                  |
+|----:|----:|-------:|-----:|------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+|   1 |     |        |      | baseline                     | `--muon-bf16-gather=false --muon-bf16-reduce=false --gather-overlap=false --gemm=cublas --fp8-recipe=tensorwise --fused=false --loss-chunk-rows=0 --attention=sdpa --window-pattern=L` |
+|   2 |     |        |      | enable torch FA2 and SSSL    | `--muon-bf16-gather=false --muon-bf16-reduce=false --gather-overlap=false --gemm=cublas --fp8-recipe=tensorwise --fused=false --loss-chunk-rows=0 --attention=fa2`                     |
+|   3 |     |        |      | fused & chunked lm_head loss | `--muon-bf16-gather=false --muon-bf16-reduce=false --gather-overlap=false --gemm=cublas --fp8-recipe=tensorwise --fused=false --loss-chunk-rows=-1 --attention=fa2`                    |
+|   4 |     |        |      | fused many more kernels      | `--muon-bf16-gather=false --muon-bf16-reduce=false --gather-overlap=false --gemm=cublas --fp8-recipe=tensorwise --fused=true --loss-chunk-rows=-1 --attention=fa2`                     |
+|   5 |     |        |      | mxfp8                        | `--muon-bf16-gather=false --muon-bf16-reduce=false --gather-overlap=false --gemm=cublas --fp8-recipe=mxfp8 --fused=true --loss-chunk-rows=-1 --attention=fa2`                          |
+|   6 |     |        |      | mxfp8 attention              | `--muon-bf16-gather=false --muon-bf16-reduce=false --gather-overlap=false --gemm=cublas --fp8-recipe=mxfp8 --fused=true --loss-chunk-rows=-1 --attention=mx`                           |
+|   7 |     |        |      | mxfp8 gemm backend           | `--muon-bf16-gather=false --muon-bf16-reduce=false --gather-overlap=false --gemm=cutlass --fp8-recipe=mxfp8 --fused=true --loss-chunk-rows=-1 --attention=mx`                          |
+|   8 |     |        |      | overlap gathers with forward | `--muon-bf16-gather=false --muon-bf16-reduce=false --gather-overlap=true --gemm=cutlass --fp8-recipe=mxfp8 --fused=true --loss-chunk-rows=-1 --attention=mx`                           |
+|   9 |     |        |      | bf16 muon gradient reduce    | `--muon-bf16-gather=false --muon-bf16-reduce=true --gather-overlap=true --gemm=cutlass --fp8-recipe=mxfp8 --fused=true --loss-chunk-rows=-1 --attention=mx`                            |
+|  10 |     |        |      | bf16 muon update gather      | `--muon-bf16-gather=true --muon-bf16-reduce=true --gather-overlap=true --gemm=cutlass --fp8-recipe=mxfp8 --fused=true --loss-chunk-rows=-1 --attention=mx`                             |
 
 ## initial port
 
@@ -83,7 +83,7 @@ Most of the sm120 tuning fell into the following categories:
 
 I've only tested on Linux Ubuntu 24.04.
 
-### 1-time initial setup
+### initial setup
 
 ```bash
 # install pixi if needed
@@ -98,11 +98,6 @@ pixi run tok-train
 
 ### execute some runs
 
-The `quick-, medium-, full-` prefixes use preset flags for convenience (see `pixi.toml` for the presets). All preset
-flags can be overridden on the command line. Or use `pixi run based-train` for no preset flags.
-
-NOTE: `--fp8` is enabled by default. To disable use `--fp8=false`. This will also disable mxfp8 related flags.
-
 ```bash
 # execute a short (30 step) --depth=12 training run
 pixi run quick-d12
@@ -116,6 +111,11 @@ pixi run full-d24 --run=full-d24-8x6000 --wandb
 # execute a customized training run
 pixi run base-train --depth=26 --device-batch-size=16 --eval-every=1000 --save-every=1000 --run=full-d26 --wandb
 ```
+
+The `quick-, medium-, full-` prefixes use preset flags for convenience (see `pixi.toml` for the presets). All preset
+flags can be overridden on the command line. Or use `pixi run based-train` for no preset flags.
+
+NOTE: `--fp8` is enabled by default. To disable use `--fp8=false`. This will also disable mxfp8 related flags.
 
 ## why c++?
 

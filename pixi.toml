@@ -45,7 +45,7 @@ NANOCHAT_BASE_DIR = "$PIXI_PROJECT_ROOT/cache"
 
 # these usually were the most consistant nccl flags.
 NCCL_PROTO = "Simple"
-NCCL_MIN_NCHANNELS = "4"
+NCCL_MIN_NCHANNELS = "8"
 NCCL_CUMEM_HOST_ENABLE = "0"
 
 # the following env vars are used as task variables.
@@ -77,10 +77,10 @@ rebuild = { cmd = "rm -rf cmake-build-pixi && pixi run build {{ opt }}", args = 
 base-train = { cmd = "cmake-build-pixi/base_train", depends-on = ["build"] }
 
 quick-d12 = { cmd = "cmake-build-pixi/base_train $D12_BASE $QUICK_BASE --num-iterations=30", depends-on = ["build"] }
-quick-d24 = { cmd = "cmake-build-pixi/base_train $D24_BASE $QUICK_BASE --num-iterations=10", depends-on = ["build"] }
+quick-d24 = { cmd = "cmake-build-pixi/base_train $D24_BASE $QUICK_BASE --num-iterations=30", depends-on = ["build"] }
 
 medium-d12 = { cmd = "cmake-build-pixi/base_train $D12_BASE $QUICK_BASE --num-iterations=100 --run=medium-d12", depends-on = ["build"] }
-medium-d24 = { cmd = "cmake-build-pixi/base_train $D24_BASE $QUICK_BASE --num-iterations=30  --run=medium-d24", depends-on = ["build"] }
+medium-d24 = { cmd = "cmake-build-pixi/base_train $D24_BASE $QUICK_BASE --num-iterations=100 --run=medium-d24", depends-on = ["build"] }
 
 full-d12 = { cmd = "cmake-build-pixi/base_train $D12_BASE --run=full-d12", depends-on = ["build"] }
 full-d24 = { cmd = "cmake-build-pixi/base_train $D24_BASE --run=full-d24", depends-on = ["build"] }
