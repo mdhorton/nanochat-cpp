@@ -61,7 +61,7 @@ D24_DBS = "$(( ${VRAM_GB:-0} > 40 ? 8 : ${VRAM_GB:-0} >= 30 ? 4 : 2 ))"
 
 D12_BASE = "$TRAIN_BASE --depth=12 --device-batch-size=$D12_DBS"
 D24_BASE = "$TRAIN_BASE --depth=24 --device-batch-size=$D24_DBS"
-QUICK_BASE = "--final-eval-tokens=4194304 --eval-every=-1 --save=false"
+QUICK_BASE = "--eval-every=-1 --save=false"
 
 # --rank-micro-steps=125,131
 # pixi run full-d24 > cache/full-d24.log 2>&1 < /dev/null &!
@@ -76,8 +76,8 @@ rebuild = { cmd = "rm -rf cmake-build-pixi && pixi run build {{ opt }}", args = 
 
 base-train = { cmd = "cmake-build-pixi/base_train", depends-on = ["build"] }
 
-quick-d12 = { cmd = "cmake-build-pixi/base_train $D12_BASE $QUICK_BASE --num-iterations=30", depends-on = ["build"] }
-quick-d24 = { cmd = "cmake-build-pixi/base_train $D24_BASE $QUICK_BASE --num-iterations=30", depends-on = ["build"] }
+quick-d12 = { cmd = "cmake-build-pixi/base_train $D12_BASE $QUICK_BASE --num-iterations=30 --final-eval-tokens=4194304", depends-on = ["build"] }
+quick-d24 = { cmd = "cmake-build-pixi/base_train $D24_BASE $QUICK_BASE --num-iterations=30 --final-eval-tokens=4194304", depends-on = ["build"] }
 
 medium-d12 = { cmd = "cmake-build-pixi/base_train $D12_BASE $QUICK_BASE --num-iterations=100 --run=medium-d12", depends-on = ["build"] }
 medium-d24 = { cmd = "cmake-build-pixi/base_train $D24_BASE $QUICK_BASE --num-iterations=100 --run=medium-d24", depends-on = ["build"] }
