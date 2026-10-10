@@ -4,7 +4,7 @@ This is a **python → c++** port of Andrej Karpathy's [nanochat](https://github
 twist that it targets Nvidia sm120 GPUs.
 
 I'd classify this port as more of a performance engineering project. I own 2x RTX Pro 4000 Blackwell and my initial goal
-was to see how fast it would run locally.
+was to see how fast it could run locally.
 
 ## sm120 GPUs
 
@@ -22,42 +22,43 @@ support P2P.
 
 However, sm120 has MXFP8 and NVFP4, which the H100 does not have. So we'll see if this helps.
 
-## tl;dr
+## tl;dr results
 
 The following runs used `--depth=24 --target-param-data-ratio=8`. They also kept the same model config as the python
 version. And CORE was calculated using the original python code.
 
 | GPU            | GPU Count |     bpb |   CORE |                  time | device-batch-size |       
 |----------------|----------:|--------:|-------:|----------------------:|------------------:|
-| RTX Pro 6000 S |         8 | 0.71773 | 0.2592 |  139.96m ( 2h 19.96m) |                 8 |
-| RTX 5090       |         8 | 0.71769 | 0.2615 |  148.85m ( 2h 28.85m) |                 4 |
-| RTX Pro 4000   |         2 | 0.71934 | 0.2616 | 1622.59m (27h  2.59m) |                 2 |
+| RTX Pro 6000 S |         8 | 0.71773 | 0.2592 |  139.96m ( 2h:19.96m) |                 8 |
+| RTX 5090       |         8 | 0.71769 | 0.2615 |  148.85m ( 2h:28.85m) |                 4 |
+| RTX Pro 4000   |         2 | 0.71934 | 0.2616 | 1622.59m (27h:02.59m) |                 2 |
 
-The RTX Pro 6000 S is ~3x faster per GPU than the RTX Pro 4000. However, this is not a great comparison because 8xGPU
-scales differently vs 2xGPU. I'll run a 2xGPU vs 2xGPU comparison later.
-`(1622.59 * 2) / (139.96 * 8) = 2.90`
+## performance history change summary
 
-## performance history summary
+There were more changes than this, but these were the keepers. Each can be run via `pixi run medium-d24` along with the
+flags from the table.
 
-Here are the main changes.
+Row #10 is the current default. Technically those flags could be omitted. I laid out all the flags for each row to make
+it clear what was being enabled or not.
 
-| row | toks/sec | bpb | memory | time | notes                        | flags                                                                                                                                                                  |
-|----:|---------:|----:|-------:|-----:|------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-|   1 |          |     |        |      | baseline                     | --muon-bf16-gather=false --muon-bf16-reduce=false --gather-overlap=false --fp8-recipe=tensorwise --fused=false --loss-chunk-rows=0 --attention=sdpa --window-pattern=L |
-|   2 |          |     |        |      | enable torch FA2 and SSSL    | --muon-bf16-gather=false --muon-bf16-reduce=false --gather-overlap=false --fp8-recipe=tensorwise --fused=false --loss-chunk-rows=0 --attention=fa2                     |
-|   3 |          |     |        |      | fused & chunked lm_head loss | --muon-bf16-gather=false --muon-bf16-reduce=false --gather-overlap=false --fp8-recipe=tensorwise --fused=false --loss-chunk-rows=-1 --attention=fa2                    |
-|   4 |          |     |        |      | fused many more kernels      | --muon-bf16-gather=false --muon-bf16-reduce=false --gather-overlap=false --fp8-recipe=tensorwise --fused=true --loss-chunk-rows=-1 --attention=fa2                     |
-|   5 |          |     |        |      | mxfp8                        | --muon-bf16-gather=false --muon-bf16-reduce=false --gather-overlap=false --fp8-recipe=mxfp8 --fused=true --loss-chunk-rows=-1 --attention=fa2                          |
-|   6 |          |     |        |      | mxfp8 attention              | --muon-bf16-gather=false --muon-bf16-reduce=false --gather-overlap=false --fp8-recipe=mxfp8 --fused=true --loss-chunk-rows=-1 --attention=mx                           |
-|   7 |          |     |        |      | overlap gathers with forward | --muon-bf16-gather=false --muon-bf16-reduce=false --gather-overlap=true --fp8-recipe=mxfp8 --fused=true --loss-chunk-rows=-1 --attention=mx                            |
-|   8 |          |     |        |      | bf16 muon gradient reduce    | --muon-bf16-gather=false --muon-bf16-reduce=true --gather-overlap=true --fp8-recipe=mxfp8 --fused=true --loss-chunk-rows=-1 --attention=mx                             |
-|   9 |          |     |        |      | bf16 muon update gather      | --muon-bf16-gather=true --muon-bf16-reduce=true --gather-overlap=true --fp8-recipe=mxfp8 --fused=true --loss-chunk-rows=-1 --attention=mx                              |
+| row | bpb | memory | time | notes                        | flags                                                                                                                                                                                |
+|----:|----:|-------:|-----:|------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+|   1 |     |        |      | baseline                     | --muon-bf16-gather=false --muon-bf16-reduce=false --gather-overlap=false --gemm=cublas --fp8-recipe=tensorwise --fused=false --loss-chunk-rows=0 --attention=sdpa --window-pattern=L |
+|   2 |     |        |      | enable torch FA2 and SSSL    | --muon-bf16-gather=false --muon-bf16-reduce=false --gather-overlap=false --gemm=cublas --fp8-recipe=tensorwise --fused=false --loss-chunk-rows=0 --attention=fa2                     |
+|   3 |     |        |      | fused & chunked lm_head loss | --muon-bf16-gather=false --muon-bf16-reduce=false --gather-overlap=false --gemm=cublas --fp8-recipe=tensorwise --fused=false --loss-chunk-rows=-1 --attention=fa2                    |
+|   4 |     |        |      | fused many more kernels      | --muon-bf16-gather=false --muon-bf16-reduce=false --gather-overlap=false --gemm=cublas --fp8-recipe=tensorwise --fused=true --loss-chunk-rows=-1 --attention=fa2                     |
+|   5 |     |        |      | mxfp8                        | --muon-bf16-gather=false --muon-bf16-reduce=false --gather-overlap=false --gemm=cublas --fp8-recipe=mxfp8 --fused=true --loss-chunk-rows=-1 --attention=fa2                          |
+|   6 |     |        |      | mxfp8 attention              | --muon-bf16-gather=false --muon-bf16-reduce=false --gather-overlap=false --gemm=cublas --fp8-recipe=mxfp8 --fused=true --loss-chunk-rows=-1 --attention=mx                           |
+|   7 |     |        |      | mxfp8 gemm backend           | --muon-bf16-gather=false --muon-bf16-reduce=false --gather-overlap=false --gemm=cutlass --fp8-recipe=mxfp8 --fused=true --loss-chunk-rows=-1 --attention=mx                          |
+|   8 |     |        |      | overlap gathers with forward | --muon-bf16-gather=false --muon-bf16-reduce=false --gather-overlap=true --gemm=cutlass --fp8-recipe=mxfp8 --fused=true --loss-chunk-rows=-1 --attention=mx                           |
+|   9 |     |        |      | bf16 muon gradient reduce    | --muon-bf16-gather=false --muon-bf16-reduce=true --gather-overlap=true --gemm=cutlass --fp8-recipe=mxfp8 --fused=true --loss-chunk-rows=-1 --attention=mx                            |
+|  10 |     |        |      | bf16 muon update gather      | --muon-bf16-gather=true --muon-bf16-reduce=true --gather-overlap=true --gemm=cutlass --fp8-recipe=mxfp8 --fused=true --loss-chunk-rows=-1 --attention=mx                             |
 
 ## initial port
 
 Opus 5.5 (high effort) ported the nanochat pre-training code from python to c++ in under 40 minutes. Couple reason why
 this was so quick. The original code is well-designed. Also, pytorch uses libtorch, which is a c++ library. This made
-some of the translation to c++ fairly straightforward.
+some of the translation to c++ straightforward.
 
 However, libtorch does not have `torch.compile` or inductor. So the baseline performance is not great. This starts the
 performance engineering work to make it faster with sm120.
@@ -99,6 +100,8 @@ pixi run tok-train
 
 The `quick-, medium-, full-` prefixes use preset flags for convenience (see `pixi.toml` for the presets). All preset
 flags can be overridden on the command line. Or use `pixi run based-train` for no preset flags.
+
+NOTE: `--fp8` is enabled by default. To disable use `--fp8=false`. This will also disable mxfp8 related flags.
 
 ```bash
 # execute a short (30 step) --depth=12 training run
