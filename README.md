@@ -55,7 +55,8 @@ These were 100-steps @ depth 24 run on rented 8x RTX Pro 6000 S.
 
 Row 2 was required to get `--depth=24` working on RTX Pro 4000.
 
-Row 3 was needed because c++ doesn't have Inductor. (However, we have an LLM agent that can fuse kernels.) This was the bulk of the speedup.
+Row 3 was needed because c++ doesn't have Inductor. (However, we have an LLM agent that can fuse kernels.) This was the
+bulk of the speedup.
 
 Rows 4-6 utilises sm120 features.
 
@@ -78,10 +79,10 @@ performance engineering work starts to make it faster with sm120.
 Most of the sm120 tuning fell into the following categories:
 
 - kernel fusing
-- overlapping compute with collectives
 - mxfp8
 - flash attention
-- memory tuning
+- overlapping compute with collectives
+- memory
 
 ## Setup
 
@@ -89,20 +90,22 @@ Most of the sm120 tuning fell into the following categories:
 
 - sm120 capability GPU (RTX Pro 6000/4000, RTX 5090, etc...)
 - nvidia driver supporting cuda 13+
-- [pixi](https://prefix.dev/) package manager
 
 I've only tested on Linux Ubuntu 24.04.
 
 ### Initial setup
 
 ```bash
-# install pixi if needed
+# install pixi package manager
 curl -fsSL https://pixi.sh/install.sh | bash
+
+# build the executables (usually ~1-2 minutes)
+pixi run rebuild
 
 # download 10 parquet files
 pixi run dataset 10
 
-# train the BPE tokenizer (usually takes ~2-3 minutes)
+# train the BPE tokenizer (usually ~1-2 minutes)
 pixi run tok-train
 ```
 

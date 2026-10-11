@@ -2,7 +2,7 @@
 
 # runs on a fresh vast.ai instance; copied there and started by scripts/vast_bootstrap.sh. disables vast's python venv,
 # installs pixi, clones /workspace/nanochat-cpp, switches to --branch. with > 1 GPU, runs `pixi run nccl-bench` and
-# skips the rest if the busbw is below --min-bus-bw (default by PCIe gen: 4 → 15, 5 → 27 GB/s). then runs
+# skips the rest if the busbw is below --min-bus-bw (default by PCIe gen: 4 → 15, 5 → 25 GB/s). then runs
 # `pixi run tok-train` and `pixi run quick-d12`, and hands over an interactive login shell in the repo.
 
 set -uo pipefail
@@ -12,7 +12,7 @@ usage() {
   exit 2
 }
 
-branch=overlap min_busbw=
+branch=main min_busbw=
 while (($#)); do
   case $1 in
     --branch) branch=${2:?--branch needs a name}; shift ;;
@@ -48,7 +48,7 @@ while IFS=', ' read -r i link gpu; do
   ((link < gpu)) && echo "== WARNING: GPU $i PCIE LINK IS GEN $link BUT THE GPU SUPPORTS GEN $gpu"
   [[ -z $gen ]] || ((link < gen)) && gen=$link
 done < <(nvidia-smi --query-gpu=index,pcie.link.gen.max,pcie.link.gen.gpumax --format=csv,noheader 2>/dev/null)
-[[ -n $min_busbw ]] || { [[ -n $gen ]] && ((gen >= 5)) && min_busbw=27 || min_busbw=15; }
+[[ -n $min_busbw ]] || { [[ -n $gen ]] && ((gen >= 5)) && min_busbw=25 || min_busbw=15; }
 echo "== $gpus GPU(s), PCIe gen ${gen:-unknown}, min Bus BW $min_busbw GB/s"
 if ((gpus > 1)); then
   rm -f cache/nccl/busbw
@@ -64,6 +64,8 @@ else
   echo "== skipping nccl-bench"
 fi
 
+pixi run rebuild || echo "rebuild failed ($?)"
+pixi run dataset 10 || echo "dataset failed ($?)"
 pixi run tok-train || echo "tok-train failed ($?)"
 pixi run quick-d12 || echo "quick-d12 failed ($?)"
 
