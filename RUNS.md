@@ -1,6 +1,6 @@
 # Run history
 
-Much of the initial sm120 tuning was done at `--depth=12`. Later `--depth=24` became fast enough to iterate with.
+The initial sm120 tuning was done at `--depth=12`. Later `--depth=24` became fast enough to iterate with.
 
 # medium runs @ d12
 
@@ -9,7 +9,7 @@ Much of the initial sm120 tuning was done at `--depth=12`. Later `--depth=24` be
 Runs 1-3 are from the original nanochat port (python → c++). No tuning yet.
 
 Runs 4+ are the tuning and customisations for sm120. Probably more than half the tuning is fusing and other
-optimisations that would normally be handled by inductor and triton.
+optimisations that would normally be handled by Inductor.
 
 | run | toks/sec |     loss |      bpb | memory |   time | notes                                          |
 |----:|---------:|---------:|---------:|-------:|-------:|------------------------------------------------|

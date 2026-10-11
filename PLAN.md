@@ -118,7 +118,7 @@ steps:
     order: bit-identical, no autograd adds (12 per micro-step at d12, layer 0's x gradient folded in). quick-d12 2
     GPUs: MX 238.7k tok/s (+0.8%).
     done: cuBLASLt workspace 32 MB (`--cublaslt-workspace-mb`; torch's default is 1 MB), which lets _scaled_mm's
-    heuristic pick split-K variants (`apps/bench_gemm.cpp` times every heuristic against _scaled_mm per shape). d12:
+    heuristic pick split-K variants (`tools/bench_gemm.cpp` times every heuristic against _scaled_mm per shape). d12:
     the four dW GEMMs (K = 16384, 36-144 CTAs on 70 SMs) -13 to -23%, the K = 768 GEMMs (qkv, c_fc, lm_head
     forward) -10 to -12%, the rest unchanged. d12 2 GPUs, 30 steps: 2196 -> 2157 ms/step (-1.8%); both runs sit at
     the 145 W power cap, so isolated kernel gains (~4% of the micro-step here) show up about halved.
@@ -154,7 +154,7 @@ steps:
     - residual_norm bwd (c_proj output grads), ~0.5%: bf16 ds is still needed (residual stream). c_proj's backward
       can't receive extra tensors through autograd: needs a handoff (MX copy keyed on data_ptr, numel, version,
       picked up by quantize_grad).
-    dead end: attention backends (`apps/bench_attention.cpp`, d12 shapes B 8, T 2048, 6 heads of 128, GPU at its 145 W
+    dead end: attention backends (`tools/bench_attention.cpp`, d12 shapes B 8, T 2048, 6 heads of 128, GPU at its 145 W
     cap). FA2 (`_flash_attention_forward`, native windows) fwd + bwd: 1.43 ms windowed (512), 2.58 ms full causal,
     55-76 TFLOPs of the measured 122 bf16 peak. cuDNN 9.24 via SDPA: full causal fwd 12% faster (0.60 vs 0.68 ms) but
     bwd 9% slower, so fwd + bwd 2.68 ms; the window as an explicit mask is 3.7x slower (5.35 ms, no block skipping).

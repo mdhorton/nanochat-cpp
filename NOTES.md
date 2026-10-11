@@ -26,12 +26,10 @@ the bare minimum.
 Some hosts intentionally lower the power cap. Sometimes for thermal reasons. This is worth a quick check via
 `nvidia-smi`. Also, if temps regularly exceed 80C then thermal throttling is a risk.
 
-Performance will suffer if any of these are subpar.
-
 ## sm120f vs sm120
 
-The following skips sm120f specific kernels (CUTLASS MXFP8 GEMMs and MXFP8 flash attention), which use block-scaled
-tensor-core MMA (e4m3 data with ue8m0 scales). This slows performance by ~11%.
+The following flags will skip sm120f specific kernels (CUTLASS MXFP8 GEMMs and MXFP8 flash attention), which use
+block-scaled tensor-core MMA (e4m3 data with ue8m0 scales). This slows performance by ~11%.
 
 `--gemm=cublas --attention=bf16`
 
@@ -60,8 +58,8 @@ Pre-training workload is heavily power-bound and these cards have a low power ca
 but most large dense GEMMs run at ~1700 GHz due to the power cap.
 
 Improved kernel efficiency can mean the same work in less time. (Same energy in less time.) This translates to a lower
-GPU clock on these cards because power is already at the cap. A 2-3% isolated step improvement is sometimes hard to
-distinguish from noise due to the power cap eating a chunk of the gain.
+GPU clock on these cards because power is already at the cap. A 2-3% isolated step improvement is hard to distinguish
+from noise due to the power cap eating a chunk of the gain.
 
 On the other hand, kernel fusing is a double win. 1) Fewer bytes are transferred, and 2) less time. (Less energy in less
 time.) This doesn’t have the power cap clock tax that improved kernel efficiency does on these cards.
