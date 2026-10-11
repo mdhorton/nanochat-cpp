@@ -99,13 +99,13 @@ I've only tested on Linux Ubuntu 24.04.
 # install pixi package manager
 curl -fsSL https://pixi.sh/install.sh | bash
 
-# build the executables (usually ~1-2 minutes)
+# build the executables (takes ~1-2 minutes)
 pixi run rebuild
 
 # download 10 parquet files
 pixi run dataset 10
 
-# train the BPE tokenizer (usually ~1-2 minutes)
+# train the BPE tokenizer (takes ~1-2 minutes)
 pixi run tok-train
 ```
 
