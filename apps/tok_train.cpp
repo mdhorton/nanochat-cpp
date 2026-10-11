@@ -1,4 +1,5 @@
 // Train the BPE tokenizer on the pretraining data. Port of nanochat's scripts/tok_train.py.
+#include <algorithm>
 #include <chrono>
 #include <format>
 #include <fstream>
@@ -29,7 +30,7 @@ static int run(int argc, char** argv) {
   const auto max_chars = flags.i64("max-chars", 2'000'000'000, "maximum characters to train on");
   const auto doc_cap = flags.i64("doc-cap", 10'000, "maximum characters per document");
   const auto vocab_size = flags.i64("vocab-size", 32768, "vocabulary size, including special tokens");
-  const auto threads = flags.i64("threads", std::thread::hardware_concurrency(), "splitting threads");
+  const auto threads = flags.i64("threads", std::max(1u, std::thread::hardware_concurrency() / 2), "splitting threads");
   const fs::path out_dir = flags.str("out-dir", (base_dir / "tokenizer").string(), "output directory");
   flags.done();
   println("max_chars: {}, doc_cap: {}, vocab_size: {}, threads: {}", max_chars, doc_cap, vocab_size, threads);
