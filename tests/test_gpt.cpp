@@ -14,7 +14,7 @@ namespace st = nanochat::safetensors;
 namespace {
 
 fs::path golden(const std::string& name) {
-  return test_env().golden_dir / "train" / name;
+  return test_env().train_golden_dir / name;
 }
 
 #define REQUIRE_TRAIN_GOLDEN(name)                                                                                     \

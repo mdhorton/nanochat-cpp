@@ -58,7 +58,7 @@ Outputs reference(const torch::Tensor& x, const torch::Tensor& w, const torch::T
   return {
         {},
         dx,
-        (dz * x64.index({Slice(), Slice(1, None), Slice(None, gate_cols)})).sum({0, 1}, true),
+        (dz * x64.index({Slice(), Slice(1, None), Slice(None, gate_cols)})).sum(at::IntArrayRef{0, 1}, true),
         (dgate * s).sum()};
 }
 

@@ -11,7 +11,7 @@ using namespace nanochat;
 namespace fs = std::filesystem;
 
 TEST(LossEvalGolden, BpbMatchesPython) {
-  const auto dir = test_env().golden_dir / "train";
+  const auto dir = test_env().train_golden_dir;
   if (!fs::exists(dir / "bpb.json"))
     GTEST_SKIP() << "missing " << dir / "bpb.json" << " (run scripts/export_train_golden.py)";
   std::ifstream in(dir / "bpb.json");

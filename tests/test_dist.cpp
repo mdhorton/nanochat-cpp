@@ -26,7 +26,7 @@ static std::string run_worker(const fs::path& golden, const std::string& tag, co
 
 // The all_gathers finished in the next forward (and the Muon state striped for it) change no bit.
 static void expect_overlap_exact(const std::string& args) {
-  const auto golden = test_env().golden_dir / "train" / "train_ddp2.json";
+  const auto golden = test_env().train_golden_dir / "train_ddp2.json";
   if (!fs::exists(golden))
     GTEST_SKIP() << "missing " << golden << " (pixi run export-train-golden-ddp)";
   if (torch::cuda::device_count() < 2)
@@ -54,7 +54,7 @@ TEST(DistGolden, GatherOverlapIsExactMuonBf16) {
 
 // Muon's reduce and gather in bf16: the ranks stay bit-identical replicas, and training still works.
 TEST(DistGolden, MuonBf16KeepsRanksEqual) {
-  const auto golden = test_env().golden_dir / "train" / "train_ddp2.json";
+  const auto golden = test_env().train_golden_dir / "train_ddp2.json";
   if (!fs::exists(golden))
     GTEST_SKIP() << "missing " << golden << " (pixi run export-train-golden-ddp)";
   if (torch::cuda::device_count() < 2)
@@ -76,7 +76,7 @@ TEST(DistGolden, MuonBf16KeepsRanksEqual) {
 }
 
 TEST(DistGolden, TwoGpusMatchPython) {
-  const auto golden = test_env().golden_dir / "train" / "train_ddp2.json";
+  const auto golden = test_env().train_golden_dir / "train_ddp2.json";
   if (!fs::exists(golden))
     GTEST_SKIP() << "missing " << golden << " (pixi run export-train-golden-ddp)";
   if (torch::cuda::device_count() < 2)

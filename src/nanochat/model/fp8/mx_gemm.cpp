@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdlib>
 #include <map>
 #include <mutex>
 #include <optional>
@@ -10,6 +11,7 @@
 
 #include <ATen/cuda/CUDAContext.h>
 #include <cublasLt.h>
+#include <torch/version.h>
 
 #include "nanochat/model/fp8/mx_gemm_kernel.h"
 
@@ -135,6 +137,18 @@ void set_mx_gemm_backend(MxGemmBackend b) {
 
 MxGemmBackend mx_gemm_backend() {
   return backend;
+}
+
+void set_cublaslt_workspace_size(size_t bytes) {
+#if TORCH_VERSION_MAJOR == 2 && TORCH_VERSION_MINOR < 14
+  // no setter (torch 2.11 for cuda 12.8): torch reads CUBLASLT_WORKSPACE_SIZE (KiB) on first use, capped by the
+  // cuBLAS workspace it shares (CUBLAS_WORKSPACE_CONFIG ":KiB:count", default ~8 MB); keep a user's config
+  const auto kib = std::to_string(bytes >> 10);
+  setenv("CUBLASLT_WORKSPACE_SIZE", kib.c_str(), 1);
+  setenv("CUBLAS_WORKSPACE_CONFIG", (":" + kib + ":1").c_str(), 0);
+#else
+  at::cuda::setCUDABlasLtWorkspaceSize(bytes);
+#endif
 }
 
 torch::Tensor mx_gemm(

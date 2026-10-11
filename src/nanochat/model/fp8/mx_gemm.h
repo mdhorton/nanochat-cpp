@@ -12,6 +12,9 @@ enum class MxGemmBackend { Cublas, Cutlass };
 void set_mx_gemm_backend(MxGemmBackend backend);
 MxGemmBackend mx_gemm_backend();
 
+// torch's cuBLASLt workspace (_scaled_mm, matmuls); call before the first GEMM
+void set_cublaslt_workspace_size(size_t bytes);
+
 // a (M, K) . b (N, K)^T as out_dtype: a, b contiguous e4m3 with their MX scales, as _scaled_mm(a, b.t(), a_scale,
 // b_scale). Cutlass: bf16 or fp32 out, dims % 128 (else _scaled_mm).
 torch::Tensor mx_gemm(

@@ -15,7 +15,7 @@ namespace fs = std::filesystem;
 namespace {
 
 fs::path golden(const std::string& name) {
-  return test_env().golden_dir / "train" / name;
+  return test_env().train_golden_dir / name;
 }
 
 class TrainGolden : public testing::Test {

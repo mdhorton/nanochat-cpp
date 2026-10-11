@@ -1,16 +1,18 @@
 [workspace]
 name = "nanochat-cpp"
 channels = ["conda-forge"]
-# we primarily target sm120. require a cuda 13+ driver.
-platforms = [{ name = "linux-64-cuda", platform = "linux-64", cuda = "13" }]
+# we primarily target sm120. pixi picks the first platform the driver supports: cuda 13+, else cuda 12.8.
+platforms = [
+    { name = "linux-64-cuda13", platform = "linux-64", cuda = "13" },
+    { name = "linux-64-cuda12", platform = "linux-64", cuda = "12.8" },
+]
 
 [dependencies]
-# C++ toolchain
-cuda-version = "13.2.*"
+# C++ toolchain (cuda-version: per-platform targets below)
 cuda-nvcc = "*"
 cuda-cudart-dev = "*"
 cxx-compiler = "*"
-gxx_linux-64 = "15.3.*"  # pins the gcc version cxx-compiler uses
+gxx_linux-64 = "14.*"    # pins the gcc version cxx-compiler uses
 cmake = ">=3.28"
 ninja = "*"
 pkg-config = "*"
@@ -33,12 +35,21 @@ filelock = "*"
 psutil = "*"
 tiktoken = "*"
 
-# pytorch 2.14 is not on conda-forge yet (bundles cuda libs).
 [pypi-dependencies]
 rustbpe = "*"
 safetensors = "*"
 wandb = "*"
+
+# torch from pytorch's index (not on conda-forge yet; bundles cuda libs). 2.11 is the newest with cu128 wheels.
+[target.linux-64-cuda13.dependencies]
+cuda-version = "13.2.*"
+[target.linux-64-cuda13.pypi-dependencies]
 torch = { version = "==2.14.*", index = "https://download.pytorch.org/whl/cu132" }
+
+[target.linux-64-cuda12.dependencies]
+cuda-version = "12.8.*"
+[target.linux-64-cuda12.pypi-dependencies]
+torch = { version = "==2.11.*", index = "https://download.pytorch.org/whl/cu128" }
 
 [activation.env]
 # keep an existing NANOCHAT_BASE_DIR (e.g. parquet files already downloaded for python nanochat)

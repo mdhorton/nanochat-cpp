@@ -58,7 +58,7 @@ TEST(Safetensors, LoadToCuda) {
 }
 
 TEST(Safetensors, ReadsPythonFile) {
-  const auto path = test_env().golden_dir / "train" / "safetensors_check.safetensors";
+  const auto path = test_env().train_golden_dir / "safetensors_check.safetensors";
   if (!fs::exists(path))
     GTEST_SKIP() << "missing " << path << " (run scripts/export_train_golden.py)";
   expect_same(st::load(path), check_tensors());

@@ -13,6 +13,10 @@
 #include <c10/cuda/CUDAFunctions.h>
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
+#include <torch/version.h>
+
+// torch 2.11 (cuda 12.8) predates the *_single collectives
+#define NANOCHAT_TORCH_BASE_COLLECTIVES (TORCH_VERSION_MAJOR == 2 && TORCH_VERSION_MINOR < 14)
 
 extern char** environ;
 
@@ -75,7 +79,11 @@ Dist::Work Dist::reduce_scatter(torch::Tensor& out, torch::Tensor& in, Op op) {
   }
   c10d::ReduceScatterOptions opts;
   opts.reduceOp = reduce_op(op);
+#if NANOCHAT_TORCH_BASE_COLLECTIVES
+  return pg_->_reduce_scatter_base(out, in, opts);
+#else
   return pg_->reduce_scatter_single(out, in, opts);
+#endif
 }
 
 Dist::Work Dist::all_gather(torch::Tensor& out, torch::Tensor& in) {
@@ -84,7 +92,11 @@ Dist::Work Dist::all_gather(torch::Tensor& out, torch::Tensor& in) {
       out.copy_(in);
     return {};
   }
+#if NANOCHAT_TORCH_BASE_COLLECTIVES
+  return pg_->_allgather_base(out, in);
+#else
   return pg_->all_gather_single(out, in);
+#endif
 }
 
 void Dist::barrier() {

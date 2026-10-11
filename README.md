@@ -78,20 +78,21 @@ performance engineering work starts to make it faster with sm120.
 
 Most of the sm120 tuning fell into the following categories:
 
-- kernel fusing
-- mxfp8
-- flash attention
-- overlapping compute with collectives
 - memory
+- kernel fusing
+- flash attention
+- mxfp8
+- overlapping compute with collectives
 
 ## Setup
 
-Everything installs and runs as the current user. root is not needed.
+Everything runs as the current user. root is not needed.
 
 ### Requirements
 
 - sm120 capability GPU (RTX Pro 6000/4000, RTX 5090, etc...)
-- nvidia driver supporting cuda 13+
+- nvidia driver supporting cuda 12.8+ (12.8+ uses torch 2.11; 13+ uses torch 2.14)
+- pixi
 
 I've only tested with Linux Ubuntu 24.04.
 
@@ -102,7 +103,7 @@ will install pixi:
 
 `curl -fsSL https://pixi.sh/install.sh | bash`
 
-Now one of the following is needed to add pixi to your path:
+Now one of the following is needed to add pixi to PATH:
 
 - logout and login again
 - restart your terminal or shell
@@ -111,10 +112,10 @@ Now one of the following is needed to add pixi to your path:
 ### Initial 1-time setup
 
 ```bash
-# setup dependencies. (similar to `uv sync`) 
+# setup dependencies. similar to `uv sync`.
 pixi install
 
-# build the executables (usually takes ~1-2 minutes)
+# build the executables (takes 1-2 minutes)
 pixi run build
 
 # download 10 parquet files
@@ -122,6 +123,9 @@ pixi run dataset 10
 
 # train the BPE tokenizer
 pixi run tok-train
+
+# optional tests (takes 2-3 minutes)
+pixi run test
 ```
 
 ### Execute some runs

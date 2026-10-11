@@ -313,7 +313,7 @@ int main(int argc, char** argv) {
           {V, C, T, true, "lm_head dW"},
     };
   if (torch_ws_mb >= 0)
-    at::cuda::setCUDABlasLtWorkspaceSize(static_cast<size_t>(torch_ws_mb) << 20);
+    nanochat::set_cublaslt_workspace_size(static_cast<size_t>(torch_ws_mb) << 20);
   std::printf("torch cublasLt workspace: %zu KB\n", at::cuda::getCUDABlasLtWorkspaceSize() >> 10);
   for (const auto& s : shapes)
     bench_shape(s, algos);

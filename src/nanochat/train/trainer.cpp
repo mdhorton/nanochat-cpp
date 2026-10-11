@@ -172,6 +172,9 @@ double peak_flops(const std::string& device_name) {
         {{"l4"}, 121e12},
         // 70 SMs x 1024 dense BF16 FLOPs/clk x 2.25 GHz boost (from the datasheet's 1290 sparse FP4 TOPS)
         {{"rtx pro 4000"}, 161.3e12},
+        // datasheet sparse FP4 TOPS / 8: Max-Q 3511, Workstation/Server 4000
+        {{"rtx pro 6000", "max-q"}, 438.9e12},
+        {{"rtx pro 6000"}, 500e12},
         {{"5090"}, 209.5e12},
         {{"4090"}, 165.2e12},
         {{"3090"}, 71e12}};
@@ -407,7 +410,7 @@ std::optional<double> train(const TrainOptions& o, const TrainCallbacks& callbac
   torch::manual_seed(static_cast<uint64_t>(o.seed));     // every rank initializes the same weights
   at::globalContext().setFloat32MatmulPrecision("high"); // TF32
   if (o.cublaslt_workspace_mb > 0)
-    at::cuda::setCUDABlasLtWorkspaceSize(static_cast<size_t>(o.cublaslt_workspace_mb) << 20);
+    set_cublaslt_workspace_size(static_cast<size_t>(o.cublaslt_workspace_mb) << 20);
   const auto device_name = std::string(at::cuda::getDeviceProperties(device.index())->name);
   const double gpu_peak_flops = peak_flops(device_name);
   print(std::format("GPU: {} | Peak FLOPS (BF16): {:.2e}", device_name, gpu_peak_flops));

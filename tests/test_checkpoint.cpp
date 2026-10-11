@@ -75,7 +75,7 @@ TEST(Checkpoint, ResumeIsExact) {
 }
 
 TEST(CheckpointGolden, ResumesPythonCheckpoint) {
-  const auto dir = test_env().golden_dir / "train";
+  const auto dir = test_env().train_golden_dir;
   if (!fs::exists(dir / "ckpt_params.safetensors"))
     GTEST_SKIP() << "missing " << dir / "ckpt_params.safetensors" << " (run scripts/export_train_golden.py)";
   const auto ckpt = load_checkpoint(dir / "ckpt", 2, torch::kCUDA, true);

@@ -2,7 +2,7 @@
 Export golden pre-training data from Python nanochat for the C++ parity tests (tests/test_*.cpp in train_tests).
 
 Python runs uncompiled (TORCHDYNAMO_DISABLE=1) with SDPA attention, so both sides use the same ATen kernels.
-Writes to --out-dir (default <project>/cache/golden/train):
+Writes to --out-dir (default <project>/cache/golden/train/torch-<major.minor>: bf16 numerics differ between versions):
 - safetensors_check.safetensors: known tensors, checks the C++ reader against a Python writer
 - gpt_*: tiny model init weights, perturbed weights, a batch, and logits / loss / grads
 - optim_*: MuonAdamW steps from given grads
@@ -430,11 +430,12 @@ SECTIONS = {"safetensors": export_safetensors_check, "gpt": export_gpt, "optim":
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--base-dir", default=BASE_DIR, help="nanochat data directory")
-    parser.add_argument("--out-dir", help="default: <project>/cache/golden/train")
+    parser.add_argument("--out-dir", help="default: <project>/cache/golden/train/torch-<major.minor>")
     parser.add_argument("--nanochat-dir", default=NANOCHAT_DIR)
     parser.add_argument("--sections", default=",".join(SECTIONS), help="comma-separated subset of " + ",".join(SECTIONS))
     args = parser.parse_args()
-    args.out_dir = args.out_dir or os.path.join(PROJECT_CACHE_DIR, "golden", "train")
+    torch_version = ".".join(torch.__version__.split(".")[:2])
+    args.out_dir = args.out_dir or os.path.join(PROJECT_CACHE_DIR, "golden", "train", f"torch-{torch_version}")
 
     os.environ["NANOCHAT_BASE_DIR"] = args.base_dir  # nanochat reads it at import time
     sys.path.insert(0, args.nanochat_dir)

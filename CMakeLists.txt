@@ -26,12 +26,34 @@ list(APPEND CMAKE_PREFIX_PATH ${TORCH_DIR})
 set(CUDA_TOOLKIT_ROOT_DIR "${PIXI_ENV}/targets/x86_64-linux")
 set(CMAKE_CUDA_COMPILER "${PIXI_ENV}/bin/nvcc")
 set(CMAKE_CUDA_HOST_COMPILER "${CMAKE_CXX_COMPILER}")
-set(CUDA_nvrtc_LIBRARY "${TORCH_DIR}/../nvidia/cu13/lib/libnvrtc.so.13") # not in the conda env
-set(TORCH_CUDA_ARCH_LIST 12.0f) # torch sets the nvcc -gencode flags from this; f: block-scaled mma.sync, runs on sm_120/sm_121
+# torch's NVIDIA wheels: cu13 puts every library under nvidia/cu13, cu12 has a directory per library
+set(NV_DIR "${TORCH_DIR}/../nvidia")
+if(EXISTS "${NV_DIR}/cu13")
+    set(NV_CUDART "${NV_DIR}/cu13/lib/libcudart.so.13")
+    set(NV_NVRTC "${NV_DIR}/cu13/lib/libnvrtc.so.13")
+    set(NV_CUBLASLT "${NV_DIR}/cu13/lib/libcublasLt.so.13")
+    set(NV_INCLUDE_DIRS "${NV_DIR}/cu13/include")
+    set(NV_RPATH "${NV_DIR}/cu13/lib")
+else()
+    set(NV_CUDART "${NV_DIR}/cuda_runtime/lib/libcudart.so.12")
+    set(NV_NVRTC "${NV_DIR}/cuda_nvrtc/lib/libnvrtc.so.12")
+    set(NV_CUBLASLT "${NV_DIR}/cublas/lib/libcublasLt.so.12")
+    file(GLOB NV_INCLUDE_DIRS "${NV_DIR}/*/include")
+    set(NV_RPATH "${NV_DIR}/cuda_runtime/lib:${NV_DIR}/cuda_nvrtc/lib:${NV_DIR}/cublas/lib")
+endif()
+set(CUDA_nvrtc_LIBRARY "${NV_NVRTC}") # not in the conda env
 
 set(CMAKE_CUDA_STANDARD 20)
 set(CMAKE_CUDA_RUNTIME_LIBRARY None) # use torch's libcudart
 enable_language(CUDA)
+
+# torch sets the nvcc -gencode flags from this. block-scaled mma.sync needs an arch-specific target:
+# f (cuda 12.9+) runs on sm_120/sm_121, a (cuda 12.8) only on sm_120
+if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.9)
+    set(TORCH_CUDA_ARCH_LIST 12.0f)
+else()
+    set(TORCH_CUDA_ARCH_LIST 12.0a)
+endif()
 
 unset(CMAKE_CUDA_ARCHITECTURES CACHE) # torch warns if set
 set(kineto_LIBRARY "${TORCH_DIR}/lib/libtorch_cpu.so") # kineto is built into libtorch_cpu
@@ -39,9 +61,9 @@ find_package(Torch REQUIRED)
 set(CMAKE_CUDA_ARCHITECTURES OFF) # torch adds the -gencode flags
 
 # link and load torch's libcudart, not the copy nvcc brings in. The rpath goes first: conda's LDFLAGS put the env's
-# lib dir (with a libcudart.so.13 symlink) at the front.
-set_property(TARGET CUDA::cudart PROPERTY IMPORTED_LOCATION "${TORCH_DIR}/../nvidia/cu13/lib/libcudart.so.13")
-set(CMAKE_EXE_LINKER_FLAGS "-Wl,-rpath,${TORCH_DIR}/../nvidia/cu13/lib ${CMAKE_EXE_LINKER_FLAGS}")
+# lib dir (with a libcudart symlink) at the front.
+set_property(TARGET CUDA::cudart PROPERTY IMPORTED_LOCATION "${NV_CUDART}")
+set(CMAKE_EXE_LINKER_FLAGS "-Wl,-rpath,${NV_RPATH} ${CMAKE_EXE_LINKER_FLAGS}")
 
 add_library(nanochat
         src/nanochat/flags.cpp
@@ -53,7 +75,8 @@ add_library(nanochat
         src/nanochat/tokenizer/tokenizer.cpp)
 target_include_directories(nanochat PUBLIC src)
 target_compile_definitions(nanochat PUBLIC NANOCHAT_PROJECT_DIR="${PROJECT_SOURCE_DIR}")
-target_link_libraries(nanochat PUBLIC
+# stdc++ first: torch 2.11's libtorch.so exports a broken std::filesystem that would otherwise take precedence
+target_link_libraries(nanochat PUBLIC stdc++
         PkgConfig::PCRE2 Arrow::arrow_shared Parquet::parquet_shared nlohmann_json::nlohmann_json Threads::Threads)
 
 # pre-training (libtorch)
@@ -95,9 +118,9 @@ add_library(nanochat_train
         src/nanochat/train/muon_kernel.cu
         src/nanochat/train/optim.cpp
         src/nanochat/train/trainer.cpp)
-target_link_libraries(nanochat_train PUBLIC nanochat ${TORCH_LIBRARIES} "${TORCH_DIR}/../nvidia/cu13/lib/libcublasLt.so.13")
+target_link_libraries(nanochat_train PUBLIC nanochat ${TORCH_LIBRARIES} "${NV_CUBLASLT}")
 # ATen/cuda headers need the CUDA library headers (cuBLAS, cuSPARSE, ...), which come with the NVIDIA wheels
-target_include_directories(nanochat_train SYSTEM PUBLIC "${TORCH_DIR}/../nvidia/cu13/include")
+target_include_directories(nanochat_train SYSTEM PUBLIC ${NV_INCLUDE_DIRS})
 target_include_directories(nanochat_train SYSTEM PRIVATE "${TORCH_DIR}/../nvidia/nccl/include") # ProcessGroupNCCL
 target_link_libraries(nanochat_train PRIVATE nvidia::cutlass::cutlass nvidia::cutlass::tools::util)
 # -lineinfo: source lines in ncu (no codegen change)
