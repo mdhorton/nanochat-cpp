@@ -111,8 +111,11 @@ pixi run build
 # download 10 parquet files
 pixi run dataset 10
 
-# train the BPE tokenizer
+# train the BPE tokenizer (takes 1-2 minutes)
 pixi run tok-train
+
+# optional (takes 2-3 minutes)
+pixi run tests
 ```
 
 ### Execute some runs
@@ -122,7 +125,7 @@ pixi run tok-train
 pixi run quick-d12
 
 # execute a short (30 step) --depth=24 training run
-pixi run quick-d12
+pixi run quick-d24
 
 # execute a full --depth=24 training run and use wandb (requires WANDB_API_KEY or wandb login)
 # run `pixi run dataset 170` if needed to fetch enough parquet files.
@@ -134,16 +137,6 @@ pixi run base-train --depth=26 --device-batch-size=16 --eval-every=1000 --save-e
 
 The `quick-, medium-, full-` prefixes use preset flags for convenience (see `pixi.toml` for the presets). All preset
 flags can be overridden on the command line. Or use `pixi run based-train` for no preset flags.
-
-## tests
-
-```bash
-# takes ~1 minute (optional - it will skip the golden tests)
-pixi run export-all-golden
-
-# takes 2-3 minutes
-pixi run test
-```
 
 ## fp8 and mxfp8
 

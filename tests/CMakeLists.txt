@@ -1,4 +1,4 @@
-# not in the default build (pixi run test builds them)
+# not in the default build (pixi run tests builds them)
 find_package(GTest REQUIRED)
 include(GoogleTest)
 

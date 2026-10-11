@@ -67,7 +67,7 @@ BUILD_TYPE = "RelWithDebInfo"
 NPROC = "$(nvidia-smi -L 2>/dev/null | wc -l)"
 VRAM_GB = "$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | awk 'NR==1{print int($1 / 1024 + 0.5)}')"
 
-TRAIN_BASE = "--nproc=$NPROC --eval-tokens=4194304"
+TRAIN_BASE = "--nproc=$NPROC"
 D12_DBS = "8"
 D24_DBS = "$(( ${VRAM_GB:-0} > 40 ? 8 : ${VRAM_GB:-0} >= 30 ? 4 : 2 ))"
 
@@ -100,11 +100,11 @@ full-d24 = { cmd = "cmake-build-pixi/base_train $D24_BASE --run=full-d24", depen
 profile-d12 = { cmd = "scripts/profile.sh d12 $D12_BASE", depends-on = ["build"] }
 profile-d24 = { cmd = "scripts/profile.sh d24 $D24_BASE", depends-on = ["build"] }
 
-test = { cmd = "cmake --build cmake-build-pixi --target nanochat_tests train_tests && ctest --test-dir cmake-build-pixi --output-on-failure", depends-on = ["build"], env = { NVCC_PREPEND_FLAGS = "" } }
+tests = { cmd = "cmake --build cmake-build-pixi --target nanochat_tests train_tests && ctest --test-dir cmake-build-pixi --output-on-failure", depends-on = ["build"], env = { NVCC_PREPEND_FLAGS = "" } }
 
-tok-train = { cmd = "cmake-build-pixi/tok_train && python scripts/import_tokenizer.py", depends-on = ["build"] }
+tok-train = { cmd = "cmake-build-pixi/tok_train && python scripts/import_tokenizer.py && pixi run export-all-golden", depends-on = ["build"] }
 # python nanochat's trainer (rustbpe), then its tokenizer.pkl -> the C++ format
-tok-train-python = { cmd = "python -m scripts.tok_train && python $PIXI_PROJECT_ROOT/scripts/export_tokenizer.py", cwd = "external/nanochat", depends-on = ["clone-nanochat"] }
+tok-train-python = { cmd = "python -m scripts.tok_train && python $PIXI_PROJECT_ROOT/scripts/export_tokenizer.py && pixi run -m $PIXI_PROJECT_ROOT export-all-golden", cwd = "external/nanochat", depends-on = ["clone-nanochat"] }
 tok-eval = { cmd = "cmake-build-pixi/tok_eval", depends-on = ["build"] }
 
 clone-nanochat = "test -d external/nanochat || (git clone https://github.com/karpathy/nanochat.git external/nanochat && git -C external/nanochat checkout 92d63d4)"
