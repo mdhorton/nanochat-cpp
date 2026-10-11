@@ -66,6 +66,18 @@ torch::Tensor randn_bf16(const std::vector<int64_t>& shape, double scale = 1) {
         .to(torch::kFloat64);
 }
 
+// The lambda grads are sums of d * s and d * x0 (d = dloss/dres) that cancel heavily, so rel_diff (relative to the
+// sum) blows up when a sum nears 0: errors are relative to sum |d * s| and sum |d * x0| instead. Rounding d to bf16
+// moves each by at most 2^-9 of that.
+double lambda_err(const Inputs& in, const Outputs& o, const Outputs& ref) {
+  const auto d = ref.dx.abs() / in.lr[in.layer].item<double>(); // dx = lr * d
+  const auto s = (in.r.defined() ? in.x.to(torch::kFloat64) + in.r : in.x.to(torch::kFloat64)).abs();
+  auto err = [&](const torch::Tensor& g, const torch::Tensor& g_ref, const torch::Tensor& v) {
+    return (g[in.layer].to(torch::kFloat64) - g_ref[in.layer]).abs().item<double>() / (d * v).sum().item<double>();
+  };
+  return std::max(err(o.dlr, ref.dlr, s), err(o.dl0, ref.dl0, in.x0.to(torch::kFloat64).abs()));
+}
+
 Inputs make_inputs(const std::vector<int64_t>& shape, bool add, bool blend, bool g_res, bool g_n) {
   const auto opts = torch::TensorOptions().device(torch::kCUDA);
   Inputs in;
@@ -128,7 +140,6 @@ TEST(ResidualNorm, AddBlendMatchOpByOp) {
 // The norm (fp32 inside) is at least as close to fp64 as torch's bf16 rms_norm, forward and backward.
 TEST(ResidualNorm, NormMatchesReference) {
   torch::manual_seed(0);
-  double lambda_err_f = 0, lambda_err_o = 0;
   for (const auto& shape : kShapes)
     for (const auto& [add, blend] : {std::pair{false, false}, {true, false}, {true, true}}) {
       const auto in = make_inputs(shape, add, blend, true, true);
@@ -142,12 +153,9 @@ TEST(ResidualNorm, NormMatchesReference) {
       if (blend) {
         EXPECT_LT(rel_diff(f.dx0, r.dx0), 1e-2) << n;
         EXPECT_LE(rel_diff(f.dx0, r.dx0), rel_diff(o.dx0, r.dx0) * 1.5) << n;
-        lambda_err_f += rel_diff(f.dlr, r.dlr) + rel_diff(f.dl0, r.dl0);
-        lambda_err_o += rel_diff(o.dlr, r.dlr) + rel_diff(o.dl0, r.dl0);
+        EXPECT_LT(lambda_err(in, f, r), 0x1p-8) << n; // 32 seeds: <= 1.4e-3 (torch's bf16 path: 2.1e-3)
       }
     }
-  // lambda grads cancel heavily, so single cases swing either way (up to ~10% off fp64 for both paths)
-  EXPECT_LE(lambda_err_f, lambda_err_o * 1.5);
 }
 
 // residual_norm_mx: quantize_mx(n) bit for bit (both layouts), n's gate columns, the same res and gradients.
