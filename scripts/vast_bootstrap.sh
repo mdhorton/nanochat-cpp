@@ -11,12 +11,12 @@ set -euo pipefail
 usage() {
   echo "usage: $0 [--dry-run] [--branch NAME] [--min-bus-bw GB/s] [ssh] [-p PORT] [USER@]HOST [-L ...]" >&2
   echo "  --dry-run    print the ssh commands instead of running them" >&2
-  echo "  --branch     git branch to run (default overlap)" >&2
-  echo "  --min-bus-bw stop before tok-train below this NCCL Bus BW (default by PCIe gen: 4 → 15, 5 → 27)" >&2
+  echo "  --branch     git branch to run (default main)" >&2
+  echo "  --min-bus-bw stop before tok-train below this NCCL Bus BW (default by PCIe gen: 4 → 15, 5 → 25)" >&2
   exit 2
 }
 
-dry_run=0 branch=refactor min_busbw= port=22 user=root host=
+dry_run=0 branch=main min_busbw= port=22 user=root host=
 set -f; set -- $*; set +f # re-split, so the vast line also works as one quoted string
 while (($#)); do
   case $1 in

@@ -8,11 +8,11 @@
 set -uo pipefail
 
 usage() {
-  echo "usage: $0 [--branch NAME] [--min-bus-bw GB/s]" >&2
+  echo "usage: $0 --branch NAME [--min-bus-bw GB/s]" >&2
   exit 2
 }
 
-branch=main min_busbw=
+branch= min_busbw=
 while (($#)); do
   case $1 in
     --branch) branch=${2:?--branch needs a name}; shift ;;
@@ -21,6 +21,7 @@ while (($#)); do
   esac
   shift
 done
+[[ -n $branch ]] || usage
 
 # lines appended (once each) to the end of .bashrc, so they run after vast's own setup on every later login:
 # vast's .bashrc activates a python venv, so deactivate it; and cd to $NANOCHAT_CD if set (the final hand over)
