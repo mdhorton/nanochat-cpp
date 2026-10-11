@@ -11,14 +11,15 @@ a [verification issue](https://gimletlabs.ai/blog/formally-verifying-ai-generate
 For this project, I'm going to take the easy way out and treat the final result as verification. After all, this is an
 experimental learning project. Does the trained model's GPT-2 CORE metric meet the `0.256525` threshold?
 
-## fp8 and mxfp8
+## Tuning
 
-fp8 and mxfp8 are enabled by default.
+Most of the sm120 tuning fell into the following categories:
 
-| flag                             | default |                                                                 |
-|----------------------------------|---------|-----------------------------------------------------------------|
-| `--fp8=true\|false`              | true    | false also disables mxfp8; slows performance 50%                |
-| `--fp8-recipe=mxfp8\|tensorwise` | mxfp8   | tensorwise disables mxfp8 but keeps fp8; slows performance ~25% |
+- memory
+- kernel fusing
+- flash attention
+- mxfp8
+- overlapping compute with collectives
 
 ## sm120a/f vs sm120
 

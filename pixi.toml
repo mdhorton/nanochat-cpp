@@ -120,5 +120,7 @@ nccl-bench = { cmd = "python scripts/nccl_bench.py", depends-on = ["build-nccl-t
 
 export-golden = { cmd = "python scripts/export_golden.py", depends-on = ["clone-nanochat"] }
 export-train-golden = { cmd = "python scripts/export_train_golden.py", depends-on = ["clone-nanochat"] }
-export-train-golden-ddp = { cmd = "torchrun --standalone --nproc-per-node 2 scripts/export_train_golden.py --sections train", depends-on = ["clone-nanochat"] }
+export-train-golden-ddp = { cmd = "test $NPROC -lt 2 && echo 'skipping: needs 2 GPUs' || torchrun --standalone --nproc-per-node 2 scripts/export_train_golden.py --sections train", depends-on = ["clone-nanochat"] }
+# all golden data for the tests (the ddp one only with 2+ GPUs)
+export-all-golden = { depends-on = ["export-golden", "export-train-golden", "export-train-golden-ddp"] }
 export-pretrained = "python scripts/export_tokenizer.py --pretrained gpt2 cl100k_base"

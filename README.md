@@ -74,16 +74,6 @@ some of the translation to c++ straightforward.
 However, libtorch does not have `torch.compile` or Inductor. So the baseline performance is not great. This is where the
 performance engineering work starts to make it faster with sm120.
 
-## Tuning
-
-Most of the sm120 tuning fell into the following categories:
-
-- memory
-- kernel fusing
-- flash attention
-- mxfp8
-- overlapping compute with collectives
-
 ## Setup
 
 Everything runs as the current user. root is not needed.
@@ -123,9 +113,6 @@ pixi run dataset 10
 
 # train the BPE tokenizer
 pixi run tok-train
-
-# optional tests (takes 2-3 minutes)
-pixi run test
 ```
 
 ### Execute some runs
@@ -148,7 +135,24 @@ pixi run base-train --depth=26 --device-batch-size=16 --eval-every=1000 --save-e
 The `quick-, medium-, full-` prefixes use preset flags for convenience (see `pixi.toml` for the presets). All preset
 flags can be overridden on the command line. Or use `pixi run based-train` for no preset flags.
 
-NOTE: `--fp8` is enabled by default. Use `--fp8=false` to disable. This will also disable mxfp8 related flags.
+## tests
+
+```bash
+# takes ~1 minute (optional - it will skip the golden tests)
+pixi run export-all-golden
+
+# takes 2-3 minutes
+pixi run test
+```
+
+## fp8 and mxfp8
+
+fp8 and mxfp8 are enabled by default.
+
+| flag                             | default |                                                                 |
+|----------------------------------|---------|-----------------------------------------------------------------|
+| `--fp8=true\|false`              | true    | false also disables mxfp8; slows performance 50%                |
+| `--fp8-recipe=mxfp8\|tensorwise` | mxfp8   | tensorwise disables mxfp8 but keeps fp8; slows performance ~25% |
 
 ## Why c++?
 
