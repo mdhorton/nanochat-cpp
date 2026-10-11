@@ -47,38 +47,24 @@ I've only tested with Linux Ubuntu 24.04.
 
 ### Install pixi (if needed)
 
-The [pixi package manager](https://pixi.prefix.dev/latest/) is similar to `uv` but works with c++. The following command
-will install it:
-
-`curl -fsSL https://pixi.sh/install.sh | bash`
-
-Now one of the following is needed to add pixi to your PATH:
-
-- logout and login again
-- restart your terminal/shell
-- `export PATH="$HOME/.pixi/bin:$PATH"`
-
-### Execute a short depth=24 run
-
-`pixi run quick-d24`
-
-### Detailed version
+The [pixi package manager](https://pixi.prefix.dev/latest/) is similar to `uv` but works with c++.
 
 ```bash
-# setup dependencies (similar to `uv sync`).
-pixi install
+# install pixi
+curl -fsSL https://pixi.sh/install.sh | bash
 
-# build the executables (takes 1-2 minutes)
-pixi run build
+# update PATH (or logout and login) 
+export PATH="$HOME/.pixi/bin:$PATH"
+```
 
+### Initial 1-time setup
+
+```bash
 # download 10 parquet files
 pixi run dataset 10
 
 # train the BPE tokenizer (takes 1-2 minutes)
 pixi run tok-train
-
-# optional (takes 2-3 minutes)
-pixi run tests
 ```
 
 ### Execute some runs
@@ -100,6 +86,16 @@ pixi run base-train --depth=26 --device-batch-size=16 --eval-every=1000 --save-e
 
 The `quick-, medium-, full-` prefixes use preset flags for convenience (see `pixi.toml` for the presets). All preset
 flags can be overridden on the command line. Or use `pixi run based-train` for no preset flags.
+
+### Tests
+
+```bash
+# optional for extra validations (takes 1-2 minutes)
+pixi run export-all-golden
+
+# takes 2-3 minutes
+pixi run tests
+```
 
 ## fp8 and mxfp8
 
