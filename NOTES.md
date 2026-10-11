@@ -11,6 +11,22 @@ a [verification issue](https://gimletlabs.ai/blog/formally-verifying-ai-generate
 For this project, I'm going to take the easy way out and treat the final result as verification. After all, this is an
 experimental learning project. Does the trained model's GPT-2 CORE metric meet the `0.256525` threshold?
 
+## fp8 and mxfp8
+
+fp8 and mxfp8 are enabled by default.
+
+| flag                             | default |                                                                 |
+|----------------------------------|---------|-----------------------------------------------------------------|
+| `--fp8=true\|false`              | true    | false also disables mxfp8; slows performance 50%                |
+| `--fp8-recipe=mxfp8\|tensorwise` | mxfp8   | tensorwise disables mxfp8 but keeps fp8; slows performance ~25% |
+
+## sm120a/f vs sm120
+
+The following flags will skip sm120a/f specific kernels (CUTLASS MXFP8 GEMMs and MXFP8 flash attention), which use
+block-scaled tensor-core MMA (e4m3 data with ue8m0 scales). This slows performance by ~9%.
+
+`--gemm=cublas --attention=bf16`
+
 ## Rental performance
 
 The following are worth checking on rented hosts:
@@ -25,13 +41,6 @@ the bare minimum.
 
 Some hosts intentionally lower the power cap. Sometimes for thermal reasons. This is worth a quick check via
 `nvidia-smi`. Also, if temps regularly exceed 80C then thermal throttling is a risk.
-
-## sm120f vs sm120
-
-The following flags will skip sm120f specific kernels (CUTLASS MXFP8 GEMMs and MXFP8 flash attention), which use
-block-scaled tensor-core MMA (e4m3 data with ue8m0 scales). This slows performance by ~11%.
-
-`--gemm=cublas --attention=bf16`
 
 ## Goal with 2x RTX Pro 4000 blackwell GPUs (sm120)
 

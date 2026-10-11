@@ -23,15 +23,16 @@ static int run(int argc, char** argv) {
   o.seed = flags.i64("seed", o.seed, "weight init seed");
   o.window_pattern = flags.str(
         "window-pattern", o.window_pattern, "sliding window pattern tiled across layers: L=full, S=quarter context");
+  o.fp8 = flags.boolean("fp8", o.fp8, "FP8 training (eval stays bf16); false = bf16, as Python's default");
+  o.fp8_recipe = flags.str("fp8-recipe", o.fp8_recipe, "mxfp8 (32-value block scales) or tensorwise (as Python)");
   o.attention = flags.str(
-        "attention", o.attention,
+        "attention", o.fp8 && o.fp8_recipe == "mxfp8" ? o.attention : "bf16",
         "bf16 (our sm120 flash attention, FA2 backward), bf16mx (bf16 forward, our MXFP8 backward), mx (MXFP8 "
-        "forward and backward), fa2 (FlashAttention-2) or sdpa (bit-identical to Python)");
+        "forward and backward), fa2 (FlashAttention-2) or sdpa (bit-identical to Python); default mx, bf16 with "
+        "--fp8=false or --fp8-recipe=tensorwise");
   o.loss_chunk_rows = flags.i64(
         "loss-chunk-rows", o.loss_chunk_rows,
         "rows per chunk of the fused lm_head + loss (-1 = whole micro-batch, 0 = unfused, as Python)");
-  o.fp8 = flags.boolean("fp8", o.fp8, "FP8 training (eval stays bf16); false = bf16, as Python's default");
-  o.fp8_recipe = flags.str("fp8-recipe", o.fp8_recipe, "mxfp8 (32-value block scales) or tensorwise (as Python)");
   o.gemm = flags.str("gemm", o.gemm, "MXFP8 GEMMs: cutlass or cublas (cuBLASLt)");
   o.fused = flags.boolean("fused", o.fused, "fused elementwise CUDA kernels (false = op by op, as Python)");
   o.muon_fused = flags.boolean(
