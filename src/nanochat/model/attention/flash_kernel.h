@@ -33,7 +33,7 @@ void flash_bwd(
 const char* flash_bwd_dq_variant_name(int variant);
 const char* flash_bwd_dkv_variant_name(int variant);
 
-// MXFP8 backward (mx_flash_bwd_kernel.cu, sm_120a): as flash_bwd with every matmul block-scaled e4m3 (ue8m0 per 32).
+// MXFP8 backward (mx_flash_bwd_kernel.cu, sm_120f): as flash_bwd with every matmul block-scaled e4m3 (ue8m0 per 32).
 // Inputs quantized twice, along head_dim (rows, for S = Q Kᵀ and dP = dout Vᵀ) and along tokens (transposed, for
 // dv = Pᵀ dout, dk = dSᵀ Q, dq = dS K).
 

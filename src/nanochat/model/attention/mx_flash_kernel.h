@@ -1,4 +1,4 @@
-// MXFP8 flash attention forward for sm_120a: block-scaled mma.sync (e4m3, ue8m0 per 32) for Q·Kᵀ and P·V.
+// MXFP8 flash attention forward for sm_120f: block-scaled mma.sync (e4m3, ue8m0 per 32) for Q·Kᵀ and P·V.
 #pragma once
 
 #include <cstdint>

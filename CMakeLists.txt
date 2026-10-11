@@ -25,7 +25,7 @@ set(CUDA_TOOLKIT_ROOT_DIR "${PIXI_ENV}/targets/x86_64-linux")
 set(CMAKE_CUDA_COMPILER "${PIXI_ENV}/bin/nvcc")
 set(CMAKE_CUDA_HOST_COMPILER "${CMAKE_CXX_COMPILER}")
 set(CUDA_nvrtc_LIBRARY "${TORCH_DIR}/../nvidia/cu13/lib/libnvrtc.so.13") # not in the conda env
-set(TORCH_CUDA_ARCH_LIST 12.0a) # torch sets the nvcc -gencode flags from this; a: block-scaled mma.sync
+set(TORCH_CUDA_ARCH_LIST 12.0f) # torch sets the nvcc -gencode flags from this; f: block-scaled mma.sync, runs on sm_120/sm_121
 
 set(CMAKE_CUDA_STANDARD 20)
 set(CMAKE_CUDA_RUNTIME_LIBRARY None) # use torch's libcudart

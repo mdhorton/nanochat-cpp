@@ -1,4 +1,4 @@
-// MXFP8 flash attention forward on sm_120a. Layout and tricks after SageAttention2's sm89 FP8 kernel
+// MXFP8 flash attention forward on sm_120f. Layout and tricks after SageAttention2's sm89 FP8 kernel
 // (external/SageAttention/csrc/qattn, Apache-2.0): 4 warps x 32 query rows, 64-key tiles, cp.async, Vᵀ tokens
 // permuted so P's accumulator is the next mma's A operand without shuffles. The P scale is LP-FA4's: exp2 offset
 // by +8 (P stored as 256 p in e4m3), a constant 2^-8 ue8m0 scale in the mma.

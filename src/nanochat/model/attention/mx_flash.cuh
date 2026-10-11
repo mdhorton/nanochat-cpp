@@ -1,4 +1,4 @@
-// MXFP8 flash attention's device helpers: block-scaled mma (sm_120a) and the input quantizers (included by .cu files
+// MXFP8 flash attention's device helpers: block-scaled mma (sm_120f) and the input quantizers (included by .cu files
 // only).
 #pragma once
 

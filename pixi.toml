@@ -57,7 +57,7 @@ NPROC = "$(nvidia-smi -L 2>/dev/null | wc -l)"
 VRAM_GB = "$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | awk 'NR==1{print int($1 / 1024 + 0.5)}')"
 
 TRAIN_BASE = "--nproc=$NPROC --eval-tokens=4194304"
-D12_DBS = "2"
+D12_DBS = "8"
 D24_DBS = "$(( ${VRAM_GB:-0} > 40 ? 8 : ${VRAM_GB:-0} >= 30 ? 4 : 2 ))"
 
 D12_BASE = "$TRAIN_BASE --depth=12 --device-batch-size=$D12_DBS"

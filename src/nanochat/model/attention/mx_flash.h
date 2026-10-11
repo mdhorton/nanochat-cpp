@@ -1,4 +1,4 @@
-// Causal attention with MXFP8 flash-attention kernels (sm_120a): mx_flash_kernel.cu's forward, mx_flash_bwd_kernel.cu's
+// Causal attention with MXFP8 flash-attention kernels (sm_120f): mx_flash_kernel.cu's forward, mx_flash_bwd_kernel.cu's
 // backward, both on one quantization of q, k, v.
 #pragma once
 

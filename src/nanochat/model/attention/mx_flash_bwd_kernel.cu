@@ -1,4 +1,4 @@
-// MXFP8 flash attention backward on sm_120a: flash_bwd_kernel.cu's two kernels (dq; dk, dv) with every matmul a
+// MXFP8 flash attention backward on sm_120f: flash_bwd_kernel.cu's two kernels (dq; dk, dv) with every matmul a
 // block-scaled e4m3 mma.sync m16n8k32 (ue8m0 per 32 along k). Numerics after LP-FA4 (external/ads_model_kernel_library,
 // lp_fa4 flash_bwd_sm100.py): P stored as 256 p with a constant 2^-8 scale, dS with a dynamic scale per row per 32,
 // Q, K, dout quantized along head_dim for S and dP and along tokens for dv, dk, dq. The token-quantized copies are

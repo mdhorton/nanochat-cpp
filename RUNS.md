@@ -1,13 +1,10 @@
 # Run history
 
-To speedup dev iterations, initial sm120 tuning was done at `--depth=12`. Later, `--depth=24` became fast enough to
-iterate with.
-
-Most of the runs have an associated git tag (eg, run27).
+Much of the initial sm120 tuning was done at `--depth=12`. Later `--depth=24` became fast enough to iterate with.
 
 # medium runs @ d12
 
-`--depth=12 --device-batch-size=8 --num-iterations=100 --eval-tokens=4194304 --eval-every=-1 --save=false`
+`pixi run medium-d12`
 
 Runs 1-3 are from the original nanochat port (python → c++). No tuning yet.
 

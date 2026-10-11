@@ -28,9 +28,9 @@ Some hosts intentionally lower the power cap. Sometimes for thermal reasons. Thi
 
 Performance will suffer if any of these are subpar.
 
-## sm120a vs sm120
+## sm120f vs sm120
 
-The following skips sm120a specific kernels (CUTLASS MXFP8 GEMMs and MXFP8 flash attention), which use block-scaled
+The following skips sm120f specific kernels (CUTLASS MXFP8 GEMMs and MXFP8 flash attention), which use block-scaled
 tensor-core MMA (e4m3 data with ue8m0 scales). This slows performance by ~11%.
 
 `--gemm=cublas --attention=bf16`
