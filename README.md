@@ -112,7 +112,7 @@ Now one of the following is needed to add pixi to PATH:
 ### Initial 1-time setup
 
 ```bash
-# setup dependencies. similar to `uv sync`.
+# setup dependencies (similar to `uv sync`).
 pixi install
 
 # build the executables (takes 1-2 minutes)
@@ -134,8 +134,8 @@ pixi run test
 # execute a short (30 step) --depth=12 training run
 pixi run quick-d12
 
-# execute a slightly longer (100 step) --depth=12 training run
-pixi run medium-d12
+# execute a short (30 step) --depth=24 training run
+pixi run quick-d12
 
 # execute a full --depth=24 training run and use wandb (requires WANDB_API_KEY or wandb login)
 # run `pixi run dataset 170` if needed to fetch enough parquet files.
