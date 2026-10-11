@@ -122,11 +122,11 @@ add_executable(base_train apps/base_train.cpp)
 target_link_libraries(base_train PRIVATE nanochat_train)
 
 # cuBLASLt algorithm search for the MX GEMM shapes
-add_executable(bench_gemm apps/bench_gemm.cpp)
+add_executable(bench_gemm tools/bench_gemm.cpp)
 target_link_libraries(bench_gemm PRIVATE nanochat_train)
 
 # attention backends (FA2, ours, cuDNN, memory-efficient) at a micro-step's shapes
-add_executable(bench_attention apps/bench_attention.cpp)
+add_executable(bench_attention tools/bench_attention.cpp)
 target_link_libraries(bench_attention PRIVATE nanochat_train)
 
 # tests (tests/CMakeLists.txt): enable_testing here so ctest finds them from the build root
