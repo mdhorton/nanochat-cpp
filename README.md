@@ -93,14 +93,17 @@ Most of the sm120 tuning fell into the following categories:
 
 I've only tested on Linux Ubuntu 24.04.
 
-### Initial setup
+### Initial 1-time setup
 
 ```bash
 # install pixi package manager
 curl -fsSL https://pixi.sh/install.sh | bash
 
+# setup the environment. (similar to `uv sync`) 
+pixi install
+
 # build the executables (usually takes ~1-2 minutes)
-pixi run rebuild
+pixi run build
 
 # download 10 parquet files
 pixi run dataset 10
