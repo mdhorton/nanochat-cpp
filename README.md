@@ -86,20 +86,32 @@ Most of the sm120 tuning fell into the following categories:
 
 ## Setup
 
+Everything installs and runs as the current user. root is not needed.
+
 ### Requirements
 
 - sm120 capability GPU (RTX Pro 6000/4000, RTX 5090, etc...)
 - nvidia driver supporting cuda 13+
 
-I've only tested on Linux Ubuntu 24.04.
+I've only tested with Linux Ubuntu 24.04.
+
+### pixi
+
+The [pixi package manager](https://pixi.prefix.dev/latest/) is similar to `uv` but works with c++. The following command
+will install pixi:
+
+`curl -fsSL https://pixi.sh/install.sh | bash`
+
+Now one of the following is needed to add pixi to your path:
+
+- logout and login again
+- restart your terminal or shell
+- `export PATH="$HOME/.pixi/bin:$PATH"`
 
 ### Initial 1-time setup
 
 ```bash
-# install pixi package manager
-curl -fsSL https://pixi.sh/install.sh | bash
-
-# setup the environment. (similar to `uv sync`) 
+# setup dependencies. (similar to `uv sync`) 
 pixi install
 
 # build the executables (usually takes ~1-2 minutes)
