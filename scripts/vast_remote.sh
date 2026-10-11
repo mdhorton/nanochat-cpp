@@ -65,7 +65,6 @@ else
   echo "== skipping nccl-bench"
 fi
 
-pixi install || echo "install failed ($?)"
 pixi run build || echo "build failed ($?)"
 pixi run dataset 10 || echo "dataset failed ($?)"
 pixi run tok-train || echo "tok-train failed ($?)"
