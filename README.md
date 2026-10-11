@@ -89,17 +89,24 @@ I've only tested with Linux Ubuntu 24.04.
 ### pixi
 
 The [pixi package manager](https://pixi.prefix.dev/latest/) is similar to `uv` but works with c++. The following command
-will install pixi:
+will install it:
 
 `curl -fsSL https://pixi.sh/install.sh | bash`
 
-Now one of the following is needed to add pixi to PATH:
+Now one of the following is needed to add pixi to your PATH:
 
 - logout and login again
-- restart your terminal or shell
+- restart your terminal/shell
 - `export PATH="$HOME/.pixi/bin:$PATH"`
 
-### Initial 1-time setup
+### Short version
+
+That will resolve the environment, build the executables, download 10 parquet files, train the tokeniser, and then
+execute a short 30-step depth=24 pre-training run.
+
+`pixi run quick-d24`
+
+### Detailed version
 
 ```bash
 # setup dependencies (similar to `uv sync`).
@@ -111,7 +118,8 @@ pixi run build
 # download 10 parquet files
 pixi run dataset 10
 
-# train the BPE tokenizer (takes 1-2 minutes)
+# train the BPE tokenizer and export the golden test data (takes 1-2 minutes; skipped if a tokenizer exists, --force
+# retrains). the training tasks run this first.
 pixi run tok-train
 
 # optional (takes 2-3 minutes)

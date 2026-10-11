@@ -86,32 +86,31 @@ configure = { cmd = "cmake -S . -B cmake-build-pixi -G Ninja -DCMAKE_BUILD_TYPE=
 build = { cmd = "cmake --build cmake-build-pixi", depends-on = [{ task = "configure", args = ["{{ opt }}"] }], args = [{ arg = "opt", default = "" }], env = { NVCC_PREPEND_FLAGS = "" } }
 rebuild = { cmd = "rm -rf cmake-build-pixi && pixi run build {{ opt }}", args = [{ arg = "opt", default = "" }] }
 
-base-train = { cmd = "cmake-build-pixi/base_train", depends-on = ["build"] }
+base-train = { cmd = "cmake-build-pixi/base_train", depends-on = ["tok-train"] }
 
-quick-d12 = { cmd = "cmake-build-pixi/base_train $D12_BASE $QUICK_BASE --num-iterations=30 --final-eval-tokens=4194304", depends-on = ["build"] }
-quick-d24 = { cmd = "cmake-build-pixi/base_train $D24_BASE $QUICK_BASE --num-iterations=30 --final-eval-tokens=4194304", depends-on = ["build"] }
+quick-d12 = { cmd = "cmake-build-pixi/base_train $D12_BASE $QUICK_BASE --num-iterations=30 --final-eval-tokens=4194304", depends-on = ["tok-train"] }
+quick-d24 = { cmd = "cmake-build-pixi/base_train $D24_BASE $QUICK_BASE --num-iterations=30 --final-eval-tokens=4194304", depends-on = ["tok-train"] }
 
-medium-d12 = { cmd = "cmake-build-pixi/base_train $D12_BASE $QUICK_BASE --num-iterations=100 --run=medium-d12", depends-on = ["build"] }
-medium-d24 = { cmd = "cmake-build-pixi/base_train $D24_BASE $QUICK_BASE --num-iterations=100 --run=medium-d24", depends-on = ["build"] }
+medium-d12 = { cmd = "cmake-build-pixi/base_train $D12_BASE $QUICK_BASE --num-iterations=100 --run=medium-d12", depends-on = ["tok-train"] }
+medium-d24 = { cmd = "cmake-build-pixi/base_train $D24_BASE $QUICK_BASE --num-iterations=100 --run=medium-d24", depends-on = ["tok-train"] }
 
-full-d12 = { cmd = "cmake-build-pixi/base_train $D12_BASE --run=full-d12", depends-on = ["build"] }
-full-d24 = { cmd = "cmake-build-pixi/base_train $D24_BASE --run=full-d24", depends-on = ["build"] }
+full-d12 = { cmd = "cmake-build-pixi/base_train $D12_BASE --run=full-d12", depends-on = ["tok-train"] }
+full-d24 = { cmd = "cmake-build-pixi/base_train $D24_BASE --run=full-d24", depends-on = ["tok-train"] }
 
-profile-d12 = { cmd = "scripts/profile.sh d12 $D12_BASE", depends-on = ["build"] }
-profile-d24 = { cmd = "scripts/profile.sh d24 $D24_BASE", depends-on = ["build"] }
+profile-d12 = { cmd = "scripts/profile.sh d12 $D12_BASE", depends-on = ["tok-train"] }
+profile-d24 = { cmd = "scripts/profile.sh d24 $D24_BASE", depends-on = ["tok-train"] }
 
-tests = { cmd = "cmake --build cmake-build-pixi --target nanochat_tests train_tests && ctest --test-dir cmake-build-pixi --output-on-failure", depends-on = ["build"], env = { NVCC_PREPEND_FLAGS = "" } }
+tests = { cmd = "cmake --build cmake-build-pixi --target nanochat_tests train_tests && ctest --test-dir cmake-build-pixi --output-on-failure", depends-on = ["tok-train"], env = { NVCC_PREPEND_FLAGS = "" } }
 
-tok-train = { cmd = "cmake-build-pixi/tok_train && python scripts/import_tokenizer.py && pixi run export-all-golden", depends-on = ["build"] }
-# python nanochat's trainer (rustbpe), then its tokenizer.pkl -> the C++ format
-tok-train-python = { cmd = "python -m scripts.tok_train && python $PIXI_PROJECT_ROOT/scripts/export_tokenizer.py && pixi run -m $PIXI_PROJECT_ROOT export-all-golden", cwd = "external/nanochat", depends-on = ["clone-nanochat"] }
+# tok-train: skips if a tokenizer exists; --force retrains (and re-exports the goldens)
+tok-train = { cmd = "{{ 'test -f $NANOCHAT_BASE_DIR/tokenizer/tokenizer.pkl && echo \"tokenizer exists (pixi run tok-train --force to retrain)\" || ' if opt != '--force' }}(cmake-build-pixi/tok_train && python scripts/import_tokenizer.py && pixi run export-all-golden)", args = [{ arg = "opt", default = "" }], depends-on = ["build", "dataset"] }
 tok-eval = { cmd = "cmake-build-pixi/tok_eval", depends-on = ["build"] }
 
 clone-nanochat = "test -d external/nanochat || (git clone https://github.com/karpathy/nanochat.git external/nanochat && git -C external/nanochat checkout 92d63d4)"
 nanochat = { cmd = "python -m", cwd = "external/nanochat", depends-on = ["clone-nanochat"] }
 dataset = { cmd = "python -m nanochat.dataset -n {{ n }}", cwd = "external/nanochat", args = [{ arg = "n", default = "10" }], depends-on = ["clone-nanochat"] }
 
-# core-eval <run>
+# core-eval <RUN>
 core-convert = { cmd = "python scripts/convert_checkpoint.py $NANOCHAT_BASE_DIR/base_checkpoints/{{ run }} $NANOCHAT_BASE_DIR/base_checkpoints/{{ run }}-pt --to pt --model-only", args = [{ arg = "run" }] }
 core-eval = { cmd = "torchrun --standalone --nproc_per_node=$NPROC -m scripts.base_eval --model-tag {{ run }}-pt --eval core {{ opt }}", cwd = "external/nanochat", args = [{ arg = "run" }, { arg = "opt", default = "" }], depends-on = [{ task = "clone-nanochat" }, { task = "core-convert", args = ["{{ run }}"] }] }
 
@@ -121,6 +120,5 @@ nccl-bench = { cmd = "python scripts/nccl_bench.py", depends-on = ["build-nccl-t
 export-golden = { cmd = "python scripts/export_golden.py", depends-on = ["clone-nanochat"] }
 export-train-golden = { cmd = "python scripts/export_train_golden.py", depends-on = ["clone-nanochat"] }
 export-train-golden-ddp = { cmd = "test $NPROC -lt 2 && echo 'skipping: needs 2 GPUs' || torchrun --standalone --nproc-per-node 2 scripts/export_train_golden.py --sections train", depends-on = ["clone-nanochat"] }
-# all golden data for the tests (the ddp one only with 2+ GPUs)
 export-all-golden = { depends-on = ["export-golden", "export-train-golden", "export-train-golden-ddp"] }
 export-pretrained = "python scripts/export_tokenizer.py --pretrained gpt2 cl100k_base"
