@@ -66,7 +66,7 @@ pixi install
 # build the executables (takes 1-2 minutes)
 pixi run build
 
-# download 10 parquet files
+# download 10 ClimbMix parquet files
 pixi run dataset 10
 
 # train the BPE tokenizer
