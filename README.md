@@ -3,8 +3,8 @@
 This is a **c++** port of Andrej Karpathy's [nanochat](https://github.com/karpathy/nanochat). With the added
 twist that it targets nvidia sm120 GPUs.
 
-I'd classify this port as more of a performance engineering project. I have 2x RTX Pro 4000 Blackwell and my goal was to
-see how fast it could run locally.
+I'd classify this port as more of a performance engineering project. I have 2x RTX Pro 4000 Blackwell and the goal was
+to see how fast it could run locally.
 
 ## sm120 GPUs
 
@@ -15,7 +15,7 @@ features compared to datacenter GPUs. For example:
 - no wgmma
 - 50% less shared memory
 - lower power cap (RTX Pro 4000 = 145 watts)
-- lower vram (RTX Pro 4000 = 24GB)
+- smaller vram (RTX Pro 4000 = 24 GB)
 
 FA3+ requires datacenter GPUs. Thus, sm120 GPUs are limited to FA2.
 
@@ -138,7 +138,7 @@ Row 2 was required to get `--depth=24` working on the RTX Pro 4000.
 Row 3 was needed because c++ doesn't have Inductor. (However, we have an LLM agent that can fuse kernels.) This was the
 bulk of the speedup.
 
-Rows 4-6 utilises sm120 features.
+Rows 4-6 adds sm120 specific features.
 
 Rows 7-9 target the lack of nvlink. Move less data and overlap it with compute.
 
