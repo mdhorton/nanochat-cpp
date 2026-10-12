@@ -9,13 +9,13 @@ So the answer is yes, but problem is more of
 a [verification issue](https://gimletlabs.ai/blog/formally-verifying-ai-generated-kernels).
 
 For this project, I'm going to take the easy way out and treat the final result as verification. After all, this is an
-experimental learning project. Does the trained model's GPT-2 CORE metric meet the `0.256525` threshold?
+experimental learning project. Does the trained model's CORE metric meet the GPT-2 `0.256525` threshold?
 
 ## Tuning
 
 Most of the sm120 tuning fell into the following categories:
 
-- memory
+- memory (24 GB vram)
 - kernel fusing
 - flash attention
 - mxfp8

@@ -3,7 +3,7 @@
 This is a **c++** port of Andrej Karpathy's [nanochat](https://github.com/karpathy/nanochat). With the added
 twist that it targets nvidia sm120 GPUs.
 
-I'd classify this port as more of a performance engineering project. I own 2x RTX Pro 4000 Blackwell and my goal was to
+I'd classify this port as more of a performance engineering project. I have 2x RTX Pro 4000 Blackwell and my goal was to
 see how fast it could run locally.
 
 ## sm120 GPUs
