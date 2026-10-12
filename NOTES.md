@@ -15,7 +15,7 @@ experimental learning project. Does the trained model's CORE metric meet the GPT
 
 Most of the sm120 tuning fell into the following categories:
 
-- memory (24 GB vram)
+- memory usage (24 GB vram)
 - kernel fusing
 - flash attention
 - mxfp8
@@ -47,11 +47,11 @@ Some hosts intentionally lower the power cap. Sometimes for thermal reasons. Thi
 
 2x RTX Pro 4000 is my local setup and where most of the tuning will be done.
 
-nanochat python trains ~5.84B tokens in 99 minutes using 8x H100. On paper an H100 is roughly 6x faster than an RTX
-Pro 4000. Thus, 8x H100 are roughly 24x faster than 2x RTX Pro 4000. Using that ratio we get the following minimum
-target:
+nanochat python trains ~5.84B tokens in 99 minutes using 8x H100. On paper an H100 is roughly 5-6x faster than an RTX
+Pro 4000. Thus, 8x H100 are roughly 20-24x faster than 2x RTX Pro 4000. Using these ratios we get the following minimum
+target range:
 
-`~5.84B tokens in 2376 minutes (39.6 hours) = ~41k toks/sec`
+`~5.84B tokens in 1980-2376 minutes (33-39.6 hours) = ~41-49k toks/sec`
 
 ## Didn't work
 
