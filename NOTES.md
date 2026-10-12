@@ -65,11 +65,13 @@ inference.
 ## RTX Pro 4000 Blackwell = 145 watts
 
 Pre-training workload is heavily power-bound and these cards have a low power cap (145 watts). They boost to 3000 GHz,
-but most large dense GEMMs run at ~1700 GHz due to the power cap.
+but most large dense GEMMs run at ~1700 GHz due to the power cap. 
+
+These cards sit capped at 145 watts the entire training run.
 
 Improved kernel efficiency can mean the same work in less time. (Same energy in less time.) This translates to a lower
 GPU clock on these cards because power is already at the cap. A 2-3% isolated step improvement is hard to distinguish
-from noise due to the power cap eating a chunk of the gain.
+from noise on the RTX Pro 4000 due to the power cap eating a chunk of the gain.
 
 On the other hand, kernel fusing is a double win. 1) Fewer bytes are transferred, and 2) less time. (Less energy in less
 time.) This doesn’t have the power cap clock tax that improved kernel efficiency does on these cards.
