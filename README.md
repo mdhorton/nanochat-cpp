@@ -74,10 +74,10 @@ pixi run tok-train
 ### Execute some runs
 
 ```bash
-# execute a short (30 step) --depth=12 training run
+# execute a short --depth=12 training run (30 step)
 pixi run quick-d12
 
-# execute a short (30 step) --depth=24 training run
+# execute a short --depth=24 training run (30 step)
 pixi run quick-d24
 
 # execute a full --depth=24 training run and use wandb (requires WANDB_API_KEY or wandb login)
