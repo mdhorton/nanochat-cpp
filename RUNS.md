@@ -2,7 +2,7 @@
 
 The initial sm120 tuning was done at `--depth=12`. Later `--depth=24` became fast enough to iterate with.
 
-# medium runs @ d12
+# 100 steps @ depth 12
 
 `pixi run medium-d12`
 
