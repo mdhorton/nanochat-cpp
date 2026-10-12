@@ -51,7 +51,7 @@ nanochat python trains ~5.84B tokens in 99 minutes using 8x H100. On paper an H1
 Pro 4000. Thus, 8x H100 are roughly 20-24x faster than 2x RTX Pro 4000. Using these ratios we get the following minimum
 target range:
 
-`~5.84B tokens in 1980-2376 minutes (33-39.6 hours) = ~41-49k toks/sec`
+`~5.84B tokens in 1980-2376 minutes (~33-40 hours) = ~41-49k toks/sec`
 
 ## Didn't work
 
