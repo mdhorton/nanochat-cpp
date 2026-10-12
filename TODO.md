@@ -6,11 +6,11 @@
 - take a close look at each hot kernel code
 - run --attention=mx|fa2|bf16|bf16mx full d12 equal-time pairs
 - FA warp specialization
-- fix mfu for rtx pro 6000 and rtx 5090
 - try mxfp8 with muon gather/reduce
 
 # done
 
+- fix mfu for rtx pro 6000 and rtx 5090
 - try sm120f (GB10 compatibility)
 - remove nvfp4 code
 - add hours to eta: 1h 34.2m

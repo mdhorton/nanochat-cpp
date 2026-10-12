@@ -26,14 +26,13 @@ However, sm120 has MXFP8 and NVFP4, which the H100 does not have. So we'll see i
 
 ### Pre-training results
 
-| GPU            | GPUs | device batch size |     bpb |   CORE |     time |    
+| GPU            | GPUs | device batch size |     bpb |   CORE |     time |
 |----------------|-----:|------------------:|--------:|-------:|---------:|
 | RTX Pro 6000 S |    8 |                 8 | 0.71773 | 0.2592 |  135.07m |
 | RTX 5090       |    8 |                 4 | 0.71769 | 0.2615 |  148.85m |
 | RTX Pro 4000   |    2 |                 2 | 0.71934 | 0.2616 | 1622.59m |
 
-These runs used `--depth=24 --target-param-data-ratio=8`. The model config was kept the same as the python version. CORE
-metric was calculated using the original python code.
+These runs used `--depth=24 --target-param-data-ratio=8`. The CORE metric was calculated using the original python code.
 
 ## Setup
 
@@ -45,7 +44,7 @@ metric was calculated using the original python code.
 
 I've only tested with Linux Ubuntu 24.04.
 
-### Install pixi (if needed)
+### Install pixi
 
 The [pixi package manager](https://pixi.prefix.dev/latest/) is similar to `uv` but works with c++.
 
@@ -107,16 +106,14 @@ pixi run tests
 
 fp8 and mxfp8 are enabled by default.
 
-| flag                             | default |                                                                 |
-|----------------------------------|---------|-----------------------------------------------------------------|
-| `--fp8=true\|false`              | true    | false also disables mxfp8; slows performance 50%                |
-| `--fp8-recipe=mxfp8\|tensorwise` | mxfp8   | tensorwise disables mxfp8 but keeps fp8; slows performance ~25% |
+`--fp8=false` disables fp8, which also disables mxfp8. This slows performance ~50%.
+
+`--fp8-recipe=tensorwise` disables mxfp8 but keeps fp8. This slows performance ~25%.
 
 ## Performance history change summary
 
-These were the keepers. These can be run with `pixi run medium-d24` along with the row flags.
-
-These were 100-steps @ depth 24 run on rented 8x RTX Pro 6000 S.
+These were the accepted changes. They can be run with `pixi run medium-d24` along with the row flags. They were run on
+rented 8x RTX Pro 6000 S.
 
 | row |      bpb | memory |  time | notes                        | flags                                                                                                                                                             |
 |----:|---------:|-------:|------:|------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------|

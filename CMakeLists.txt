@@ -6,8 +6,9 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_SCAN_FOR_MODULES OFF) 
 
-# before any find_package: deps set this, so a fresh configure lacks -pthread and the next one rebuilds everything
+# set this early to prevent unnecessary rebuilds.
 set(THREADS_PREFER_PTHREAD_FLAG ON)
+
 find_package(PkgConfig REQUIRED)
 find_package(Arrow REQUIRED)
 find_package(Parquet REQUIRED)
@@ -26,8 +27,10 @@ list(APPEND CMAKE_PREFIX_PATH ${TORCH_DIR})
 set(CUDA_TOOLKIT_ROOT_DIR "${PIXI_ENV}/targets/x86_64-linux")
 set(CMAKE_CUDA_COMPILER "${PIXI_ENV}/bin/nvcc")
 set(CMAKE_CUDA_HOST_COMPILER "${CMAKE_CXX_COMPILER}")
+
 # torch's NVIDIA wheels: cu13 puts every library under nvidia/cu13, cu12 has a directory per library
 set(NV_DIR "${TORCH_DIR}/../nvidia")
+
 if(EXISTS "${NV_DIR}/cu13")
     set(NV_CUDART "${NV_DIR}/cu13/lib/libcudart.so.13")
     set(NV_NVRTC "${NV_DIR}/cu13/lib/libnvrtc.so.13")
@@ -41,6 +44,7 @@ else()
     file(GLOB NV_INCLUDE_DIRS "${NV_DIR}/*/include")
     set(NV_RPATH "${NV_DIR}/cuda_runtime/lib:${NV_DIR}/cuda_nvrtc/lib:${NV_DIR}/cublas/lib")
 endif()
+
 set(CUDA_nvrtc_LIBRARY "${NV_NVRTC}") # not in the conda env
 
 set(CMAKE_CUDA_STANDARD 20)
@@ -48,7 +52,7 @@ set(CMAKE_CUDA_RUNTIME_LIBRARY None) # use torch's libcudart
 enable_language(CUDA)
 
 # torch sets the nvcc -gencode flags from this. block-scaled mma.sync needs an arch-specific target:
-# f (cuda 12.9+) runs on sm_120/sm_121, a (cuda 12.8) only on sm_120
+# use 12.0f if we can, otherwise 12.0a
 if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.9)
     set(TORCH_CUDA_ARCH_LIST 12.0f)
 else()
