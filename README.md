@@ -60,10 +60,16 @@ export PATH="$HOME/.pixi/bin:$PATH"
 ### Initial 1-time setup
 
 ```bash
+# setup dependencies (similar to `uv sync`).
+pixi install
+
+# build the executables (takes 1-2 minutes)
+pixi run build
+
 # download 10 parquet files
 pixi run dataset 10
 
-# train the BPE tokenizer (takes 1-2 minutes)
+# train the BPE tokenizer
 pixi run tok-train
 ```
 
@@ -90,10 +96,10 @@ flags can be overridden on the command line. Or use `pixi run based-train` for n
 ### Tests
 
 ```bash
-# optional for extra validations (takes 1-2 minutes)
+# optional for extra validations (takes ~1 minute)
 pixi run export-all-golden
 
-# takes 2-3 minutes
+# takes ~3-4 minutes
 pixi run tests
 ```
 
