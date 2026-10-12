@@ -55,6 +55,13 @@ curl -fsSL https://pixi.sh/install.sh | bash
 export PATH="$HOME/.pixi/bin:$PATH"
 ```
 
+### Clone repo
+
+```bash
+git clone https://github.com/mdhorton/nanochat-cpp.git
+cd nanochat-cpp
+```
+
 ### 1-time setup
 
 ```bash
@@ -107,7 +114,7 @@ fp8 and mxfp8 are enabled by default.
 
 `--fp8=false` disables fp8, which also disables mxfp8. This slows performance ~50%.
 
-`--fp8-recipe=tensorwise` disables mxfp8 but keeps fp8. This slows performance ~25%.
+`--fp8-recipe=tensorwise` disables mxfp8 but keeps fp8. This slows performance ~20%.
 
 ## Performance history change summary
 
