@@ -65,7 +65,7 @@ inference.
 ## RTX Pro 4000 Blackwell = 145 watts
 
 Pre-training workload is heavily power-bound and these cards have a low power cap (145 watts). They boost to 3000 GHz,
-but most large dense GEMMs run at ~1700 GHz due to the power cap. 
+but most large dense GEMMs run at ~1700 GHz due to the power cap.
 
 These cards sit capped at 145 watts the entire training run.
 
@@ -75,3 +75,21 @@ from noise on the RTX Pro 4000 due to the power cap eating a chunk of the gain.
 
 On the other hand, kernel fusing is a double win. 1) Fewer bytes are transferred, and 2) less time. (Less energy in less
 time.) This doesn’t have the power cap clock tax that improved kernel efficiency does on these cards.
+
+## Measured rooflines
+
+### H100 (sm90)
+
+![](roofline/roofline-hierarchical-e16b70c960a2-h100-80gb-hbm3-0.png)
+
+### RTX Pro 6000 S (sm120)
+
+![](roofline/roofline-hierarchical-bf38749a67e5-rtx-pro-6000-blackwell-server-edition-0.png)
+
+### RTX 5090 (sm120)
+
+![](roofline/roofline-hierarchical-19a470995f1c-rtx-5090-0.png)
+
+### RTX Pro 4000 (sm120)
+
+![](roofline/roofline-hierarchical-cuda-rtx-pro-4000-blackwell-0.png)
