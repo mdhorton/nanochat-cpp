@@ -17,8 +17,7 @@ features compared to datacenter GPUs. For example:
 - lower power cap (RTX Pro 4000 = 145 watts)
 - lower vram (RTX Pro 4000 = 24GB)
 
-FA3+ requires datacenter GPUs. Thus, sm120 GPUs are limited to FA2. Also, the RTX non-Pro line (eg, RTX 5090) does not
-support P2P.
+FA3+ requires datacenter GPUs. Thus, sm120 GPUs are limited to FA2.
 
 However, sm120 has MXFP8 and NVFP4, which the H100 does not have. So we'll see if this helps.
 
@@ -56,7 +55,7 @@ curl -fsSL https://pixi.sh/install.sh | bash
 export PATH="$HOME/.pixi/bin:$PATH"
 ```
 
-### Initial 1-time setup
+### 1-time setup
 
 ```bash
 # setup dependencies (similar to `uv sync`).
@@ -112,7 +111,7 @@ fp8 and mxfp8 are enabled by default.
 
 ## Performance history change summary
 
-These were the accepted changes. They can be run with `pixi run medium-d24` along with the row flags. They were run on
+These are the accepted changes. They can be run with `pixi run medium-d24` along with the row flags. They were run on
 rented 8x RTX Pro 6000 S.
 
 | row |      bpb | memory |  time | notes                        | flags                                                                                                                                                             |
