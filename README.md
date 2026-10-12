@@ -118,8 +118,8 @@ fp8 and mxfp8 are enabled by default.
 
 ## Performance history change summary
 
-These are the accepted changes. They can be run with `pixi run medium-d24` along with the row flags. They were run on
-rented 8x RTX Pro 6000 S.
+These are the accepted changes. They can be run with `pixi run medium-d24` (100 steps @ depth 24) along with the row
+flags. They were run on rented 8x RTX Pro 6000 S.
 
 | row |      bpb | memory |  time | notes                        | flags                                                                                                                                                             |
 |----:|---------:|-------:|------:|------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------|
