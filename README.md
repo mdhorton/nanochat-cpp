@@ -19,7 +19,7 @@ features compared to datacenter GPUs. For example:
 
 FA3+ requires datacenter GPUs. Thus, sm120 GPUs are limited to FA2.
 
-However, sm120 has MXFP8 and NVFP4, which the H100 does not have. So we'll see if this helps.
+However, sm120 has MXFP8 and NVFP4, so we'll see if this helps.
 
 ## TLDR
 
