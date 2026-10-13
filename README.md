@@ -25,11 +25,12 @@ However, sm120 has MXFP8 and NVFP4, so we'll see if this helps.
 
 ### Pre-training results
 
-| GPU            | GPUs | device batch size |     bpb |   CORE |     time |
-|----------------|-----:|------------------:|--------:|-------:|---------:|
-| RTX Pro 6000 S |    8 |                 8 | 0.71773 | 0.2592 |  135.07m |
-| RTX 5090       |    8 |                 4 | 0.71769 | 0.2615 |  148.85m |
-| RTX Pro 4000   |    2 |                 2 | 0.71934 | 0.2616 | 1622.59m |
+| GPU            | GPUs | device batch size |     bpb |   CORE |                 time |
+|----------------|-----:|------------------:|--------:|-------:|---------------------:|
+| RTX Pro 6000 S |    8 |                 8 | 0.71773 | 0.2592 |  135.07m  ( ~2h 15m) |
+| RTX 5090       |    8 |                 4 | 0.71769 | 0.2615 |  148.85m  ( ~2h 29m) |
+| RTX 5090       |    1 |                 4 | 0.71909 | 0.2657 | 1127.48m  (~18h 47m) |
+| RTX Pro 4000   |    2 |                 2 | 0.71934 | 0.2616 | 1622.59m  (~27h 03m) |
 
 These runs used `--depth=24 --target-param-data-ratio=8`. The CORE metric was calculated using the original python code.
 
